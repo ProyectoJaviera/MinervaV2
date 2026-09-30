@@ -1,0 +1,23 @@
+# Entornos y dependencias
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Cache de herramientas
+.pytest_cache/
+.ruff_cache/
+
+# Datos locales (base de datos SQLite de paper trading) y secretos
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+
+# Frontend build
+frontend/dist/
+
+# Logs
+*.log

@@ -1,0 +1,14 @@
+# Esqueleto minimo de Fase 1. La imagen final multi-stage y optimizada es
+# tarea de Fase 6 (Docker, pruebas E2E, guia de puesta en marcha).
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir -e .
+
+COPY app ./app
+
+ENV PYTHONUNBUFFERED=1
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

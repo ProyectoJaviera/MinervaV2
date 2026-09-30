@@ -1,0 +1,44 @@
+[project]
+name = "minerva"
+version = "0.1.0"
+description = "Minerva: bot de trading autonomo en paper trading (v1)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "websockets>=12.0",
+    "aiosqlite>=0.20",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "pandas>=2.2",
+    "truststore>=0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Depends(...) en defaults es el patron idiomatico de FastAPI, no un bug.
+"app/api/routes/*.py" = ["B008"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "slow: tests de integracion contra la red real (omitidos por defecto)",
+]

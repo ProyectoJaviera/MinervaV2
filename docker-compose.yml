@@ -1,0 +1,16 @@
+# Esqueleto minimo de Fase 1 -- no es obligatorio levantarlo en esta fase.
+# La configuracion final (multi-stage, frontend, healthchecks) es Fase 6.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - minerva_data:/app/data
+
+volumes:
+  minerva_data:
