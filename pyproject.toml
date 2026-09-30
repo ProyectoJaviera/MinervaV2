@@ -2,7 +2,10 @@
 name = "minerva"
 version = "0.1.0"
 description = "Minerva: bot de trading autonomo en paper trading (v1)"
-requires-python = ">=3.11"
+# Acotado a 3.11/3.12 (verificados en Fase 1). 3.13+ no se ha probado; un
+# build especifico de 3.14 en Windows via python-build-standalone tiene un
+# bug conocido que rompe el modulo ssl (ver PROGRESS.md / README.md).
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",

@@ -22,7 +22,7 @@ previo evaluado en `docs/FASE0.md`) y `PROGRESS.md` (estado por fase).
 uv venv --python 3.12 .venv
 uv pip install -e ".[dev]"
 cp .env.example .env   # opcional: valores por defecto ya son seguros
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 # Frontend (en otra terminal)
 cd frontend
@@ -31,7 +31,10 @@ npm run dev
 ```
 
 Endpoints disponibles: `GET /health`, `GET /positions`, `GET /trades`
-(sin autenticacion todavia; se agrega en Fase 5).
+(sin autenticacion todavia; se agrega en Fase 5; todos son de solo lectura,
+no existe ningun endpoint para abrir/cerrar posiciones). La API escucha
+solo en `127.0.0.1` -- nunca en `0.0.0.0` -- tanto en local como en Docker
+(ver `docker-compose.yml`), es decir, nunca queda expuesta a la red.
 
 ## Puesta en marcha (Docker Compose)
 

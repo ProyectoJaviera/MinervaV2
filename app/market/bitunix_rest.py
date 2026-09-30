@@ -14,12 +14,11 @@ from __future__ import annotations
 
 import asyncio
 import random
-import ssl
 from typing import Any
 
 import httpx
-import truststore
 
+from app.core.http import build_async_http_client
 from app.core.logging import get_logger
 from app.market.rate_limiter import RateLimiter
 
@@ -39,11 +38,7 @@ class BitunixRestClient:
         self.base_url = base_url.rstrip("/")
         self.rate_limiter = RateLimiter(rate_limit_per_sec)
         self.max_retries = max_retries
-        # Usa el almacen de certificados del sistema operativo (via `truststore`)
-        # en vez del bundle embebido de certifi: necesario en redes corporativas
-        # con proxy/inspeccion TLS, y funciona igual en redes sin proxy.
-        ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        self._client = httpx.AsyncClient(timeout=timeout, verify=ssl_context)
+        self._client = build_async_http_client(timeout=timeout)
 
     async def aclose(self) -> None:
         await self._client.aclose()

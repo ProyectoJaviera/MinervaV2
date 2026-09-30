@@ -8,7 +8,13 @@ services:
     env_file:
       - .env
     ports:
-      - "8000:8000"
+      # Publicado SOLO en loopback: la API nunca queda expuesta a la LAN/red
+      # externa. Dentro del contenedor el proceso escucha en 0.0.0.0 (ver
+      # docker/Dockerfile.backend) porque Docker solo puede enrutar trafico
+      # de puertos publicados hacia esa interfaz, no hacia 127.0.0.1 del
+      # propio contenedor; el aislamiento real lo da este binding "127.0.0.1:"
+      # del lado del host, no el host dentro del contenedor.
+      - "127.0.0.1:8000:8000"
     volumes:
       - minerva_data:/app/data
 

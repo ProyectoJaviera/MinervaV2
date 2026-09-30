@@ -36,3 +36,10 @@ Especificación completa en docs/SPEC.md y base previa en docs/openspec.md (nunc
 - Antes de integrar cualquier servicio externo, verifica en su documentación oficial: plan gratuito real, límites de uso, términos (uso no comercial, atribución) y si pide tarjeta. Si no cumple, propón una alternativa gratuita o descártalo.
 - Diseña para fuentes gratuitas poco fiables: caché local, reintentos con backoff, degradación controlada, registro de salud por fuente y bloqueo de nuevas operaciones si los datos críticos están obsoletos.
 - Respeta límites de uso y atribuciones (p. ej. "Data provided by CoinGecko" visible en el frontend).
+
+## Formato de comandos (para evitar solicitudes de permiso)
+- El directorio de trabajo ya es la raíz del proyecto: NO uses `cd`.
+- Un solo comando por llamada. No encadenes con `&&`, `;` ni `&`.
+- Para cambiar de carpeta dentro de un comando usa las opciones propias de la herramienta (p. ej. `npm --prefix frontend run build`, `git -C ...`), no `cd`.
+- Mensajes de commit de una sola línea con `git commit -m "tipo: descripción"`, sin saltos de línea ni trailers.
+- No redirijas salidas a archivos temporales (`> build.log`, `> out.txt`) ni borres archivos después; lee la salida directamente.

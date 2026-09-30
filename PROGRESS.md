@@ -48,8 +48,11 @@ adelante, Fase 4+).
   con tests de coherencia (incluye el caso de capital reducido por perdidas).
 - Cliente REST publico de Bitunix (`market/bitunix_rest.py`): 7 endpoints
   verificados, rate limiter propio (10 req/s), reintentos con backoff
-  exponencial, usa `truststore` (almacen de certificados del SO) para
-  funcionar tambien en redes corporativas con inspeccion TLS.
+  exponencial. Construye su cliente HTTP via `app/core/http.py`
+  (`build_async_http_client`), el modulo de red centralizado que usa
+  `truststore` -- almacen de certificados del SO -- para funcionar tambien
+  en redes corporativas con inspeccion TLS; todo cliente HTTP futuro
+  (CoinGecko en Fase 2, etc.) debe construirse con esa misma funcion.
 - Cache historica de velas con paginacion (`market/ohlcv_history.py`) sobre
   la tabla `ohlcv_cache`.
 - Cliente WS publico (`market/bitunix_ws.py`): reconexion con backoff,
@@ -92,6 +95,90 @@ adelante, Fase 4+).
   `OPENSSL_Uplink: no OPENSSL_Applink`, no relacionado con este proyecto) y
   `truststore` para el certificado TLS de la red local -- ambos ya resueltos
   en el codigo/README.
+
+### Ajustes solicitados tras la aprobacion de Fase 1
+
+1. **Endpoints de abrir/cerrar posiciones**: no existen en la API. `api/routes/`
+   solo tiene 3 rutas, las 3 `GET` y de solo lectura (`/health`, `/positions`,
+   `/trades`); no hay ningun `POST`/`PUT`/`DELETE`. La apertura/cierre que se
+   veia en la verificacion manual de esta fase se hizo con un script Python
+   suelto que llamaba a `PaperBackend` directamente (fuera de la API HTTP, sin
+   pasar por red) y nunca se guardo en el repositorio. Fase 5 es la que
+   definira si se expone algun control de apertura/cierre manual por HTTP, y
+   en tal caso ira detras de la autenticacion de esa fase.
+   **API atada a loopback:** `docker-compose.yml` publica el puerto como
+   `"127.0.0.1:8000:8000"` (antes `"8000:8000"`) -- el contenedor sigue
+   escuchando en `0.0.0.0` *dentro* de su propio namespace de red (asi
+   funciona el port-forwarding de Docker), pero Docker solo enruta ese
+   puerto publicado hacia la interfaz de loopback del host, asi que la API
+   nunca es alcanzable desde la LAN ni desde internet. En local (`uvicorn`
+   directo) se fija explicitamente `--host 127.0.0.1` en `README.md`.
+2. **`truststore` centralizado**: se creo `app/core/http.py` con
+   `build_async_http_client()`, la unica forma permitida de construir un
+   cliente HTTP asincrono en el proyecto. `market/bitunix_rest.py` ya lo usa;
+   el cliente de CoinGecko (Fase 2) y cualquier otro futuro deben usarlo
+   tambien en vez de instanciar `httpx.AsyncClient` por su cuenta.
+   **Pendiente para Fase 6:** un contenedor Docker recien construido no tiene
+   el certificado raiz de la inspeccion TLS corporativa de esta red en su
+   almacen de confianza del sistema operativo (a diferencia de la maquina
+   host, que si lo tiene instalado vía Windows). Si al ejecutar
+   `docker compose up` las llamadas a Bitunix/CoinGecko fallan con
+   `CERTIFICATE_VERIFY_FAILED` *solo dentro del contenedor* (pero funcionan
+   en local), Fase 6 debera montar ese certificado raiz en la imagen (por
+   ejemplo, copiarlo a `/usr/local/share/ca-certificates/` y correr
+   `update-ca-certificates` en el Dockerfile, o montarlo como volumen) --
+   `truststore` dentro del contenedor leera el almacen de certificados de
+   ESE sistema operativo (el de la imagen), no el de Windows.
+3. **`.gitignore` y `requires-python`**: `.venv/` -> `.venv*/` (cubre
+   variantes como la `.venv311` temporal que se uso durante la depuracion de
+   esta fase); ya cubria `.env`, `*.db` (+ `-wal`/`-shm`), `node_modules/` y
+   `*.log`. `pyproject.toml` ahora fija `requires-python = ">=3.11,<3.13"`
+   (antes solo `>=3.11`, lo que habria permitido instalar en el 3.14 con el
+   bug de `ssl` encontrado en esta fase).
+4. **Ejemplo numerico de fees y PnL** (formulas y calculo verificable a
+   mano; corresponde exactamente al test automatizado
+   `test_open_and_close_long_position_computes_pnl_and_fees` en
+   `tests/unit/test_paper_backend.py`):
+
+   ```
+   Entrada:  margen = 10 USDT, apalancamiento = 10x, taker_fee = 0.06% (0.0006)
+             precio de entrada = 100.0, precio de salida = 110.0 (LONG)
+
+   notional        = margen * apalancamiento           = 10 * 10        = 100.0 USDT
+   qty             = notional / precio_entrada          = 100 / 100      = 1.0
+   fee_entrada     = notional * taker_fee                = 100 * 0.0006  = 0.06 USDT
+   notional_salida = qty * precio_salida                 = 1.0 * 110     = 110.0 USDT
+   fee_salida      = notional_salida * taker_fee          = 110 * 0.0006 = 0.066 USDT
+
+   pnl_bruto (LONG) = (precio_salida - precio_entrada) * qty
+                    = (110 - 100) * 1.0                                 = 10.0 USDT
+
+   pnl_neto = pnl_bruto - fee_entrada - fee_salida
+            = 10.0 - 0.06 - 0.066                                       = 9.874 USDT
+
+   ROI sobre el margen = pnl_neto / margen = 9.874 / 10                 = 98.74 %
+   ```
+
+   Caso SHORT (simetrico, mismo ejemplo con precio cayendo de 100 a 90):
+   ```
+   pnl_bruto (SHORT) = (precio_entrada - precio_salida) * qty
+                     = (100 - 90) * 1.0                                 = 10.0 USDT
+   ```
+   (misma formula de fees; `qty` y `fee_entrada` no cambian porque dependen
+   del precio de entrada, no del de salida).
+
+   Formulas generales usadas por `PaperBackend` (ver
+   `app/execution/paper_backend.py`):
+   ```
+   notional      = margen_usdt * leverage
+   qty           = notional / precio_entrada
+   fee_entrada   = notional * taker_fee_pct
+   fee_salida    = (qty * precio_salida) * taker_fee_pct
+   pnl_bruto     = (precio_salida - precio_entrada) * qty          si LONG
+   pnl_bruto     = (precio_entrada - precio_salida) * qty          si SHORT
+   pnl_neto      = pnl_bruto - fee_entrada - fee_salida
+   ```
+   No incluye funding ni slippage (Fase 3).
 
 ### Limitaciones conocidas de esta fase (documentadas, no son bugs)
 
