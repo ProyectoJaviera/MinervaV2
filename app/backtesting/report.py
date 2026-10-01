@@ -18,8 +18,11 @@ from app.backtesting import metrics as m
 from app.backtesting.engine import RawTrade, run_backtest
 from app.config import Settings
 from app.core.logging import get_logger
-from app.market.bitunix_rest import BitunixRestClient
-from app.market.ohlcv_history import drop_incomplete_last_bar, get_or_fetch
+from app.market.ohlcv_history import (
+    MissingHistoricalDataError,
+    drop_incomplete_last_bar,
+    get_cached_or_raise,
+)
 from app.persistence.database import Database
 from app.persistence.models import BacktestRun, BacktestSkippedEntry, BacktestTrade, BacktestVerdict
 from app.persistence.repositories import backtest_repo
@@ -66,21 +69,19 @@ def _to_skip_model(s) -> BacktestSkippedEntry:
 
 
 async def _benchmark_for_cell(
-    rest_client: BitunixRestClient,
     db: Database,
     symbol: str,
     timeframe: str,
     start_ms: int,
     end_ms: int,
 ) -> tuple[float, float]:
-    bars = await get_or_fetch(rest_client, db, symbol, timeframe, start_ms, end_ms, "LAST_PRICE")
+    bars = await get_cached_or_raise(db, symbol, timeframe, start_ms, end_ms, "LAST_PRICE")
     bars = drop_incomplete_last_bar(bars, timeframe, int(_time.time() * 1000))
     bars.sort(key=lambda b: b.open_time)
     return m.benchmark_buy_and_hold([b.close for b in bars])
 
 
 async def _run_one_cell(
-    rest_client: BitunixRestClient,
     db: Database,
     strategy,
     strategy_name: str,
@@ -93,9 +94,16 @@ async def _run_one_cell(
 ) -> list[RawTrade]:
     try:
         trades, skips = await run_backtest(
-            rest_client, db, strategy, strategy_name, symbol, timeframe,
+            db, strategy, strategy_name, symbol, timeframe,
             start_ms, end_ms, settings,
         )
+    except MissingHistoricalDataError:
+        # Faltan datos: no es un bug de una celda puntual, es una
+        # precondicion incumplida de toda la corrida -- se propaga para que
+        # el script se detenga con un mensaje claro en vez de reportar
+        # "0 trades" silenciosamente en esta celda (y probablemente en
+        # todas las demas del mismo simbolo/timeframe).
+        raise
     except Exception:
         logger.exception("Backtest fallido: %s %s %s", strategy_name, symbol, timeframe)
         return []
@@ -112,7 +120,7 @@ async def _run_one_cell(
         cell_end = end_ms if segment == "OOS" else oos_boundary_ms
         cell_metrics = m.compute_metrics(seg_trades, settings.backtest_initial_capital)
         bench_return, bench_dd = await _benchmark_for_cell(
-            rest_client, db, symbol, timeframe, cell_start, cell_end
+            db, symbol, timeframe, cell_start, cell_end
         )
         await backtest_repo.insert_run(db, BacktestRun(
             strategy=strategy_name, symbol=symbol, timeframe=timeframe, segment=segment,
@@ -240,7 +248,6 @@ def _evaluate_discard_criteria(
 
 
 async def run_full_backtest(
-    rest_client: BitunixRestClient,
     db: Database,
     settings: Settings,
     symbols: list[str],
@@ -265,9 +272,15 @@ async def run_full_backtest(
         for timeframe in timeframes:
             for symbol in all_symbols:
                 combos_tested += 1
+                cell_t0 = _time.time()
+                logger.info("celda %s %s %s: empieza", strategy_name, symbol, timeframe)
                 trades = await _run_one_cell(
-                    rest_client, db, strategy, strategy_name, symbol, timeframe,
+                    db, strategy, strategy_name, symbol, timeframe,
                     start_ms, end_ms, oos_boundary_ms, settings,
+                )
+                logger.info(
+                    "celda %s %s %s: termina (%d trades, %.1fs)",
+                    strategy_name, symbol, timeframe, len(trades), _time.time() - cell_t0,
                 )
                 strategy_trades.extend(trades)
 

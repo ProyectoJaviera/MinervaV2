@@ -1,25 +1,36 @@
-"""Descarga historica de velas con paginacion y cache local.
+"""Descarga incremental y reanudable de velas, con cache local.
 
-Respeta el limite de Bitunix (200 velas/llamada, 10 req/s -- este ultimo ya
-lo aplica `BitunixRestClient`) y evita volver a pedir velas que ya estan en
-`ohlcv_cache`.
+Respeta el limite de Bitunix (200 velas/llamada, paginacion hacia ATRAS
+desde `end_time` -- verificado empiricamente, ver docs/FASE2_PLAN.md) y
+descarga SOLO lo que falta en `ohlcv_cache`, nunca el rango completo de
+nuevo.
 
 Formato de cada vela devuelto por `GET /market/kline` (verificado):
 `{"open": "60000", "high": "60001", "close": "60000", "low": "59989.2",
 "time": 111111, "quoteVol": "1", "baseVol": "60000", "type": "LAST_PRICE"}`.
 
-**Correccion de Fase 2** (ver docs/FASE2_PLAN.md): se verifico empiricamente
-contra la API real que `/market/kline` NO pagina hacia adelante desde
-`start_time` -- pagina hacia ATRAS desde `end_time` (devuelve las `limit`
-velas mas recientes en o antes de `end_time`). La version de Fase 1 asumia
-paginacion hacia adelante y nunca avanzaba en un rango historico amplio.
-Esta version pagina hacia atras: parte de `end_time`, cada pagina retrocede
-el cursor al `open_time` mas antiguo recibido menos 1, hasta cubrir
-`start_time` o agotar el historial disponible (la API devuelve menos de
-`limit` velas, o ninguna).
+**Tarea 2/3 (correccion post-Fase-2)**: la version anterior de
+`get_or_fetch` mezclaba descarga de red y lectura de cache en una sola
+funcion, y su chequeo de "ya cubierto" era todo-o-nada: si el rango pedido
+no estaba 100% cubierto, re-pedia por red el RANGO COMPLETO otra vez
+(incluida la parte ya cacheada), desperdiciando cientos de solicitudes en
+cada reintento. Se separa en dos funciones con responsabilidades distintas:
+
+- `download_missing`: descarga por red SOLO la cola reciente (mas nuevo
+  que lo cacheado) y la cabeza vieja (mas viejo que lo cacheado) que
+  realmente falten. Cada pagina se guarda de inmediato -> interrumpir esta
+  funcion a mitad de camino no pierde progreso, la siguiente llamada
+  retoma desde donde quedo. Usada SOLO por `scripts/download_history.py`.
+- `get_cached_or_raise`: lectura PURA de `ohlcv_cache`, sin red. Usada por
+  el motor de backtest (`app/backtesting/engine.py`), que ya no debe tocar
+  la red (ver docs/FASE2_BLOQUEO_RED.md) -- si el rango pedido no esta
+  completo en cache, lanza `MissingHistoricalDataError` con instrucciones
+  claras en vez de descargar nada silenciosamente.
 """
 
 from __future__ import annotations
+
+from datetime import UTC, datetime
 
 from app.core.logging import get_logger
 from app.market.bitunix_rest import BitunixRestClient
@@ -30,6 +41,13 @@ from app.persistence.repositories import ohlcv_repo
 logger = get_logger(__name__)
 
 PAGE_LIMIT = 200
+
+# Una pagina vacia aislada no se acepta de inmediato como "fin real del
+# historial": se reintenta la MISMA peticion hasta este numero de veces
+# extra antes de asumirlo (evita marcar un piso falso por una respuesta
+# vacia puntual -- no hay evidencia de que esto haya ocurrido nunca, pero
+# es una salvaguarda barata; ver docs/FASE2_BLOQUEO_RED.md).
+EMPTY_PAGE_RETRIES = 2
 
 _INTERVAL_MS = {
     "1m": 60_000,
@@ -46,6 +64,12 @@ _INTERVAL_MS = {
     "3d": 259_200_000,
     "1w": 604_800_000,
 }
+
+
+class MissingHistoricalDataError(RuntimeError):
+    """El rango de velas pedido no esta completo en `ohlcv_cache`. El motor
+    de backtest ya no descarga por red (tarea 3): corre primero
+    `scripts/download_history.py` para llenar el cache."""
 
 
 def interval_to_ms(interval: str) -> int | None:
@@ -87,7 +111,75 @@ def drop_incomplete_last_bar(
     return [b for b in bars if b.open_time + step_ms <= now_ms]
 
 
-async def get_or_fetch(
+def _fmt(ms: int) -> str:
+    return datetime.fromtimestamp(ms / 1000, tz=UTC).date().isoformat()
+
+
+async def _fetch_kline_page(
+    client: BitunixRestClient, symbol: str, interval: str, cursor: int, price_type: str
+) -> list[dict]:
+    for attempt in range(EMPTY_PAGE_RETRIES + 1):
+        raw_bars = await client.get_kline(
+            symbol=symbol, interval=interval, end_time=cursor, limit=PAGE_LIMIT,
+            price_type=price_type,
+        )
+        if raw_bars:
+            return raw_bars
+        if attempt < EMPTY_PAGE_RETRIES:
+            logger.warning(
+                "%s %s %s: pagina vacia en end_time=%d (reintento %d/%d)",
+                symbol, interval, price_type, cursor, attempt + 1, EMPTY_PAGE_RETRIES,
+            )
+    return []
+
+
+async def _download_range(
+    client: BitunixRestClient,
+    db: Database,
+    symbol: str,
+    interval: str,
+    price_type: str,
+    range_start: int,
+    range_end: int,
+    floor: int | None,
+) -> None:
+    """Descarga hacia atras SOLO [range_start, range_end]. Guarda cada
+    pagina de inmediato -> reanudable sin perder progreso."""
+    if range_start > range_end:
+        return
+    if floor is not None and range_end < floor:
+        return  # todo el rango pedido es anterior al piso real conocido
+
+    cursor = range_end
+    page_num = 0
+    while cursor >= range_start:
+        page_num += 1
+        raw_bars = await _fetch_kline_page(client, symbol, interval, cursor, price_type)
+        if not raw_bars:
+            logger.info(
+                "%s %s %s: historial agotado en Bitunix antes de %s (pagina %d)",
+                symbol, interval, price_type, _fmt(range_start), page_num,
+            )
+            await ohlcv_repo.set_floor(db, symbol, interval, price_type, cursor)
+            return
+
+        bars = [_bar_from_raw(symbol, interval, price_type, r) for r in raw_bars]
+        await ohlcv_repo.upsert_bars(db, bars)
+        oldest_time = min(b.open_time for b in bars)
+        logger.info(
+            "%s %s %s: pagina %d guardada (%d velas, hasta %s)",
+            symbol, interval, price_type, page_num, len(bars), _fmt(oldest_time),
+        )
+
+        if len(raw_bars) < PAGE_LIMIT:
+            await ohlcv_repo.set_floor(db, symbol, interval, price_type, oldest_time)
+            return
+        if oldest_time <= range_start:
+            return
+        cursor = oldest_time - 1
+
+
+async def download_missing(
     client: BitunixRestClient,
     db: Database,
     symbol: str,
@@ -95,69 +187,74 @@ async def get_or_fetch(
     start_time: int,
     end_time: int,
     price_type: str = "LAST_PRICE",
-) -> list[OHLCVBar]:
-    """Devuelve las velas de [start_time, end_time] (ms), descargando de
-    Bitunix solo lo que falte en el cache local. Pagina hacia atras desde
-    `end_time` (ver docstring del modulo)."""
+) -> None:
+    """Descarga por red SOLO lo que falte en cache para cubrir
+    [start_time, end_time]: la cola reciente (mas nuevo que lo cacheado,
+    hasta `end_time`) y la cabeza vieja (mas viejo que lo cacheado, hasta
+    `start_time` o el piso real ya conocido). Usada exclusivamente por
+    `scripts/download_history.py` -- el motor de backtest nunca llama
+    esto, solo lee con `get_cached_or_raise`."""
     step_ms = interval_to_ms(interval)
+    floor = await ohlcv_repo.get_floor(db, symbol, interval, price_type)
 
-    already_covered = False
-    if step_ms:
-        covered = await ohlcv_repo.get_covered_open_times(db, symbol, interval, price_type)
+    if step_ms is None:
+        # Sin grilla conocida (p.ej. "1M"): no se puede razonar sobre
+        # rangos faltantes, se descarga el pedido completo tal cual.
+        await _download_range(
+            client, db, symbol, interval, price_type, start_time, end_time, floor
+        )
+        return
+
+    covered = await ohlcv_repo.get_covered_range(db, symbol, interval, price_type)
+    if covered is None:
+        await _download_range(
+            client, db, symbol, interval, price_type, start_time, end_time, floor
+        )
+        return
+
+    min_cached, max_cached = covered
+
+    if max_cached < end_time - 2 * step_ms:
+        await _download_range(
+            client, db, symbol, interval, price_type, max_cached + step_ms, end_time, floor
+        )
         floor = await ohlcv_repo.get_floor(db, symbol, interval, price_type)
-        # No se compara contra una grilla aritmetica exacta desde
-        # `start_time` -- un `start_time`/`end_time` arbitrario (p.ej. un
-        # corte IS/OOS que no cae justo en un borde de vela real) nunca
-        # coincidiria con los `open_time` reales de Bitunix, forzando una
-        # redescarga completa innecesaria cada vez (encontrado durante la
-        # corrida real de Fase 2). En cambio, se verifica que el rango ya
-        # cacheado "abarque" el pedido: hay una vela en o antes de
-        # `start_time` (o, si `start_time` es anterior al piso real del
-        # historial ya detectado, no hace falta ninguna mas antigua) y una
-        # vela en o despues de `end_time - 2*step_ms`: la ultima vela
-        # CERRADA puede estar hasta casi 2 intervalos detras de "ahora"
-        # (la vela en curso todavia no cerro) -- exigir `end_time -
-        # step_ms` como se intento primero es demasiado estricto y
-        # dispara una redescarga completa espuria en cada corrida real
-        # (encontrado en la corrida de Fase 2).
-        if covered:
-            min_ok = min(covered) <= start_time or (floor is not None and floor <= min(covered))
-            already_covered = min_ok and max(covered) >= end_time - 2 * step_ms
 
-    if not already_covered:
-        cursor = end_time
-        while cursor >= start_time:
-            raw_bars = await client.get_kline(
-                symbol=symbol,
-                interval=interval,
-                end_time=cursor,
-                limit=PAGE_LIMIT,
-                price_type=price_type,
+    head_target = start_time if floor is None else max(start_time, floor)
+    if min_cached > head_target:
+        await _download_range(
+            client, db, symbol, interval, price_type, start_time, min_cached - step_ms, floor
+        )
+
+
+async def get_cached_or_raise(
+    db: Database,
+    symbol: str,
+    interval: str,
+    start_time: int,
+    end_time: int,
+    price_type: str = "LAST_PRICE",
+) -> list[OHLCVBar]:
+    """Lee SOLO de `ohlcv_cache` (nunca toca la red). Si el rango pedido no
+    esta completo, lanza `MissingHistoricalDataError` -- el llamador debe
+    correr `scripts/download_history.py` primero."""
+    step_ms = interval_to_ms(interval)
+    if step_ms is not None:
+        floor = await ohlcv_repo.get_floor(db, symbol, interval, price_type)
+        covered = await ohlcv_repo.get_covered_range(db, symbol, interval, price_type)
+        if covered is None:
+            raise MissingHistoricalDataError(
+                f"No hay velas cacheadas para {symbol} {interval} {price_type}. "
+                "Corre primero: python scripts/download_history.py"
             )
-            if not raw_bars:
-                logger.info(
-                    "%s %s: historial agotado en Bitunix antes de alcanzar start_time=%d",
-                    symbol, interval, start_time,
-                )
-                # El piso real quedo en el `cursor` actual (no hay nada en o
-                # antes de este punto): se recuerda para no reintentar.
-                if step_ms:
-                    await ohlcv_repo.set_floor(db, symbol, interval, price_type, cursor)
-                break
-            bars = [_bar_from_raw(symbol, interval, price_type, r) for r in raw_bars]
-            await ohlcv_repo.upsert_bars(db, bars)
-            oldest_time = min(b.open_time for b in bars)
-            if len(raw_bars) < PAGE_LIMIT:
-                # Pagina parcial: la API ya no tiene mas historial antes de
-                # `oldest_time` -- ese es el piso real, se recuerda.
-                if step_ms:
-                    await ohlcv_repo.set_floor(db, symbol, interval, price_type, oldest_time)
-                break
-            if oldest_time <= start_time:
-                break
-            cursor = oldest_time - 1
-            # El espaciado y la pausa larga periodica contra el colgado de
-            # red del entorno (ver docs/PROGRESS.md) ahora viven
-            # centralizados en `BitunixRestClient._get`, no aqui.
-
+        min_cached, max_cached = covered
+        head_ok = min_cached <= start_time or (floor is not None and floor <= min_cached)
+        tail_ok = max_cached >= end_time - 2 * step_ms
+        if not (head_ok and tail_ok):
+            raise MissingHistoricalDataError(
+                f"Velas incompletas para {symbol} {interval} {price_type} en rango "
+                f"[{_fmt(start_time)}, {_fmt(end_time)}] (cacheado: "
+                f"[{_fmt(min_cached)}, {_fmt(max_cached)}]). "
+                "Corre primero: python scripts/download_history.py"
+            )
     return await ohlcv_repo.get_bars(db, symbol, interval, price_type, start_time, end_time)

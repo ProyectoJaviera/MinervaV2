@@ -76,6 +76,23 @@ async def get_covered_open_times(
     return {r["open_time"] for r in rows}
 
 
+async def get_covered_range(
+    db: Database, symbol: str, interval: str, price_type: str
+) -> tuple[int, int] | None:
+    """(open_time mas antiguo, open_time mas nuevo) ya cacheados, o `None`
+    si no hay ninguna vela. Mas eficiente que `get_covered_open_times` para
+    decidir que rango falta descargar (no carga todos los timestamps a
+    memoria, solo MIN/MAX via SQL)."""
+    row = await db.fetch_one(
+        "SELECT MIN(open_time) AS lo, MAX(open_time) AS hi FROM ohlcv_cache "
+        "WHERE symbol = ? AND interval = ? AND price_type = ?",
+        (symbol, interval, price_type),
+    )
+    if row is None or row["lo"] is None:
+        return None
+    return int(row["lo"]), int(row["hi"])
+
+
 async def get_floor(db: Database, symbol: str, interval: str, price_type: str) -> int | None:
     """Timestamp de la vela mas antigua que existe en Bitunix para este
     (symbol, interval, price_type), si ya se detecto (ver `set_floor`)."""

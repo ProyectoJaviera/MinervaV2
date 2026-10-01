@@ -37,3 +37,16 @@ async def get_covered_funding_times(db: Database, symbol: str) -> set[int]:
         "SELECT funding_time FROM funding_cache WHERE symbol = ?", (symbol,)
     )
     return {int(r["funding_time"]) for r in rows}
+
+
+async def get_covered_range(db: Database, symbol: str) -> tuple[int, int] | None:
+    """(funding_time mas antiguo, mas nuevo) ya cacheados, o `None` si no
+    hay ninguno -- misma idea que `ohlcv_repo.get_covered_range`."""
+    row = await db.fetch_one(
+        "SELECT MIN(funding_time) AS lo, MAX(funding_time) AS hi FROM funding_cache "
+        "WHERE symbol = ?",
+        (symbol,),
+    )
+    if row is None or row["lo"] is None:
+        return None
+    return int(row["lo"]), int(row["hi"])

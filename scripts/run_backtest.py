@@ -1,10 +1,13 @@
-"""Ejecuta el backtest completo de Fase 2 contra datos reales de Bitunix/
-CoinGecko y persiste todo en la base de datos (`asset_universe`,
-`backtest_trades`, `backtest_runs`, `backtest_verdicts`).
+"""Ejecuta el backtest completo de Fase 2 y persiste todo en la base de
+datos (`backtest_trades`, `backtest_runs`, `backtest_verdicts`).
 
-No hay API/frontend todavia para disparar esto (ver docs/FASE2_PLAN.md,
-fuera de alcance de esta fase) -- se corre manualmente:
+Correccion post-Fase-2 (ver docs/FASE2_BLOQUEO_RED.md): este script ya NO
+toca la red -- lee universo, specs, velas y funding exclusivamente de
+SQLite. Si falta algo, lanza un error claro en vez de descargar nada. Corre
+primero `scripts/download_history.py` (una sola vez; es idempotente y
+reanudable) para llenar la base de datos:
 
+    python scripts/download_history.py
     python scripts/run_backtest.py
 
 Imprime un resumen por estrategia al terminar. Los criterios y parametros
@@ -25,11 +28,8 @@ sys.path.insert(0, ".")
 from app.backtesting.report import run_full_backtest  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.core.logging import get_logger, setup_logging  # noqa: E402
-from app.market.bitunix_rest import BitunixRestClient  # noqa: E402
-from app.market.coingecko_client import CoinGeckoClient  # noqa: E402
-from app.market.contract_specs import refresh_spec  # noqa: E402
-from app.market.universe import refresh_universe  # noqa: E402
 from app.persistence.database import Database  # noqa: E402
+from app.persistence.repositories import universe_repo  # noqa: E402
 
 logger = get_logger("run_backtest")
 
@@ -43,25 +43,15 @@ async def main() -> None:
     t0 = time.time()
     db = Database(settings.database_path)
     await db.connect()
-    rest_client = BitunixRestClient(
-        base_url=settings.bitunix_rest_base_url,
-        rate_limit_per_sec=settings.bitunix_rate_limit_per_sec,
-    )
-    coingecko_client = CoinGeckoClient(settings.coingecko_base_url, settings.coingecko_api_key)
 
     try:
-        logger.info("Construyendo universo dinamico...")
-        universe_entries = await refresh_universe(coingecko_client, rest_client, db, settings)
-        universe_symbols = [e.symbol for e in universe_entries if e.included]
-        logger.info("Universo incluido: %s", universe_symbols)
-
-        all_symbols = sorted(set(universe_symbols) | set(settings.backtest_control_symbols_list))
-        logger.info("Refrescando specs de contrato para %d simbolos...", len(all_symbols))
-        for symbol in all_symbols:
-            try:
-                await refresh_spec(rest_client, db, symbol)
-            except Exception:
-                logger.exception("No se pudo refrescar specs de %s", symbol)
+        universe_symbols = await universe_repo.get_included_symbols(db)
+        if not universe_symbols:
+            raise RuntimeError(
+                "No hay universo cacheado en asset_universe. "
+                "Corre primero: python scripts/download_history.py"
+            )
+        logger.info("Universo (desde cache): %s", universe_symbols)
 
         end_ms = int(time.time() * 1000)
         logger.info(
@@ -69,9 +59,7 @@ async def main() -> None:
             datetime.fromtimestamp(START_MS / 1000, tz=UTC).date(),
             datetime.fromtimestamp(end_ms / 1000, tz=UTC).date(),
         )
-        results = await run_full_backtest(
-            rest_client, db, settings, universe_symbols, START_MS, end_ms
-        )
+        results = await run_full_backtest(db, settings, universe_symbols, START_MS, end_ms)
 
         print("\n=== RESUMEN DE VEREDICTOS (Fase 2) ===\n")
         for r in results:
@@ -98,8 +86,6 @@ async def main() -> None:
 
         print(f"Tiempo total: {time.time() - t0:.1f}s")
     finally:
-        await rest_client.aclose()
-        await coingecko_client.aclose()
         await db.close()
 
 
