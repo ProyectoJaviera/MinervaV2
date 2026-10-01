@@ -1,7 +1,8 @@
 """Capa de persistencia (aiosqlite).
 
-Fase 1 crea solo las tablas que esta fase usa: `trades`, `system_state`,
-`ohlcv_cache`, `contract_specs_cache`. El resto del esquema propuesto en
+Fase 1 creo `trades`, `system_state`, `ohlcv_cache`, `contract_specs_cache`.
+Fase 2 agrega `asset_universe`, `backtest_trades`, `backtest_skipped_entries`,
+`backtest_runs`, `backtest_verdicts`. El resto del esquema propuesto en
 docs/FASE0.md (llm_logs, news_items, lessons_learned, etc.) se crea en la
 fase que los necesite, para no mantener tablas vacias sin dueno.
 """
@@ -73,6 +74,107 @@ CREATE TABLE IF NOT EXISTS contract_specs_cache (
     funding_interval_hours INTEGER,
     next_funding_time INTEGER,
     fetched_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS asset_universe (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    refreshed_at TEXT NOT NULL,
+    coingecko_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    coingecko_rank INTEGER,
+    market_cap_usd REAL,
+    excluded_category TEXT,
+    excluded_manual INTEGER NOT NULL DEFAULT 0,
+    has_bitunix_perp INTEGER NOT NULL DEFAULT 0,
+    price_sanity_ok INTEGER,
+    included INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_asset_universe_refreshed ON asset_universe (refreshed_at);
+
+CREATE TABLE IF NOT EXISTS backtest_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    segment TEXT NOT NULL,
+    side TEXT NOT NULL CHECK (side IN ('LONG', 'SHORT')),
+    entry_time TEXT NOT NULL,
+    exit_time TEXT NOT NULL,
+    entry_price REAL NOT NULL,
+    exit_price REAL NOT NULL,
+    qty REAL NOT NULL,
+    margin_usdt REAL NOT NULL,
+    leverage INTEGER NOT NULL,
+    fee_entry_usdt REAL NOT NULL,
+    fee_exit_usdt REAL NOT NULL,
+    slippage_cost_usdt REAL NOT NULL,
+    funding_paid_usdt REAL NOT NULL,
+    funding_is_approximated INTEGER NOT NULL,
+    pnl_gross_usdt REAL NOT NULL,
+    pnl_net_usdt REAL NOT NULL,
+    close_reason TEXT NOT NULL,
+    sl_margin_loss_pct REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_trades_cell
+    ON backtest_trades (strategy, symbol, timeframe, segment);
+
+CREATE TABLE IF NOT EXISTS backtest_skipped_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    segment TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    side TEXT NOT NULL CHECK (side IN ('LONG', 'SHORT')),
+    intended_sl_margin_loss_pct REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS backtest_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    segment TEXT NOT NULL,
+    winrate REAL,
+    profit_factor REAL,
+    pnl_gross_total_usdt REAL NOT NULL DEFAULT 0,
+    pnl_net_total_usdt REAL NOT NULL DEFAULT 0,
+    max_drawdown_pct REAL,
+    expectancy_usdt REAL,
+    total_trades INTEGER NOT NULL DEFAULT 0,
+    fees_total_usdt REAL NOT NULL DEFAULT 0,
+    funding_total_usdt REAL NOT NULL DEFAULT 0,
+    funding_real_trades INTEGER NOT NULL DEFAULT 0,
+    funding_approx_trades INTEGER NOT NULL DEFAULT 0,
+    benchmark_return_pct REAL,
+    benchmark_max_drawdown_pct REAL,
+    run_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_runs_cell
+    ON backtest_runs (strategy, symbol, timeframe, segment);
+
+CREATE TABLE IF NOT EXISTS backtest_verdicts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy TEXT NOT NULL,
+    is_experimental INTEGER NOT NULL DEFAULT 0,
+    combos_tested INTEGER NOT NULL DEFAULT 0,
+    total_trades_all_segments INTEGER NOT NULL DEFAULT 0,
+    pf_oos_aggregate REAL,
+    pct_symbols_pf_gt1 REAL,
+    pct_folds_positive REAL,
+    pf_stressed REAL,
+    pf_real_funding_only REAL,
+    pf_full_period_approx REAL,
+    max_drawdown_oos_pct REAL,
+    concentration_pct REAL,
+    pf_control_group REAL,
+    evidence_insufficient INTEGER NOT NULL DEFAULT 0,
+    discarded INTEGER NOT NULL DEFAULT 0,
+    discard_reasons_json TEXT,
+    run_at TEXT NOT NULL
 );
 """
 

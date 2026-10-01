@@ -63,11 +63,64 @@ class Settings(BaseSettings):
     min_closed_trades: int = Field(default=100, alias="MIN_CLOSED_TRADES")
     min_profit_factor: float = Field(default=1.3, alias="MIN_PROFIT_FACTOR")
 
-    # --- CoinGecko (usado desde Fase 2+) ---
+    # --- CoinGecko / universo dinamico (Fase 2) ---
     coingecko_api_key: str = Field(default="", alias="COINGECKO_API_KEY")
     coingecko_base_url: str = Field(
         default="https://api.coingecko.com/api/v3", alias="COINGECKO_BASE_URL"
     )
+    universe_size: int = Field(default=10, alias="UNIVERSE_SIZE")
+    universe_candidate_pool: int = Field(default=30, alias="UNIVERSE_CANDIDATE_POOL")
+    universe_refresh_hours: float = Field(default=24.0, alias="UNIVERSE_REFRESH_HOURS")
+    universe_staleness_hours: float = Field(default=48.0, alias="UNIVERSE_STALENESS_HOURS")
+    universe_exclude_categories: str = Field(
+        default="stablecoins,wrapped-tokens,liquid-staking-tokens",
+        alias="UNIVERSE_EXCLUDE_CATEGORIES",
+    )
+    universe_manual_exclusions: str = Field(default="", alias="UNIVERSE_MANUAL_EXCLUSIONS")
+    universe_price_sanity_tolerance_pct: float = Field(
+        default=0.05, alias="UNIVERSE_PRICE_SANITY_TOLERANCE_PCT"
+    )
+
+    # --- Backtesting (Fase 2) ---
+    backtest_initial_capital: float = Field(default=100.0, alias="BACKTEST_INITIAL_CAPITAL")
+    backtest_slippage_bps: float = Field(default=5.0, alias="BACKTEST_SLIPPAGE_BPS")
+    backtest_min_trades_per_cell: int = Field(default=30, alias="BACKTEST_MIN_TRADES_PER_CELL")
+    backtest_min_trades_total: int = Field(default=100, alias="BACKTEST_MIN_TRADES_TOTAL")
+    backtest_min_profit_factor: float = Field(default=1.2, alias="BACKTEST_MIN_PROFIT_FACTOR")
+    backtest_max_drawdown_pct: float = Field(default=0.50, alias="BACKTEST_MAX_DRAWDOWN_PCT")
+    backtest_concentration_limit_pct: float = Field(
+        default=0.40, alias="BACKTEST_CONCENTRATION_LIMIT_PCT"
+    )
+    backtest_min_pct_symbols_pf_gt1: float = Field(
+        default=0.50, alias="BACKTEST_MIN_PCT_SYMBOLS_PF_GT1"
+    )
+    backtest_min_pct_folds_positive: float = Field(
+        default=0.50, alias="BACKTEST_MIN_PCT_FOLDS_POSITIVE"
+    )
+    backtest_stress_fee_multiplier: float = Field(
+        default=2.0, alias="BACKTEST_STRESS_FEE_MULTIPLIER"
+    )
+    backtest_stress_slippage_multiplier: float = Field(
+        default=2.0, alias="BACKTEST_STRESS_SLIPPAGE_MULTIPLIER"
+    )
+    backtest_oos_split_pct: float = Field(default=0.30, alias="BACKTEST_OOS_SPLIT_PCT")
+    backtest_walk_forward_fold_months: int = Field(
+        default=6, alias="BACKTEST_WALK_FORWARD_FOLD_MONTHS"
+    )
+    backtest_walk_forward_step_months: int = Field(
+        default=2, alias="BACKTEST_WALK_FORWARD_STEP_MONTHS"
+    )
+    backtest_control_symbols: str = Field(
+        default="BTCUSDT,ETHUSDT", alias="BACKTEST_CONTROL_SYMBOLS"
+    )
+    # Tope de riesgo por operacion: si el SL configurado de una estrategia
+    # perderia mas de este % del margen (a 10x), la entrada se omite (no se
+    # fuerza un SL mas ajustado) y se registra como "omitida por riesgo".
+    max_sl_margin_loss_pct: float = Field(default=50.0, alias="MAX_SL_MARGIN_LOSS_PCT")
+    # SL/TP de respaldo (en % de movimiento de precio) para estrategias que
+    # no implementan stop_price/take_profit_price (None).
+    backtest_fallback_sl_pct: float = Field(default=0.05, alias="BACKTEST_FALLBACK_SL_PCT")
+    backtest_fallback_tp_pct: float = Field(default=0.10, alias="BACKTEST_FALLBACK_TP_PCT")
 
     # --- Claude / Anthropic (usado desde Fase 4) ---
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
@@ -94,6 +147,20 @@ class Settings(BaseSettings):
     def symbols(self) -> list[str]:
         """Lista de simbolos configurados en TRADING_SYMBOLS (separados por coma)."""
         return [s.strip().upper() for s in self.trading_symbols.split(",") if s.strip()]
+
+    @property
+    def universe_exclude_categories_list(self) -> list[str]:
+        return [c.strip() for c in self.universe_exclude_categories.split(",") if c.strip()]
+
+    @property
+    def universe_manual_exclusions_list(self) -> list[str]:
+        """Ids de CoinGecko (no simbolos) a excluir manualmente, ademas del
+        filtro automatico por categoria -- ver docs/FASE2_PLAN.md punto 6."""
+        return [c.strip().lower() for c in self.universe_manual_exclusions.split(",") if c.strip()]
+
+    @property
+    def backtest_control_symbols_list(self) -> list[str]:
+        return [s.strip().upper() for s in self.backtest_control_symbols.split(",") if s.strip()]
 
     def max_margin_for_new_trade(
         self,

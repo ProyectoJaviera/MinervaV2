@@ -7,6 +7,16 @@ lo aplica `BitunixRestClient`) y evita volver a pedir velas que ya estan en
 Formato de cada vela devuelto por `GET /market/kline` (verificado):
 `{"open": "60000", "high": "60001", "close": "60000", "low": "59989.2",
 "time": 111111, "quoteVol": "1", "baseVol": "60000", "type": "LAST_PRICE"}`.
+
+**Correccion de Fase 2** (ver docs/FASE2_PLAN.md): se verifico empiricamente
+contra la API real que `/market/kline` NO pagina hacia adelante desde
+`start_time` -- pagina hacia ATRAS desde `end_time` (devuelve las `limit`
+velas mas recientes en o antes de `end_time`). La version de Fase 1 asumia
+paginacion hacia adelante y nunca avanzaba en un rango historico amplio.
+Esta version pagina hacia atras: parte de `end_time`, cada pagina retrocede
+el cursor al `open_time` mas antiguo recibido menos 1, hasta cubrir
+`start_time` o agotar el historial disponible (la API devuelve menos de
+`limit` velas, o ninguna).
 """
 
 from __future__ import annotations
@@ -38,6 +48,12 @@ _INTERVAL_MS = {
 }
 
 
+def interval_to_ms(interval: str) -> int | None:
+    """Duracion de un intervalo de vela en ms, o None si es desconocido
+    (p. ej. '1M' -- mes calendario, duracion variable)."""
+    return _INTERVAL_MS.get(interval)
+
+
 def _bar_from_raw(symbol: str, interval: str, raw: dict) -> OHLCVBar:
     return OHLCVBar(
         symbol=symbol,
@@ -53,6 +69,19 @@ def _bar_from_raw(symbol: str, interval: str, raw: dict) -> OHLCVBar:
     )
 
 
+def drop_incomplete_last_bar(
+    bars: list[OHLCVBar], interval: str, now_ms: int
+) -> list[OHLCVBar]:
+    """Descarta la ultima vela si todavia no ha cerrado (su open_time + la
+    duracion del intervalo es posterior a `now_ms`). Usado por el motor de
+    backtest (Fase 2, punto 6 de los ajustes) para nunca operar sobre una
+    vela en formacion."""
+    step_ms = interval_to_ms(interval)
+    if step_ms is None or not bars:
+        return bars
+    return [b for b in bars if b.open_time + step_ms <= now_ms]
+
+
 async def get_or_fetch(
     client: BitunixRestClient,
     db: Database,
@@ -62,39 +91,38 @@ async def get_or_fetch(
     end_time: int,
     price_type: str = "LAST_PRICE",
 ) -> list[OHLCVBar]:
-    """Devuelve las velas de [start_time, end_time] (ms), descargando de Bitunix
-    solo lo que falte en el cache local."""
-    covered = await ohlcv_repo.get_covered_open_times(db, symbol, interval, price_type)
-    step_ms = _INTERVAL_MS.get(interval)
+    """Devuelve las velas de [start_time, end_time] (ms), descargando de
+    Bitunix solo lo que falte en el cache local. Pagina hacia atras desde
+    `end_time` (ver docstring del modulo)."""
+    step_ms = interval_to_ms(interval)
 
-    if step_ms and covered:
+    already_covered = False
+    if step_ms:
+        covered = await ohlcv_repo.get_covered_open_times(db, symbol, interval, price_type)
         expected = set(range(start_time, end_time + 1, step_ms))
-        missing = sorted(expected - covered)
-    else:
-        # Intervalo desconocido o cache vacio: se descarga el rango completo y se
-        # deja que la cache (PRIMARY KEY) deduplique en el proximo upsert.
-        missing = [start_time] if not covered else []
+        already_covered = not (expected - covered)
 
-    if missing or not covered:
-        cursor = start_time
-        while cursor <= end_time:
+    if not already_covered:
+        cursor = end_time
+        while cursor >= start_time:
             raw_bars = await client.get_kline(
                 symbol=symbol,
                 interval=interval,
-                start_time=cursor,
-                end_time=end_time,
+                end_time=cursor,
                 limit=PAGE_LIMIT,
                 price_type=price_type,
             )
             if not raw_bars:
+                logger.info(
+                    "%s %s: historial agotado en Bitunix antes de alcanzar start_time=%d",
+                    symbol, interval, start_time,
+                )
                 break
             bars = [_bar_from_raw(symbol, interval, r) for r in raw_bars]
             await ohlcv_repo.upsert_bars(db, bars)
-            latest_time = max(b.open_time for b in bars)
-            if step_ms is None or latest_time <= cursor:
+            oldest_time = min(b.open_time for b in bars)
+            if oldest_time <= start_time or len(raw_bars) < PAGE_LIMIT:
                 break
-            cursor = latest_time + step_ms
-            if len(raw_bars) < PAGE_LIMIT:
-                break
+            cursor = oldest_time - 1
 
     return await ohlcv_repo.get_bars(db, symbol, interval, price_type, start_time, end_time)

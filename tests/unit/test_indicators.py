@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from app.indicators.engine import atr, ema, rsi
+from app.indicators.engine import atr, bollinger_bands, donchian_channel, ema, rsi, sma
 
 
 def test_ema_span_must_be_positive():
@@ -64,3 +64,50 @@ def test_atr_non_negative():
     )
     result = atr(df, period=3)
     assert (result.dropna() >= 0).all()
+
+
+def test_sma_period_must_be_positive():
+    with pytest.raises(ValueError):
+        sma(pd.Series([1.0, 2.0]), period=0)
+
+
+def test_sma_constant_series_equals_constant():
+    series = pd.Series([7.0] * 10)
+    assert sma(series, period=4).iloc[-1] == pytest.approx(7.0)
+
+
+def test_sma_matches_manual_average():
+    series = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0])
+    result = sma(series, period=3)
+    assert result.iloc[-1] == pytest.approx((3.0 + 4.0 + 5.0) / 3)
+    assert result.iloc[:2].isna().all()  # no hay suficiente historia todavia
+
+
+def test_bollinger_bands_flat_price_collapses_bands():
+    series = pd.Series([50.0] * 25)
+    upper, middle, lower = bollinger_bands(series, period=20, num_std=2.0)
+    assert upper.iloc[-1] == pytest.approx(50.0)
+    assert middle.iloc[-1] == pytest.approx(50.0)
+    assert lower.iloc[-1] == pytest.approx(50.0)
+
+
+def test_bollinger_bands_upper_above_middle_above_lower():
+    series = pd.Series([50.0 + (i % 3) for i in range(30)])  # con algo de ruido
+    upper, middle, lower = bollinger_bands(series, period=10, num_std=2.0)
+    assert upper.iloc[-1] > middle.iloc[-1] > lower.iloc[-1]
+
+
+def test_donchian_channel_requires_columns():
+    with pytest.raises(ValueError):
+        donchian_channel(pd.DataFrame({"close": [1.0, 2.0]}), period=3)
+
+
+def test_donchian_channel_tracks_rolling_extremes():
+    df = pd.DataFrame({
+        "high": [10.0, 12.0, 11.0, 15.0, 9.0],
+        "low": [8.0, 9.0, 7.0, 10.0, 6.0],
+    })
+    upper, lower = donchian_channel(df, period=3)
+    # ventana de las ultimas 3 velas en el indice final: high=[11,15,9] low=[7,10,6]
+    assert upper.iloc[-1] == pytest.approx(15.0)
+    assert lower.iloc[-1] == pytest.approx(6.0)

@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from app.config import Settings
 from app.core.logging import get_logger
 from app.execution.backend_base import ExecutionBackend
+from app.execution.pnl import compute_close_result, compute_open_fill
 from app.market.bitunix_rest import BitunixRestClient
 from app.persistence.database import Database
 from app.persistence.models import Side, Trade, TradeStatus
@@ -68,16 +69,13 @@ class PaperBackend(ExecutionBackend):
 
         spec = await specs_repo.get_spec(self.db, symbol)
         price = await self._get_mark_price(symbol)
-        notional = margin_usdt * leverage
-        qty = notional / price
+        fill = compute_open_fill(margin_usdt, leverage, price, self.settings.taker_fee_pct)
 
-        if spec and spec.min_trade_volume and qty < spec.min_trade_volume:
+        if spec and spec.min_trade_volume and fill.qty < spec.min_trade_volume:
             raise InsufficientRiskBudgetError(
-                f"qty {qty} por debajo del minimo operable de {symbol} "
+                f"qty {fill.qty} por debajo del minimo operable de {symbol} "
                 f"({spec.min_trade_volume})"
             )
-
-        fee_entry = notional * self.settings.taker_fee_pct
 
         trade = Trade(
             symbol=symbol,
@@ -86,15 +84,15 @@ class PaperBackend(ExecutionBackend):
             status=TradeStatus.OPEN,
             leverage=leverage,
             margin_usdt=margin_usdt,
-            notional_usdt=notional,
-            qty=qty,
+            notional_usdt=fill.notional_usdt,
+            qty=fill.qty,
             entry_price=price,
-            fee_entry_usdt=fee_entry,
+            fee_entry_usdt=fill.fee_entry_usdt,
             opened_at=datetime.now(UTC),
         )
         trade = await trades_repo.create_trade(self.db, trade)
         logger.info("Posicion abierta (paper): %s %s margen=%.2f qty=%.6f @ %.4f",
-                    symbol, side.value, margin_usdt, qty, price)
+                    symbol, side.value, margin_usdt, fill.qty, price)
         return trade
 
     async def close_position(self, trade_id: int, reason: str = "MANUAL") -> Trade:
@@ -105,21 +103,18 @@ class PaperBackend(ExecutionBackend):
             raise ValueError(f"Trade {trade_id} ya esta cerrado")
 
         exit_price = await self._get_mark_price(trade.symbol)
-        exit_notional = trade.qty * exit_price
-        fee_exit = exit_notional * self.settings.taker_fee_pct
-
-        if trade.side == Side.LONG:
-            pnl_gross = (exit_price - trade.entry_price) * trade.qty
-        else:
-            pnl_gross = (trade.entry_price - exit_price) * trade.qty
-        pnl_net = pnl_gross - trade.fee_entry_usdt - fee_exit
+        result = compute_close_result(
+            trade.side, trade.qty, trade.entry_price, exit_price,
+            trade.fee_entry_usdt, self.settings.taker_fee_pct,
+        )
 
         await trades_repo.close_trade(
-            self.db, trade_id, exit_price, fee_exit, pnl_gross, pnl_net, reason
+            self.db, trade_id, exit_price, result.fee_exit_usdt,
+            result.pnl_gross_usdt, result.pnl_net_usdt, reason,
         )
         logger.info(
             "Posicion cerrada (paper): trade=%d %s pnl_neto=%.4f motivo=%s",
-            trade_id, trade.symbol, pnl_net, reason,
+            trade_id, trade.symbol, result.pnl_net_usdt, reason,
         )
         updated = await trades_repo.get_trade(self.db, trade_id)
         assert updated is not None

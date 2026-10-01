@@ -32,6 +32,41 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
     return result
 
 
+def sma(series: pd.Series, period: int) -> pd.Series:
+    """Media movil simple. `period` debe ser >= 1."""
+    if period < 1:
+        raise ValueError("period debe ser >= 1")
+    return series.rolling(window=period, min_periods=period).mean()
+
+
+def bollinger_bands(
+    series: pd.Series, period: int = 20, num_std: float = 2.0
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Bandas de Bollinger: (banda_superior, banda_media, banda_inferior).
+    Banda media = SMA(period); bandas exteriores = media +/- num_std * desv.
+    estandar (poblacional, ddof=0, convencion estandar de Bollinger)."""
+    if period < 1:
+        raise ValueError("period debe ser >= 1")
+    middle = sma(series, period)
+    std = series.rolling(window=period, min_periods=period).std(ddof=0)
+    upper = middle + num_std * std
+    lower = middle - num_std * std
+    return upper, middle, lower
+
+
+def donchian_channel(df: pd.DataFrame, period: int = 20) -> tuple[pd.Series, pd.Series]:
+    """Canal de Donchian: (maximo_superior, minimo_inferior) de las ultimas
+    `period` velas (incluyendo la actual). Requiere columnas 'high', 'low'."""
+    if period < 1:
+        raise ValueError("period debe ser >= 1")
+    for col in ("high", "low"):
+        if col not in df.columns:
+            raise ValueError(f"Falta la columna '{col}' en el DataFrame")
+    upper = df["high"].rolling(window=period, min_periods=period).max()
+    lower = df["low"].rolling(window=period, min_periods=period).min()
+    return upper, lower
+
+
 def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     """Average True Range de Wilder. Requiere columnas 'high', 'low', 'close'."""
     if period < 1:
