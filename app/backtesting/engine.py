@@ -249,6 +249,7 @@ async def run_backtest(
 
     df = pd.DataFrame({"open": opens, "high": highs, "low": lows, "close": closes,
                         "funding_rate": funding_rates})
+    df = strategy.precompute(df)
 
     margin_usdt = settings.default_margin_usdt
     leverage = settings.leverage
@@ -334,7 +335,14 @@ async def run_backtest(
                 candidate = position.best_price + position.trailing_distance
                 position.effective_stop = min(position.effective_stop, candidate)
 
+    progress_every = max(1, len(df) // 5)
     for i in range(len(df)):
+        if i > 0 and i % progress_every == 0:
+            logger.info(
+                "%s %s %s: vela %d/%d",
+                strategy_name, symbol, timeframe, i, len(df),
+            )
+
         if position is not None:
             process_bar(i)
 

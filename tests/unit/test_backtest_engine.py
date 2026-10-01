@@ -13,6 +13,8 @@ falso."""
 
 from __future__ import annotations
 
+import random
+
 import pytest
 
 from app.backtesting.engine import run_backtest
@@ -21,6 +23,7 @@ from app.market.ohlcv_history import interval_to_ms
 from app.persistence.models import OHLCVBar
 from app.persistence.repositories import ohlcv_repo
 from app.strategies.base import BaseStrategy, Signal
+from app.strategies.ema_cross import EMACrossStrategy
 
 BASE_MS = 1_700_000_000_000
 STEP_MS = interval_to_ms("4h")
@@ -376,3 +379,48 @@ async def test_too_few_bars_returns_no_trades(db):
     )
     assert trades == []
     assert skipped == []
+
+
+@pytest.mark.asyncio
+async def test_precompute_gives_identical_trades_to_recompute_per_slice(db):
+    """Tarea 5: precalcular indicadores una sola vez por serie (en vez de
+    recalcularlos en cada vela sobre una ventana) debe dar EXACTAMENTE los
+    mismos trades -- todos los indicadores usados son causales, no hay
+    aproximacion al precalcularlos. Compara `EMACrossStrategy` normal
+    (usa `precompute`) contra una version que lo deshabilita a proposito
+    (fuerza el camino de respaldo: recalculo por vela)."""
+    rng = random.Random(42)
+    price = 100.0
+    last: list[OHLCVBar] = []
+    mark: list[OHLCVBar] = []
+    n = 200
+    for i in range(n):
+        price *= 1 + rng.uniform(-0.01, 0.012)
+        o, h, low, c = price, price * 1.002, price * 0.998, price * (1 + rng.uniform(-0.001, 0.001))
+        last.append(_bar(i, o, h, low, c, "LAST_PRICE"))
+        mark.append(_bar(i, o, h, low, c, "MARK_PRICE"))
+    await _seed(db, last, mark)
+
+    settings = make_settings(MAX_SL_MARGIN_LOSS_PCT=1000.0)
+    end_ms = BASE_MS + (n - 1) * STEP_MS
+
+    class NoPrecomputeEMACross(EMACrossStrategy):
+        def precompute(self, df):
+            return df  # fuerza el camino de respaldo (recalculo por vela)
+
+    trades_cached, _ = await run_backtest(
+        db, EMACrossStrategy(fast=9, slow=21), "ema_cross_9_21", "BTCUSDT", "4h",
+        BASE_MS, end_ms, settings, now_ms=NOW_MS,
+    )
+    trades_uncached, _ = await run_backtest(
+        db, NoPrecomputeEMACross(fast=9, slow=21), "ema_cross_9_21", "BTCUSDT", "4h",
+        BASE_MS, end_ms, settings, now_ms=NOW_MS,
+    )
+
+    assert len(trades_cached) > 0  # el test ejercita entradas reales
+    assert len(trades_cached) == len(trades_uncached)
+    for cached, uncached in zip(trades_cached, trades_uncached, strict=True):
+        assert cached.entry_time == uncached.entry_time
+        assert cached.entry_price == pytest.approx(uncached.entry_price)
+        assert cached.exit_price == pytest.approx(uncached.exit_price)
+        assert cached.close_reason == uncached.close_reason

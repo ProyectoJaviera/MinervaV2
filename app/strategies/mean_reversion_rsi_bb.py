@@ -30,13 +30,25 @@ class MeanReversionRSIBBStrategy(BaseStrategy):
         self.atr_period = atr_period
         self.name = f"mean_reversion_rsi{rsi_period}_bb{bb_period}"
 
+    def precompute(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df["rsi"] = rsi(df["close"], self.rsi_period)
+        upper, middle, lower = bollinger_bands(df["close"], self.bb_period, self.bb_std)
+        df["bb_upper"], df["bb_middle"], df["bb_lower"] = upper, middle, lower
+        df["atr"] = atr(df, self.atr_period)
+        return df
+
     def evaluate(self, df: pd.DataFrame) -> Signal:
         if len(df) < max(self.rsi_period, self.bb_period) + 1:
             return Signal.HOLD
 
         close = df["close"]
-        r = rsi(close, self.rsi_period)
-        upper, _middle, lower = bollinger_bands(close, self.bb_period, self.bb_std)
+        has_cache = "rsi" in df.columns
+        r = df["rsi"] if has_cache else rsi(close, self.rsi_period)
+        if has_cache:
+            upper, lower = df["bb_upper"], df["bb_lower"]
+        else:
+            upper, _middle, lower = bollinger_bands(close, self.bb_period, self.bb_std)
 
         if r.iloc[-1] < self.oversold and close.iloc[-1] <= lower.iloc[-1]:
             return Signal.LONG
@@ -45,12 +57,16 @@ class MeanReversionRSIBBStrategy(BaseStrategy):
         return Signal.HOLD
 
     def take_profit_price(self, df: pd.DataFrame, side: Signal, entry_price: float) -> float | None:
-        _upper, middle, _lower = bollinger_bands(df["close"], self.bb_period, self.bb_std)
-        value = middle.iloc[-1]
+        if "bb_middle" in df.columns:
+            value = df["bb_middle"].iloc[-1]
+        else:
+            _upper, middle, _lower = bollinger_bands(df["close"], self.bb_period, self.bb_std)
+            value = middle.iloc[-1]
         return None if pd.isna(value) else float(value)
 
     def stop_price(self, df: pd.DataFrame, side: Signal, entry_price: float) -> float | None:
-        distance = ATR_MULTIPLIER * atr(df, self.atr_period).iloc[-1]
+        atr_series = df["atr"] if "atr" in df.columns else atr(df, self.atr_period)
+        distance = ATR_MULTIPLIER * atr_series.iloc[-1]
         if pd.isna(distance):
             return None
         return entry_price - distance if side == Signal.LONG else entry_price + distance

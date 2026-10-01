@@ -28,14 +28,23 @@ class TrendATRStopStrategy(BaseStrategy):
         self.atr_period = atr_period
         self.name = f"trend_atr_stop_{fast}_{slow}_{trend}"
 
+    def precompute(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df["ema_trend"] = ema(df["close"], self.trend)
+        df["ema_fast"] = ema(df["close"], self.fast)
+        df["ema_slow"] = ema(df["close"], self.slow)
+        df["atr"] = atr(df, self.atr_period)
+        return df
+
     def evaluate(self, df: pd.DataFrame) -> Signal:
         if len(df) < self.trend + 1:
             return Signal.HOLD
 
         close = df["close"]
-        ema_trend = ema(close, self.trend)
-        ema_fast = ema(close, self.fast)
-        ema_slow = ema(close, self.slow)
+        has_cache = "ema_trend" in df.columns
+        ema_trend = df["ema_trend"] if has_cache else ema(close, self.trend)
+        ema_fast = df["ema_fast"] if has_cache else ema(close, self.fast)
+        ema_slow = df["ema_slow"] if has_cache else ema(close, self.slow)
 
         prev_diff = ema_fast.iloc[-2] - ema_slow.iloc[-2]
         curr_diff = ema_fast.iloc[-1] - ema_slow.iloc[-1]
@@ -51,12 +60,16 @@ class TrendATRStopStrategy(BaseStrategy):
             return Signal.SHORT
         return Signal.HOLD
 
+    def _atr_last(self, df: pd.DataFrame) -> float:
+        series = df["atr"] if "atr" in df.columns else atr(df, self.atr_period)
+        return series.iloc[-1]
+
     def stop_price(self, df: pd.DataFrame, side: Signal, entry_price: float) -> float | None:
-        distance = ATR_MULTIPLIER * atr(df, self.atr_period).iloc[-1]
+        distance = ATR_MULTIPLIER * self._atr_last(df)
         if pd.isna(distance):
             return None
         return entry_price - distance if side == Signal.LONG else entry_price + distance
 
     def trailing_distance(self, df: pd.DataFrame) -> float | None:
-        distance = ATR_MULTIPLIER * atr(df, self.atr_period).iloc[-1]
+        distance = ATR_MULTIPLIER * self._atr_last(df)
         return None if pd.isna(distance) else float(distance)

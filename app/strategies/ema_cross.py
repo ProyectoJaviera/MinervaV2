@@ -18,12 +18,18 @@ class EMACrossStrategy(BaseStrategy):
         self.slow = slow
         self.name = f"ema_cross_{fast}_{slow}"
 
+    def precompute(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df["ema_fast"] = ema(df["close"], self.fast)
+        df["ema_slow"] = ema(df["close"], self.slow)
+        return df
+
     def evaluate(self, df: pd.DataFrame) -> Signal:
         if len(df) < 2:
             return Signal.HOLD
 
-        ema_fast = ema(df["close"], self.fast)
-        ema_slow = ema(df["close"], self.slow)
+        ema_fast = df["ema_fast"] if "ema_fast" in df.columns else ema(df["close"], self.fast)
+        ema_slow = df["ema_slow"] if "ema_slow" in df.columns else ema(df["close"], self.slow)
 
         prev_diff = ema_fast.iloc[-2] - ema_slow.iloc[-2]
         curr_diff = ema_fast.iloc[-1] - ema_slow.iloc[-1]

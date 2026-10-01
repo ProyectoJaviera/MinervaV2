@@ -19,11 +19,20 @@ class DonchianBreakoutStrategy(BaseStrategy):
         self.period = period
         self.name = f"donchian_breakout_{period}"
 
+    def precompute(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        upper, lower = donchian_channel(df, self.period)
+        df["donchian_upper"], df["donchian_lower"] = upper, lower
+        return df
+
     def evaluate(self, df: pd.DataFrame) -> Signal:
         if len(df) < self.period + 2:
             return Signal.HOLD
 
-        upper, lower = donchian_channel(df, self.period)
+        if "donchian_upper" in df.columns:
+            upper, lower = df["donchian_upper"], df["donchian_lower"]
+        else:
+            upper, lower = donchian_channel(df, self.period)
         # Canal calculado con las velas PREVIAS (shift 1): evita comparar el
         # cierre contra un canal que ya incluye esa misma vela (trivialmente
         # siempre verdadero/falso).
@@ -41,7 +50,10 @@ class DonchianBreakoutStrategy(BaseStrategy):
         return Signal.HOLD
 
     def stop_price(self, df: pd.DataFrame, side: Signal, entry_price: float) -> float | None:
-        upper, lower = donchian_channel(df, self.period)
+        if "donchian_upper" in df.columns:
+            upper, lower = df["donchian_upper"], df["donchian_lower"]
+        else:
+            upper, lower = donchian_channel(df, self.period)
         if pd.isna(upper.iloc[-1]) or pd.isna(lower.iloc[-1]):
             return None
         midpoint = (upper.iloc[-1] + lower.iloc[-1]) / 2

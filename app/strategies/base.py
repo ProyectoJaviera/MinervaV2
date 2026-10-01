@@ -49,3 +49,19 @@ class BaseStrategy(ABC):
         """Distancia (en precio, siempre positiva) que mantiene el trailing
         stop respecto del mejor precio alcanzado. `None` -> sin trailing."""
         return None
+
+    def precompute(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Devuelve `df` con columnas de indicador agregadas, calculadas UNA
+        SOLA VEZ sobre toda la serie (correccion de rendimiento post-Fase-2:
+        sin esto, el motor de backtest recalculaba cada indicador desde
+        cero en cada vela sobre una ventana de hasta `MAX_LOOKBACK_BARS`,
+        miles de veces por celda -- lento aunque sea O(n), por el costo fijo
+        de cada llamada a pandas). Todos los indicadores usados aqui son
+        causales (nunca leen datos futuros), asi que precalcularlos sobre
+        la serie completa da EXACTAMENTE el mismo valor que recomputarlos en
+        cada vela sobre una ventana suficientemente larga -- no es una
+        aproximacion. Default: no agrega nada, `evaluate`/`stop_price`/etc.
+        recalculan sobre el sub-dataframe que reciban (compatibilidad con
+        llamadas directas en tests). Cada estrategia que lo necesite
+        sobreescribe esto Y lee la columna ya calculada si esta presente."""
+        return df
