@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import random
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -206,9 +207,78 @@ def margin_loss_distribution(trades: list[RawTrade]) -> dict[str, float]:
 class PortfolioSimResult:
     final_capital_usdt: float
     max_drawdown_pct: float
+    mtm_max_drawdown_pct: float
     concentration_pct: float | None
     trades_included: int
     trades_skipped_no_margin: int
+
+
+def _trade_slope_intercept(t: RawTrade) -> tuple[float, float]:
+    """Coeficientes (pendiente, intercepto) de la recta que interpola
+    linealmente la PnL de `t` entre 0 (en `entry_time`) y `pnl_net_usdt`
+    (en `exit_time`), evaluada sobre `datetime.timestamp()` (segundos).
+    Si la duracion es cero (o negativa, no deberia ocurrir), la "recta" es
+    la constante `pnl_net_usdt` -- no hay nada que interpolar."""
+    duration_s = (t.exit_time - t.entry_time).total_seconds()
+    if duration_s <= 0:
+        return 0.0, t.pnl_net_usdt
+    slope = t.pnl_net_usdt / duration_s
+    intercept = -slope * t.entry_time.timestamp()
+    return slope, intercept
+
+
+def _mark_to_market_drawdown(included: list[RawTrade], initial_capital: float) -> float:
+    """Aproximacion BARATA de drawdown incluyendo PnL FLOTANTE de
+    posiciones todavia abiertas (no solo lo ya realizado al cerrar, como
+    `max_drawdown_pct`). `RawTrade` solo guarda precio de entrada/salida,
+    no la trayectoria de precio intermedia -- asi que la PnL flotante de
+    cada posicion se interpola LINEALMENTE entre 0 (al abrir) y su PnL
+    neto final (al cerrar). Es una aproximacion (no reconstruye reversiones
+    intra-operacion que vuelven a un resultado similar), pero revela algo
+    que el metodo "solo al cierre" esconde por completo: varias posiciones
+    simultaneas perdiendo a la vez arrastran el equity hacia abajo DURANTE
+    su periodo de superposicion, no solo en el instante en que cada una
+    cierra. Barrido O(n log n): se mantienen la pendiente y el intercepto
+    ACUMULADOS de las posiciones activas y se evalua una sola vez por cada
+    instante de apertura/cierre distinto."""
+    if not included:
+        return 0.0
+
+    opens = sorted(included, key=lambda t: t.entry_time)
+    closes = sorted(included, key=lambda t: t.exit_time)
+    timestamps = sorted({t.entry_time for t in included} | {t.exit_time for t in included})
+
+    sum_slope = 0.0
+    sum_intercept = 0.0
+    realized_capital = initial_capital
+    peak = initial_capital
+    max_dd = 0.0
+    open_idx = 0
+    close_idx = 0
+    n = len(included)
+
+    for ts in timestamps:
+        while open_idx < n and opens[open_idx].entry_time == ts:
+            slope, intercept = _trade_slope_intercept(opens[open_idx])
+            sum_slope += slope
+            sum_intercept += intercept
+            open_idx += 1
+
+        floating = sum_slope * ts.timestamp() + sum_intercept
+        equity = max(0.0, realized_capital + floating)
+        peak = max(peak, equity)
+        if peak > 0:
+            max_dd = max(max_dd, (peak - equity) / peak * 100)
+
+        while close_idx < n and closes[close_idx].exit_time == ts:
+            t = closes[close_idx]
+            slope, intercept = _trade_slope_intercept(t)
+            sum_slope -= slope
+            sum_intercept -= intercept
+            realized_capital = max(0.0, realized_capital + t.pnl_net_usdt)
+            close_idx += 1
+
+    return max_dd
 
 
 def simulate_portfolio(
@@ -231,6 +301,12 @@ def simulate_portfolio(
     fuerza un tamano distinto -- simplemente no hay espacio). El capital
     nunca queda negativo (una perdida que superaria el capital restante
     se trunca en el cierre, caso extremo de "cuenta liquidada").
+
+    Desempate en `entry_time`: `sorted()` es estable, asi que dos
+    operaciones con el mismo `entry_time` se procesan en el orden en que
+    aparezcan en `trades` -- el llamador decide ese orden (ver
+    `simulate_portfolio_monte_carlo`, que lo baraja para no sesgar
+    sistematicamente la admision hacia el mismo simbolo).
 
     Limitacion documentada: los trades de entrada se generaron de forma
     INDEPENDIENTE por simbolo/timeframe (sin conocimiento de esta cuenta
@@ -274,6 +350,104 @@ def simulate_portfolio(
 
     return PortfolioSimResult(
         final_capital_usdt=capital, max_drawdown_pct=max_dd_pct,
+        mtm_max_drawdown_pct=_mark_to_market_drawdown(included, initial_capital),
         concentration_pct=concentration_pct(included), trades_included=len(included),
         trades_skipped_no_margin=skipped_no_margin,
+    )
+
+
+@dataclass
+class PortfolioSimSummary:
+    """Resultado de correr `simulate_portfolio` `runs` veces, barajando con
+    una semilla fija el orden de las operaciones empatadas en `entry_time`
+    cada vez (ver `simulate_portfolio_monte_carlo`) -- evita que el
+    desempate alfabetico por simbolo (orden de iteracion de
+    `run_full_backtest`) sesgue sistematicamente que operaciones se
+    admiten cuando hay mas señales que cupos simultaneos. Mediana y rango
+    p10-p90 sobre las `runs` corridas; sigue siendo INFORMATIVO, no
+    participa en los criterios de descarte."""
+    runs: int
+    final_capital_median: float
+    final_capital_p10: float
+    final_capital_p90: float
+    max_drawdown_median: float
+    max_drawdown_p10: float
+    max_drawdown_p90: float
+    mtm_max_drawdown_median: float
+    mtm_max_drawdown_p10: float
+    mtm_max_drawdown_p90: float
+    concentration_pct_median: float | None
+    trades_included_median: float
+    trades_skipped_no_margin_median: float
+
+
+def _percentile(values: list[float], p: float) -> float:
+    """Percentil `p` (0-100) por interpolacion lineal sobre `values`
+    ordenados -- mismo criterio que `pandas.Series.quantile` default."""
+    if not values:
+        return 0.0
+    s = sorted(values)
+    if len(s) == 1:
+        return s[0]
+    rank = (p / 100) * (len(s) - 1)
+    lo = int(rank)
+    hi = min(lo + 1, len(s) - 1)
+    frac = rank - lo
+    return s[lo] + (s[hi] - s[lo]) * frac
+
+
+def simulate_portfolio_monte_carlo(
+    trades: list[RawTrade],
+    initial_capital: float,
+    max_simultaneous_positions: int,
+    margin_per_trade: float,
+    runs: int = 200,
+    seed: int = 42,
+) -> PortfolioSimSummary:
+    """Corre `simulate_portfolio` `runs` veces; en cada corrida se baraja
+    una COPIA de `trades` con una semilla fija derivada de `seed` antes de
+    pasarla -- como `simulate_portfolio` ordena con `sorted()` (estable),
+    barajar la lista completa de antemano solo cambia el orden relativo de
+    las operaciones EMPATADAS en `entry_time` (las demas quedan igual,
+    `sorted()` las reordena correctamente por tiempo sin importar el orden
+    de entrada). Reporta mediana y rango p10-p90 de capital final y de
+    ambos drawdowns (realizado y mark-to-market) sobre las `runs`
+    corridas -- sigue siendo informativo, no participa en los criterios
+    de descarte congelados."""
+    rng = random.Random(seed)
+    final_capitals: list[float] = []
+    drawdowns: list[float] = []
+    mtm_drawdowns: list[float] = []
+    concentrations: list[float] = []
+    included_counts: list[float] = []
+    skipped_counts: list[float] = []
+
+    for _ in range(runs):
+        shuffled = list(trades)
+        rng.shuffle(shuffled)
+        result = simulate_portfolio(
+            shuffled, initial_capital, max_simultaneous_positions, margin_per_trade
+        )
+        final_capitals.append(result.final_capital_usdt)
+        drawdowns.append(result.max_drawdown_pct)
+        mtm_drawdowns.append(result.mtm_max_drawdown_pct)
+        included_counts.append(float(result.trades_included))
+        skipped_counts.append(float(result.trades_skipped_no_margin))
+        if result.concentration_pct is not None:
+            concentrations.append(result.concentration_pct)
+
+    return PortfolioSimSummary(
+        runs=runs,
+        final_capital_median=_percentile(final_capitals, 50),
+        final_capital_p10=_percentile(final_capitals, 10),
+        final_capital_p90=_percentile(final_capitals, 90),
+        max_drawdown_median=_percentile(drawdowns, 50),
+        max_drawdown_p10=_percentile(drawdowns, 10),
+        max_drawdown_p90=_percentile(drawdowns, 90),
+        mtm_max_drawdown_median=_percentile(mtm_drawdowns, 50),
+        mtm_max_drawdown_p10=_percentile(mtm_drawdowns, 10),
+        mtm_max_drawdown_p90=_percentile(mtm_drawdowns, 90),
+        concentration_pct_median=_percentile(concentrations, 50) if concentrations else None,
+        trades_included_median=_percentile(included_counts, 50),
+        trades_skipped_no_margin_median=_percentile(skipped_counts, 50),
     )

@@ -193,10 +193,13 @@ def _build_verdict(
     # Informativo, NO participa en los criterios de descarte de arriba:
     # drawdown/concentracion de una cuenta UNICA compartida (todo el
     # periodo IS+OOS), con tope de posiciones simultaneas y margen fijo,
-    # en vez del supuesto de capital/margen ilimitado por celda.
-    portfolio = m.simulate_portfolio(
+    # en vez del supuesto de capital/margen ilimitado por celda. Corrida
+    # `runs` veces barajando el desempate de entry_time (evita el sesgo
+    # alfabetico por simbolo); mediana y rango p10-p90 sobre las corridas.
+    portfolio = m.simulate_portfolio_monte_carlo(
         all_trades, settings.backtest_initial_capital,
         settings.max_simultaneous_positions, settings.default_margin_usdt,
+        runs=settings.backtest_portfolio_sim_runs,
     )
 
     return BacktestVerdict(
@@ -211,11 +214,19 @@ def _build_verdict(
         concentration_pct=concentration, pf_control_group=_finite_or_none(pf_control),
         evidence_insufficient=evidence_insufficient, discarded=discarded,
         discard_reasons_json=json.dumps(discard_reasons) if discard_reasons else None,
-        portfolio_max_drawdown_pct=portfolio.max_drawdown_pct,
-        portfolio_concentration_pct=portfolio.concentration_pct,
-        portfolio_final_capital_usdt=portfolio.final_capital_usdt,
-        portfolio_trades_included=portfolio.trades_included,
-        portfolio_trades_skipped_no_margin=portfolio.trades_skipped_no_margin,
+        portfolio_simulation_runs=portfolio.runs,
+        portfolio_final_capital_median=portfolio.final_capital_median,
+        portfolio_final_capital_p10=portfolio.final_capital_p10,
+        portfolio_final_capital_p90=portfolio.final_capital_p90,
+        portfolio_max_drawdown_median=portfolio.max_drawdown_median,
+        portfolio_max_drawdown_p10=portfolio.max_drawdown_p10,
+        portfolio_max_drawdown_p90=portfolio.max_drawdown_p90,
+        portfolio_mtm_max_drawdown_median=portfolio.mtm_max_drawdown_median,
+        portfolio_mtm_max_drawdown_p10=portfolio.mtm_max_drawdown_p10,
+        portfolio_mtm_max_drawdown_p90=portfolio.mtm_max_drawdown_p90,
+        portfolio_concentration_pct_median=portfolio.concentration_pct_median,
+        portfolio_trades_included_median=portfolio.trades_included_median,
+        portfolio_trades_skipped_no_margin_median=portfolio.trades_skipped_no_margin_median,
         run_at=datetime.now(UTC),
     )
 

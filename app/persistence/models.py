@@ -182,10 +182,24 @@ class BacktestVerdict(BaseModel):
     # operaciones de la estrategia (todos los simbolos/timeframes) sobre
     # una sola cuenta compartida con capital inicial, tope de posiciones
     # simultaneas y margen fijo por operacion, en vez del supuesto
-    # (irreal) de capital/margen ilimitado por celda.
-    portfolio_max_drawdown_pct: float | None = None
-    portfolio_concentration_pct: float | None = None
-    portfolio_final_capital_usdt: float | None = None
-    portfolio_trades_included: int = 0
-    portfolio_trades_skipped_no_margin: int = 0
+    # (irreal) de capital/margen ilimitado por celda. Corrida
+    # `portfolio_simulation_runs` veces barajando el orden de las
+    # operaciones empatadas en entry_time (evita el sesgo alfabetico por
+    # simbolo) -- se reporta mediana y rango p10-p90. Incluye ademas el
+    # drawdown mark-to-market (con PnL flotante interpolada de posiciones
+    # todavia abiertas), que puede ser mayor que el drawdown "solo al
+    # cierre".
+    portfolio_simulation_runs: int = 0
+    portfolio_final_capital_median: float | None = None
+    portfolio_final_capital_p10: float | None = None
+    portfolio_final_capital_p90: float | None = None
+    portfolio_max_drawdown_median: float | None = None
+    portfolio_max_drawdown_p10: float | None = None
+    portfolio_max_drawdown_p90: float | None = None
+    portfolio_mtm_max_drawdown_median: float | None = None
+    portfolio_mtm_max_drawdown_p10: float | None = None
+    portfolio_mtm_max_drawdown_p90: float | None = None
+    portfolio_concentration_pct_median: float | None = None
+    portfolio_trades_included_median: float | None = None
+    portfolio_trades_skipped_no_margin_median: float | None = None
     run_at: datetime

@@ -198,27 +198,52 @@ CREATE TABLE IF NOT EXISTS backtest_verdicts (
     evidence_insufficient INTEGER NOT NULL DEFAULT 0,
     discarded INTEGER NOT NULL DEFAULT 0,
     discard_reasons_json TEXT,
-    portfolio_max_drawdown_pct REAL,
-    portfolio_concentration_pct REAL,
-    portfolio_final_capital_usdt REAL,
-    portfolio_trades_included INTEGER NOT NULL DEFAULT 0,
-    portfolio_trades_skipped_no_margin INTEGER NOT NULL DEFAULT 0,
+    portfolio_simulation_runs INTEGER NOT NULL DEFAULT 0,
+    portfolio_final_capital_median REAL,
+    portfolio_final_capital_p10 REAL,
+    portfolio_final_capital_p90 REAL,
+    portfolio_max_drawdown_median REAL,
+    portfolio_max_drawdown_p10 REAL,
+    portfolio_max_drawdown_p90 REAL,
+    portfolio_mtm_max_drawdown_median REAL,
+    portfolio_mtm_max_drawdown_p10 REAL,
+    portfolio_mtm_max_drawdown_p90 REAL,
+    portfolio_concentration_pct_median REAL,
+    portfolio_trades_included_median REAL,
+    portfolio_trades_skipped_no_margin_median REAL,
     run_at TEXT NOT NULL
 );
 """
 
-# Columnas agregadas DESPUES de la primera version de `backtest_verdicts`
-# (simulacion de cartera, correccion post-revision). `CREATE TABLE IF NOT
-# EXISTS` no las agrega a una base de datos ya existente -- se migran aqui
-# con `ALTER TABLE` (idempotente: se saltan si ya existen) para que un
-# archivo `minerva.db` de una corrida anterior no quede con el esquema
-# viejo.
+# Columnas agregadas DESPUES de la primera version de `backtest_verdicts`.
+# `CREATE TABLE IF NOT EXISTS` no las agrega a una base de datos ya
+# existente -- se migran aqui con `ALTER TABLE` (idempotente: se saltan si
+# ya existen) para que un archivo `minerva.db` de una corrida anterior no
+# quede con el esquema viejo.
 _BACKTEST_VERDICTS_MIGRATED_COLUMNS = {
+    # V1: simulacion de cartera de una sola corrida (reemplazada por la
+    # version Monte Carlo de abajo; se deja la columna por compatibilidad
+    # con bases de datos existentes, sin usarla mas).
     "portfolio_max_drawdown_pct": "REAL",
     "portfolio_concentration_pct": "REAL",
     "portfolio_final_capital_usdt": "REAL",
     "portfolio_trades_included": "INTEGER NOT NULL DEFAULT 0",
     "portfolio_trades_skipped_no_margin": "INTEGER NOT NULL DEFAULT 0",
+    # V2: simulacion de cartera Monte Carlo (barajando el desempate de
+    # entry_time) con mediana/p10/p90 y drawdown mark-to-market.
+    "portfolio_simulation_runs": "INTEGER NOT NULL DEFAULT 0",
+    "portfolio_final_capital_median": "REAL",
+    "portfolio_final_capital_p10": "REAL",
+    "portfolio_final_capital_p90": "REAL",
+    "portfolio_max_drawdown_median": "REAL",
+    "portfolio_max_drawdown_p10": "REAL",
+    "portfolio_max_drawdown_p90": "REAL",
+    "portfolio_mtm_max_drawdown_median": "REAL",
+    "portfolio_mtm_max_drawdown_p10": "REAL",
+    "portfolio_mtm_max_drawdown_p90": "REAL",
+    "portfolio_concentration_pct_median": "REAL",
+    "portfolio_trades_included_median": "REAL",
+    "portfolio_trades_skipped_no_margin_median": "REAL",
 }
 
 

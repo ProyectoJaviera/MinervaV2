@@ -86,11 +86,23 @@ async def main() -> None:
             print(f"  % folds positivos: {v.pct_folds_positive}")
             print(f"  drawdown OOS: {v.max_drawdown_oos_pct}")
             print(
-                f"  [informativo] cartera unica: drawdown {v.portfolio_max_drawdown_pct}%, "
-                f"concentracion {v.portfolio_concentration_pct}, "
-                f"capital final {v.portfolio_final_capital_usdt} USDT, "
-                f"trades incluidos {v.portfolio_trades_included}, "
-                f"omitidos por falta de margen {v.portfolio_trades_skipped_no_margin}"
+                f"  [informativo, {v.portfolio_simulation_runs} corridas Monte Carlo] "
+                f"cartera unica -- capital final: mediana {v.portfolio_final_capital_median} "
+                f"USDT (p10-p90: {v.portfolio_final_capital_p10}-{v.portfolio_final_capital_p90})"
+            )
+            print(
+                f"    drawdown solo-al-cierre: mediana {v.portfolio_max_drawdown_median}% "
+                f"(p10-p90: {v.portfolio_max_drawdown_p10}-{v.portfolio_max_drawdown_p90})"
+            )
+            print(
+                f"    drawdown mark-to-market: mediana {v.portfolio_mtm_max_drawdown_median}% "
+                f"(p10-p90: {v.portfolio_mtm_max_drawdown_p10}-{v.portfolio_mtm_max_drawdown_p90})"
+            )
+            print(
+                f"    concentracion (mediana): {v.portfolio_concentration_pct_median}, "
+                f"trades incluidos (mediana): {v.portfolio_trades_included_median}, "
+                f"omitidos por falta de margen (mediana): "
+                f"{v.portfolio_trades_skipped_no_margin_median}"
             )
             print(f"  concentracion: {v.concentration_pct}")
             if v.discard_reasons_json:

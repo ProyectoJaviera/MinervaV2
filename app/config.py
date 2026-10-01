@@ -121,6 +121,10 @@ class Settings(BaseSettings):
     # no implementan stop_price/take_profit_price (None).
     backtest_fallback_sl_pct: float = Field(default=0.05, alias="BACKTEST_FALLBACK_SL_PCT")
     backtest_fallback_tp_pct: float = Field(default=0.10, alias="BACKTEST_FALLBACK_TP_PCT")
+    # Numero de corridas de `simulate_portfolio_monte_carlo` (barajando el
+    # desempate de entry_time con una semilla fija) por estrategia --
+    # informativo, no participa en los criterios de descarte.
+    backtest_portfolio_sim_runs: int = Field(default=200, alias="BACKTEST_PORTFOLIO_SIM_RUNS")
 
     # --- Claude / Anthropic (usado desde Fase 4) ---
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
