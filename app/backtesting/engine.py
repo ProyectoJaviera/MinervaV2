@@ -21,6 +21,7 @@ Reglas implementadas (ver el plan para la justificacion de cada una):
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -143,6 +144,9 @@ async def _fetch_funding_events(
             if oldest <= start_time_ms:
                 break
             cursor = oldest - 1
+            # Pausa deliberada entre paginas -- ver la misma nota en
+            # app/market/ohlcv_history.py::get_or_fetch.
+            await asyncio.sleep(0.3)
 
     return await funding_repo.get_funding(db, symbol, start_time_ms, end_time_ms)
 

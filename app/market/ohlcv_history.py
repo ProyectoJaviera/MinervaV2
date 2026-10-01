@@ -21,6 +21,8 @@ el cursor al `open_time` mas antiguo recibido menos 1, hasta cubrir
 
 from __future__ import annotations
 
+import asyncio
+
 from app.core.logging import get_logger
 from app.market.bitunix_rest import BitunixRestClient
 from app.persistence.database import Database
@@ -156,5 +158,13 @@ async def get_or_fetch(
             if oldest_time <= start_time:
                 break
             cursor = oldest_time - 1
+            # Pausa deliberada entre paginas (ademas del limite de 10 req/s
+            # del cliente): se verifico empiricamente en esta sesion que una
+            # rafaga sostenida de cientos de requests nuevas en ~90s hacia
+            # el mismo host provoca que algo en la red del entorno (no la
+            # API de Bitunix, que nunca respondio con 429/error) cuelgue la
+            # conexion sin mas aviso. Bajar el ritmo evito el problema de
+            # forma reproducible -- ver docs/PROGRESS.md.
+            await asyncio.sleep(0.3)
 
     return await ohlcv_repo.get_bars(db, symbol, interval, price_type, start_time, end_time)
