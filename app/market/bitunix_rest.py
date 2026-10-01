@@ -38,6 +38,7 @@ class BitunixRestClient:
         self.base_url = base_url.rstrip("/")
         self.rate_limiter = RateLimiter(rate_limit_per_sec)
         self.max_retries = max_retries
+        self.timeout = timeout
         self._client = build_async_http_client(timeout=timeout)
 
     async def aclose(self) -> None:
@@ -50,7 +51,17 @@ class BitunixRestClient:
         for attempt in range(self.max_retries + 1):
             await self.rate_limiter.acquire()
             try:
-                response = await self._client.get(url, params=params)
+                # Respaldo duro ademas del timeout de httpx: se observo en
+                # la corrida real de Fase 2 una conexion colgada que el
+                # timeout normal de httpx no corto (posible interaccion
+                # asyncio/httpx en Windows) -- wait_for garantiza que esta
+                # llamada nunca bloquea mas de `timeout * 2`.
+                response = await asyncio.wait_for(
+                    self._client.get(url, params=params), timeout=self.timeout * 2
+                )
+            except TimeoutError as exc:
+                last_exc = exc
+                logger.warning("Timeout duro en %s (intento %d): %s", path, attempt, exc)
             except httpx.TransportError as exc:
                 last_exc = exc
                 logger.warning("Error de red en %s (intento %d): %s", path, attempt, exc)
