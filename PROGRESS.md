@@ -27,7 +27,7 @@
 
 ## Fase 1 -- Estructura, datos de mercado Bitunix y vertical minima end-to-end
 
-**Estado: IMPLEMENTADA. Pendiente tu aprobacion para pasar a Fase 2.**
+**Estado: APROBADA.**
 
 Plan aprobado: `C:\Users\Renzo\.claude\plans\abundant-knitting-pearl.md`
 (resumen tambien en la conversacion). Instrucciones adicionales del usuario
@@ -203,12 +203,80 @@ adelante, Fase 4+).
   trading hacia adelante -- esto debe quedar explicito en el informe de
   criterios de paso a dinero real.
 
+## Fase 2 -- Universo dinamico y backtesting riguroso
+
+**Estado: CERRADA.** Ver `docs/FASE2_RESULTADOS.md` (veredicto final por
+estrategia y simulacion de cartera) y `docs/FASE2_RIESGO.md` (analisis de
+riesgo de ruina con bootstrap, informa los parametros de Fase 3).
+
+### Que se construyo
+
+- Universo dinamico (CoinGecko top-N menos stablecoins/wrapped/liquid-staking,
+  intersectado con perpetuos USDT de Bitunix) + grupo de control BTC/ETH.
+- Motor de backtest sin sesgo de anticipacion (`app/backtesting/engine.py`):
+  fill en el open de la vela siguiente a la senal, liquidacion por
+  MARK_PRICE, SL/TP por LAST_PRICE, orden de eventos adversos por cercania
+  de precio, ejecucion al OPEN si hay gap, funding real/aproximado
+  prorrateado por vela, indicadores precalculados una sola vez por serie.
+- 6 estrategias candidatas de familias distintas (`ema_cross_9_21`,
+  `trend_atr_stop_9_21_50`, `mean_reversion_rsi14_bb20`,
+  `donchian_breakout_20`, y 2 variantes experimentales de
+  `funding_contrarian`), validadas IS/OOS + walk-forward, con criterios de
+  descarte pre-registrados ANTES de la corrida completa
+  (`docs/FASE2_CRITERIOS.md`).
+- Simulacion de cartera Monte Carlo (200 corridas, capital/margen/tope de
+  posiciones reales, drawdown mark-to-market) como metrica informativa
+  adicional, nunca como criterio de descarte.
+- Descarga incremental/reanudable de velas y funding
+  (`scripts/download_history.py`) separada del calculo
+  (`scripts/run_backtest.py`, que ya no toca la red).
+
+### Resultado
+
+**Ninguna estrategia por reglas supera los criterios congelados** (PF OOS:
+`ema_cross` 1.12, `trend_atr_stop` 1.02, `mean_reversion` 0.74, `donchian`
+0.90 -- todas por debajo del minimo 1.2, o con otros criterios
+incumplidos). Esto se reporta honestamente, sin relajar ningun umbral --
+exactamente el resultado que el criterio de exito de esta fase ("el
+pipeline corre de punta a punta con resultados auditables, no que exista
+una estrategia ganadora") contemplaba como posible. Detalle completo,
+incluida la simulacion de cartera por estrategia, en
+`docs/FASE2_RIESGO.md` y `docs/FASE2_RESULTADOS.md`.
+
+### Problemas reales encontrados y corregidos durante esta fase
+
+Ver el detalle completo (con la justificacion de cada correccion) en las
+secciones "Correcciones..." de `docs/FASE2_CRITERIOS.md` y en
+`docs/FASE2_BLOQUEO_RED.md`. Resumen:
+
+- Un diagnostico inicial de "bloqueo de red" durante la primera corrida
+  completa resulto ser incorrecto -- la causa real era computo lento sin
+  logging de progreso, mas una redescarga completa innecesaria en cada
+  reintento. Corregido con descarga incremental + logging de progreso.
+- Bug real en `funding_contrarian_percentile_experimental`: nunca generaba
+  señales porque exigia mas historia de la que el motor le pasaba por
+  vela evaluada. Corregido precalculando los percentiles sobre la serie
+  completa.
+- Bug real en `simulate_portfolio`: el desempate de operaciones con el
+  mismo `entry_time` sesgaba sistematicamente la admision por orden
+  alfabetico de simbolo. Corregido con una simulacion Monte Carlo que
+  baraja el desempate.
+- Bug real en `backtest_repo.insert_verdict`: un INSERT escrito a mano se
+  desincronizo (29 valores para 30 columnas) al agregar la simulacion de
+  cartera. Corregido generando columnas y valores desde el modelo
+  (`BacktestVerdict.model_dump()`) en vez de listas paralelas a mano.
+- Bug real de piso de cache ausente (`MissingHistoricalDataError` evitable
+  en BNBUSDT 1h) pese a que los datos cacheados si cubrian lo pedido.
+  Corregido con una marca afirmativa de "serie completa", mas una
+  verificacion previa de TODAS las series antes de calcular nada.
+- Off-by-one en el chequeo de huecos de cache (comparaba contra "ahora" en
+  vez de contra la ultima vela realmente descargada), que generaba un
+  falso positivo en 46 de 60 series. Corregido.
+
 ### Pendientes explicitos para fases siguientes
 
-- Fase 2: universo dinamico (CoinGecko + filtro Bitunix), 2-4 estrategias
-  candidatas adicionales, motor de backtesting (winrate, profit factor,
-  drawdown, con fees y funding incluidos), validar profundidad de funding
-  historico.
+- Fase 3: ver `docs/FASE3_PLAN.md` (plan propuesto, pendiente de tu
+  aprobacion).
 - Fase 3: simulador realista completo (SL/TP escalonado, trailing,
   liquidacion por tiers de `position_tiers`, funding periodico, slippage,
   reconciliacion tras downtime), motor de riesgo completo (circuit breaker
