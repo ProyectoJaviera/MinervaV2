@@ -26,6 +26,19 @@ logger = get_logger(__name__)
 
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
+# Pausa fija tras cada solicitud exitosa, y pausa larga de "enfriamiento"
+# cada N solicitudes -- se verifico empiricamente en varias corridas reales
+# del backtest de Fase 2 que este entorno (sandbox) cuelga una conexion sin
+# aviso tras una rafaga sostenida hacia el mismo host, de forma reproducible
+# alrededor de cada ~140 solicitudes incluso con ~1.4s de espaciado entre
+# cada una -- un patron mas consistente con un contador de solicitudes que
+# con una ventana de tiempo fija. Centralizado aqui (unico punto por el que
+# pasan TODAS las llamadas a Bitunix) en vez de duplicado en cada llamador
+# (ver docs/PROGRESS.md para el detalle de la investigacion).
+_PACING_DELAY_SECONDS = 0.5
+_COOLDOWN_EVERY_REQUESTS = 40
+_COOLDOWN_SECONDS = 15.0
+
 
 class BitunixRestClient:
     def __init__(
@@ -40,6 +53,7 @@ class BitunixRestClient:
         self.max_retries = max_retries
         self.timeout = timeout
         self._client = build_async_http_client(timeout=timeout)
+        self._request_count = 0
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -47,6 +61,15 @@ class BitunixRestClient:
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         url = f"{self.base_url}{path}"
         params = {k: v for k, v in (params or {}).items() if v is not None}
+
+        self._request_count += 1
+        if self._request_count > 1 and (self._request_count - 1) % _COOLDOWN_EVERY_REQUESTS == 0:
+            logger.info(
+                "Pausa de enfriamiento de %.0fs tras %d solicitudes a %s",
+                _COOLDOWN_SECONDS, self._request_count - 1, self.base_url,
+            )
+            await asyncio.sleep(_COOLDOWN_SECONDS)
+
         last_exc: Exception | None = None
         for attempt in range(self.max_retries + 1):
             await self.rate_limiter.acquire()
@@ -82,6 +105,7 @@ class BitunixRestClient:
                         raise BitunixApiError(
                             f"{path} respondio code={payload.get('code')} msg={payload.get('msg')}"
                         )
+                    await asyncio.sleep(_PACING_DELAY_SECONDS)
                     return payload.get("data") if isinstance(payload, dict) else payload
                 if response.status_code not in RETRYABLE_STATUS:
                     response.raise_for_status()
