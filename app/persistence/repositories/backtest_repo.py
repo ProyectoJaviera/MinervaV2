@@ -15,6 +15,19 @@ from app.persistence.models import (
 )
 
 
+async def clear_results(db: Database) -> None:
+    """Borra resultados de corridas anteriores (trades, skips, runs,
+    veredictos) antes de empezar una corrida completa nueva -- hace que
+    reintentar tras una interrupcion (p.ej. un colgado de red, ver
+    docs/PROGRESS.md) sea seguro e idempotente, en vez de acumular filas
+    duplicadas. NO borra `asset_universe`, `contract_specs_cache`,
+    `ohlcv_cache` ni `funding_cache`: esos son cachés legítimamente
+    reutilizables entre corridas."""
+    tables = ("backtest_trades", "backtest_skipped_entries", "backtest_runs", "backtest_verdicts")
+    for table in tables:
+        await db.execute(f"DELETE FROM {table}")  # nombres de tabla fijos, no son input de usuario
+
+
 async def insert_trade(db: Database, t: BacktestTrade) -> None:
     await db.execute(
         """

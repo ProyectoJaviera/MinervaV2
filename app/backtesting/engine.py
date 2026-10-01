@@ -36,10 +36,20 @@ from app.market.bitunix_rest import BitunixRestClient
 from app.market.ohlcv_history import drop_incomplete_last_bar, get_or_fetch, interval_to_ms
 from app.persistence.database import Database
 from app.persistence.models import Side
-from app.persistence.repositories import specs_repo
+from app.persistence.repositories import funding_repo, ohlcv_repo, specs_repo
 from app.strategies.base import BaseStrategy, Signal
 
 logger = get_logger(__name__)
+
+# Ventana maxima de velas que se le pasa a una estrategia para calcular
+# indicadores/senales. Sin este tope, pasarle `df.iloc[:i]` (todo el
+# historial visto hasta ahora) hace que cada vela recalcule EMA/RSI/ATR
+# desde el inicio del dataset -> O(n^2) total (medido: 46s para un solo
+# simbolo/timeframe/estrategia en ~9760 velas de 4h; habria escalado a
+# horas con 1h). Los indicadores usados (EMA/RSI/ATR/Bollinger/Donchian,
+# periodo maximo 50) convergen numericamente dentro de unas pocas veces su
+# periodo; 300 velas da un margen amplio sin cambiar el resultado.
+MAX_LOOKBACK_BARS = 300
 
 
 @dataclass
@@ -99,24 +109,42 @@ class _Position:
     funding_is_approximated: bool = False
 
 
+_FUNDING_FRESHNESS_TOLERANCE_MS = 2 * 24 * 60 * 60 * 1000  # 2 dias
+
+
 async def _fetch_funding_events(
-    client: BitunixRestClient, symbol: str, start_time_ms: int, end_time_ms: int
+    client: BitunixRestClient, db: Database, symbol: str, start_time_ms: int, end_time_ms: int
 ) -> list[tuple[int, float]]:
     """Pagina hacia atras `get_funding_rate_history` (misma logica que
-    `ohlcv_history`, verificada empiricamente -- ver docs/FASE2_PLAN.md)."""
-    events: list[tuple[int, float]] = []
-    cursor = end_time_ms
-    while cursor >= start_time_ms:
-        rows = await client.get_funding_rate_history(symbol, end_time=cursor, limit=200)
-        if not rows:
-            break
-        for r in rows:
-            events.append((int(r["fundingTime"]), float(r["fundingRate"])))
-        oldest = min(int(r["fundingTime"]) for r in rows)
-        if oldest <= start_time_ms or len(rows) < 200:
-            break
-        cursor = oldest - 1
-    return events
+    `ohlcv_history`, verificada empiricamente -- ver docs/FASE2_PLAN.md),
+    cacheada en `funding_cache` (mismo motivo que `ohlcv_cache`: evitar
+    re-descargar en cada reintento/corrida)."""
+    covered = await funding_repo.get_covered_funding_times(db, symbol)
+    floor = await ohlcv_repo.get_floor(db, symbol, "__funding__", "__funding__")
+
+    already_covered = False
+    if covered:
+        min_ok = min(covered) <= start_time_ms or (floor is not None and floor <= min(covered))
+        already_covered = min_ok and max(covered) >= end_time_ms - _FUNDING_FRESHNESS_TOLERANCE_MS
+
+    if not already_covered:
+        cursor = end_time_ms
+        while cursor >= start_time_ms:
+            rows = await client.get_funding_rate_history(symbol, end_time=cursor, limit=200)
+            if not rows:
+                await ohlcv_repo.set_floor(db, symbol, "__funding__", "__funding__", cursor)
+                break
+            batch = [(int(r["fundingTime"]), float(r["fundingRate"])) for r in rows]
+            await funding_repo.upsert_funding(db, symbol, batch)
+            oldest = min(t for t, _ in batch)
+            if len(rows) < 200:
+                await ohlcv_repo.set_floor(db, symbol, "__funding__", "__funding__", oldest)
+                break
+            if oldest <= start_time_ms:
+                break
+            cursor = oldest - 1
+
+    return await funding_repo.get_funding(db, symbol, start_time_ms, end_time_ms)
 
 
 def _fallback_sl_tp(side: Signal, entry_price: float, settings: Settings) -> tuple[float, float]:
@@ -171,7 +199,9 @@ async def run_backtest(
     mark_highs = [p[1].high for p in aligned]
     mark_lows = [p[1].low for p in aligned]
 
-    funding_events = await _fetch_funding_events(rest_client, symbol, start_time_ms, end_time_ms)
+    funding_events = await _fetch_funding_events(
+        rest_client, db, symbol, start_time_ms, end_time_ms
+    )
     funding_rates, funding_approx = build_funding_series(open_times, funding_events)
 
     spec = await specs_repo.get_spec(db, symbol)
@@ -282,7 +312,7 @@ async def run_backtest(
             if pending_signal is not None and i > 0:
                 side = pending_signal
                 fill_price = opens[i]
-                sub_df = df.iloc[:i]
+                sub_df = df.iloc[max(0, i - MAX_LOOKBACK_BARS) : i]
                 fill = compute_open_fill(margin_usdt, leverage, fill_price, taker_fee_pct)
 
                 sl = strategy.stop_price(sub_df, side, fill_price)
@@ -318,7 +348,7 @@ async def run_backtest(
                 pending_signal = None
 
         if position is None:
-            sub_df_signal = df.iloc[: i + 1]
+            sub_df_signal = df.iloc[max(0, i + 1 - MAX_LOOKBACK_BARS) : i + 1]
             signal = strategy.evaluate(sub_df_signal)
             pending_signal = signal if signal != Signal.HOLD else None
         else:

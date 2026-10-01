@@ -251,6 +251,10 @@ async def run_full_backtest(
     control_symbols = set(settings.backtest_control_symbols_list)
     all_symbols = sorted(set(symbols) | control_symbols)
 
+    # Idempotente ante reintentos (ver backtest_repo.clear_results): no deja
+    # filas duplicadas de una corrida anterior interrumpida.
+    await backtest_repo.clear_results(db)
+
     results: list[StrategyResult] = []
 
     for strategy_name, strategy in STRATEGIES.items():

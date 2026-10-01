@@ -72,6 +72,19 @@ CREATE TABLE IF NOT EXISTS ohlcv_floor (
     PRIMARY KEY (symbol, interval, price_type)
 );
 
+-- Cache de funding_rate_history (igual proposito que ohlcv_cache): evita
+-- re-descargar en cada corrida/reintento del backtest. `floor_time` (en
+-- `ohlcv_floor` con interval='__funding__', price_type='__funding__' para
+-- reusar la misma tabla de piso) marca cuando se alcanzo el principio real
+-- del historial de funding de Bitunix (mas corto que el de velas, ver
+-- docs/FASE2_PLAN.md).
+CREATE TABLE IF NOT EXISTS funding_cache (
+    symbol TEXT NOT NULL,
+    funding_time INTEGER NOT NULL,
+    funding_rate REAL NOT NULL,
+    PRIMARY KEY (symbol, funding_time)
+);
+
 CREATE TABLE IF NOT EXISTS contract_specs_cache (
     symbol TEXT PRIMARY KEY,
     min_trade_volume REAL,
