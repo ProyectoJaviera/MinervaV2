@@ -54,11 +54,16 @@ def interval_to_ms(interval: str) -> int | None:
     return _INTERVAL_MS.get(interval)
 
 
-def _bar_from_raw(symbol: str, interval: str, raw: dict) -> OHLCVBar:
+def _bar_from_raw(symbol: str, interval: str, price_type: str, raw: dict) -> OHLCVBar:
+    """`price_type` se toma del parametro SOLICITADO a la API, no del campo
+    `type` de la respuesta -- verificado empiricamente que la API no
+    siempre lo incluye (p.ej. ausente en varias respuestas de MARK_PRICE),
+    lo que etiquetaba mal las velas y las mezclaba con LAST_PRICE en cache
+    (bug encontrado durante la corrida real de Fase 2)."""
     return OHLCVBar(
         symbol=symbol,
         interval=interval,
-        price_type=raw.get("type", "LAST_PRICE"),
+        price_type=price_type,
         open_time=int(raw["time"]),
         open=float(raw["open"]),
         high=float(raw["high"]),
@@ -99,8 +104,21 @@ async def get_or_fetch(
     already_covered = False
     if step_ms:
         covered = await ohlcv_repo.get_covered_open_times(db, symbol, interval, price_type)
-        expected = set(range(start_time, end_time + 1, step_ms))
-        already_covered = not (expected - covered)
+        floor = await ohlcv_repo.get_floor(db, symbol, interval, price_type)
+        # No se compara contra una grilla aritmetica exacta desde
+        # `start_time` -- un `start_time`/`end_time` arbitrario (p.ej. un
+        # corte IS/OOS que no cae justo en un borde de vela real) nunca
+        # coincidiria con los `open_time` reales de Bitunix, forzando una
+        # redescarga completa innecesaria cada vez (encontrado durante la
+        # corrida real de Fase 2). En cambio, se verifica que el rango ya
+        # cacheado "abarque" el pedido: hay una vela en o antes de
+        # `start_time` (o, si `start_time` es anterior al piso real del
+        # historial ya detectado, no hace falta ninguna mas antigua) y una
+        # vela en o despues de `end_time - step_ms` (la mas reciente que
+        # podria caber en el rango).
+        if covered:
+            min_ok = min(covered) <= start_time or (floor is not None and floor <= min(covered))
+            already_covered = min_ok and max(covered) >= end_time - step_ms
 
     if not already_covered:
         cursor = end_time
@@ -117,11 +135,21 @@ async def get_or_fetch(
                     "%s %s: historial agotado en Bitunix antes de alcanzar start_time=%d",
                     symbol, interval, start_time,
                 )
+                # El piso real quedo en el `cursor` actual (no hay nada en o
+                # antes de este punto): se recuerda para no reintentar.
+                if step_ms:
+                    await ohlcv_repo.set_floor(db, symbol, interval, price_type, cursor)
                 break
-            bars = [_bar_from_raw(symbol, interval, r) for r in raw_bars]
+            bars = [_bar_from_raw(symbol, interval, price_type, r) for r in raw_bars]
             await ohlcv_repo.upsert_bars(db, bars)
             oldest_time = min(b.open_time for b in bars)
-            if oldest_time <= start_time or len(raw_bars) < PAGE_LIMIT:
+            if len(raw_bars) < PAGE_LIMIT:
+                # Pagina parcial: la API ya no tiene mas historial antes de
+                # `oldest_time` -- ese es el piso real, se recuerda.
+                if step_ms:
+                    await ohlcv_repo.set_floor(db, symbol, interval, price_type, oldest_time)
+                break
+            if oldest_time <= start_time:
                 break
             cursor = oldest_time - 1
 

@@ -9,23 +9,27 @@ from app.persistence.models import AssetUniverseEntry
 
 
 async def insert_snapshot(db: Database, entries: list[AssetUniverseEntry]) -> None:
-    for e in entries:
-        await db.execute(
-            """
-            INSERT INTO asset_universe (
-                refreshed_at, coingecko_id, symbol, coingecko_rank, market_cap_usd,
-                excluded_category, excluded_manual, has_bitunix_perp, price_sanity_ok,
-                included
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                e.refreshed_at.isoformat(), e.coingecko_id, e.symbol, e.coingecko_rank,
-                e.market_cap_usd, e.excluded_category, int(e.excluded_manual),
-                int(e.has_bitunix_perp),
-                None if e.price_sanity_ok is None else int(e.price_sanity_ok),
-                int(e.included),
-            ),
+    """Un solo commit para todo el snapshot (ver Database.execute_many)."""
+    params = [
+        (
+            e.refreshed_at.isoformat(), e.coingecko_id, e.symbol, e.coingecko_rank,
+            e.market_cap_usd, e.excluded_category, int(e.excluded_manual),
+            int(e.has_bitunix_perp),
+            None if e.price_sanity_ok is None else int(e.price_sanity_ok),
+            int(e.included),
         )
+        for e in entries
+    ]
+    await db.execute_many(
+        """
+        INSERT INTO asset_universe (
+            refreshed_at, coingecko_id, symbol, coingecko_rank, market_cap_usd,
+            excluded_category, excluded_manual, has_bitunix_perp, price_sanity_ok,
+            included
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        params,
+    )
 
 
 def _row_to_entry(row) -> AssetUniverseEntry:

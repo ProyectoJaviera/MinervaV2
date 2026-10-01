@@ -38,8 +38,30 @@ async def insert_trade(db: Database, t: BacktestTrade) -> None:
 
 
 async def insert_trades(db: Database, trades: list[BacktestTrade]) -> None:
-    for t in trades:
-        await insert_trade(db, t)
+    """Un solo commit para todo el lote (ver Database.execute_many)."""
+    params = [
+        (
+            t.strategy, t.symbol, t.timeframe, t.segment, t.side.value,
+            t.entry_time.isoformat(), t.exit_time.isoformat(), t.entry_price,
+            t.exit_price, t.qty, t.margin_usdt, t.leverage, t.fee_entry_usdt,
+            t.fee_exit_usdt, t.slippage_cost_usdt, t.funding_paid_usdt,
+            int(t.funding_is_approximated), t.pnl_gross_usdt, t.pnl_net_usdt,
+            t.close_reason, t.sl_margin_loss_pct,
+        )
+        for t in trades
+    ]
+    await db.execute_many(
+        """
+        INSERT INTO backtest_trades (
+            strategy, symbol, timeframe, segment, side, entry_time, exit_time,
+            entry_price, exit_price, qty, margin_usdt, leverage, fee_entry_usdt,
+            fee_exit_usdt, slippage_cost_usdt, funding_paid_usdt,
+            funding_is_approximated, pnl_gross_usdt, pnl_net_usdt, close_reason,
+            sl_margin_loss_pct
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        params,
+    )
 
 
 async def insert_skipped_entry(db: Database, s: BacktestSkippedEntry) -> None:

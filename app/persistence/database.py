@@ -61,6 +61,17 @@ CREATE TABLE IF NOT EXISTS ohlcv_cache (
     PRIMARY KEY (symbol, interval, price_type, open_time)
 );
 
+-- Recuerda que ya se alcanzo el piso real del historial de Bitunix para
+-- un (symbol, interval, price_type) -- evita redescargar todo cada vez
+-- que se pide un start_time anterior al dato mas antiguo disponible.
+CREATE TABLE IF NOT EXISTS ohlcv_floor (
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    price_type TEXT NOT NULL,
+    floor_open_time INTEGER NOT NULL,
+    PRIMARY KEY (symbol, interval, price_type)
+);
+
 CREATE TABLE IF NOT EXISTS contract_specs_cache (
     symbol TEXT PRIMARY KEY,
     min_trade_volume REAL,
@@ -204,6 +215,10 @@ class Database:
         self._conn = await aiosqlite.connect(self.path)
         self._conn.row_factory = aiosqlite.Row
         await self._conn.execute("PRAGMA journal_mode=WAL;")
+        # Seguro combinado con WAL (solo arriesga las ultimas transacciones
+        # en un corte de energia, no la integridad de la BD) y reduce mucho
+        # el costo de fsync en escrituras por lote -- ver Database.execute_many.
+        await self._conn.execute("PRAGMA synchronous=NORMAL;")
         await self.init_schema()
 
     async def close(self) -> None:
@@ -221,6 +236,18 @@ class Database:
             cursor = await self.conn.execute(query, params)
             await self.conn.commit()
             return cursor
+
+    async def execute_many(self, query: str, params_list: list[tuple]) -> None:
+        """Ejecuta la misma consulta para cada tupla de `params_list` en UNA
+        sola transaccion (un solo commit), en vez de uno por fila -- evita
+        el costo de fsync por fila al insertar en bloque (p.ej. una pagina
+        de 200 velas); se detecto como cuello de botella real durante la
+        corrida del backtest de Fase 2."""
+        if not params_list:
+            return
+        async with self._write_lock:
+            await self.conn.executemany(query, params_list)
+            await self.conn.commit()
 
     async def fetch_one(self, query: str, params: tuple = ()) -> aiosqlite.Row | None:
         cursor = await self.conn.execute(query, params)
