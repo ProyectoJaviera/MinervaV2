@@ -248,7 +248,7 @@ async def run_backtest(
     bar_duration_hours = step_ms / 3_600_000
 
     df = pd.DataFrame({"open": opens, "high": highs, "low": lows, "close": closes,
-                        "funding_rate": funding_rates})
+                        "funding_rate": funding_rates, "funding_is_approximated": funding_approx})
     df = strategy.precompute(df)
 
     margin_usdt = settings.default_margin_usdt
