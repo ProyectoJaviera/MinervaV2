@@ -1,6 +1,21 @@
 # Fase 2 - Bloqueo de red reproducible durante la corrida completa del backtest
 
-## Resumen
+> **CORRECCION (mismo dia, 2026-10-01)**: el diagnostico de "bloqueo de
+> red" de este documento resulto ser **incorrecto**. El usuario revisó el
+> repositorio y los logs directamente y lo descarto: todas las respuestas
+> de Bitunix fueron `200 OK`, sin una sola excepcion. Las causas reales
+> eran (a) computo lento del motor sin ningun logging de progreso
+> (facilmente confundido con un "colgado"), y (b) un bug real en
+> `ohlcv_history.get_or_fetch` que re-descargaba por red rangos enteros ya
+> cacheados en cada reintento. Ambas se corrigieron -- ver
+> `docs/FASE2_CRITERIOS.md`, seccion "Correcciones de motor previas a la
+> corrida completa", para el detalle de las correcciones reales aplicadas.
+> Se deja el resto de este documento sin alterar como registro historico
+> de la investigacion (incluida la enseñanza de no declarar una causa
+> externa "confirmada" sin haberla descartado primero contra el propio
+> codigo).
+
+## Resumen (diagnostico original -- ver correccion arriba)
 
 Al intentar ejecutar el backtest de alcance completo (10 simbolos x 5
 estrategias x ~4.5 anos de historia, `scripts/run_backtest.py`), el proceso
