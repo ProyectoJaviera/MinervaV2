@@ -177,4 +177,15 @@ class BacktestVerdict(BaseModel):
     evidence_insufficient: bool = False
     discarded: bool = False
     discard_reasons_json: str | None = None
+    # Simulacion de cartera UNICA (informativa, no participa en los
+    # criterios de descarte -- ver docs/FASE2_CRITERIOS.md): todas las
+    # operaciones de la estrategia (todos los simbolos/timeframes) sobre
+    # una sola cuenta compartida con capital inicial, tope de posiciones
+    # simultaneas y margen fijo por operacion, en vez del supuesto
+    # (irreal) de capital/margen ilimitado por celda.
+    portfolio_max_drawdown_pct: float | None = None
+    portfolio_concentration_pct: float | None = None
+    portfolio_final_capital_usdt: float | None = None
+    portfolio_trades_included: int = 0
+    portfolio_trades_skipped_no_margin: int = 0
     run_at: datetime

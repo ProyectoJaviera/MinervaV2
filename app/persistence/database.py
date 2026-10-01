@@ -198,9 +198,28 @@ CREATE TABLE IF NOT EXISTS backtest_verdicts (
     evidence_insufficient INTEGER NOT NULL DEFAULT 0,
     discarded INTEGER NOT NULL DEFAULT 0,
     discard_reasons_json TEXT,
+    portfolio_max_drawdown_pct REAL,
+    portfolio_concentration_pct REAL,
+    portfolio_final_capital_usdt REAL,
+    portfolio_trades_included INTEGER NOT NULL DEFAULT 0,
+    portfolio_trades_skipped_no_margin INTEGER NOT NULL DEFAULT 0,
     run_at TEXT NOT NULL
 );
 """
+
+# Columnas agregadas DESPUES de la primera version de `backtest_verdicts`
+# (simulacion de cartera, correccion post-revision). `CREATE TABLE IF NOT
+# EXISTS` no las agrega a una base de datos ya existente -- se migran aqui
+# con `ALTER TABLE` (idempotente: se saltan si ya existen) para que un
+# archivo `minerva.db` de una corrida anterior no quede con el esquema
+# viejo.
+_BACKTEST_VERDICTS_MIGRATED_COLUMNS = {
+    "portfolio_max_drawdown_pct": "REAL",
+    "portfolio_concentration_pct": "REAL",
+    "portfolio_final_capital_usdt": "REAL",
+    "portfolio_trades_included": "INTEGER NOT NULL DEFAULT 0",
+    "portfolio_trades_skipped_no_margin": "INTEGER NOT NULL DEFAULT 0",
+}
 
 
 class Database:
@@ -243,6 +262,18 @@ class Database:
         async with self._write_lock:
             await self.conn.executescript(SCHEMA)
             await self.conn.commit()
+            await self._migrate_backtest_verdicts_columns()
+
+    async def _migrate_backtest_verdicts_columns(self) -> None:
+        cursor = await self.conn.execute("PRAGMA table_info(backtest_verdicts)")
+        existing = {row[1] for row in await cursor.fetchall()}
+        await cursor.close()
+        for name, sql_type in _BACKTEST_VERDICTS_MIGRATED_COLUMNS.items():
+            if name not in existing:
+                await self.conn.execute(
+                    f"ALTER TABLE backtest_verdicts ADD COLUMN {name} {sql_type}"
+                )
+        await self.conn.commit()
 
     async def execute(self, query: str, params: tuple = ()) -> aiosqlite.Cursor:
         async with self._write_lock:

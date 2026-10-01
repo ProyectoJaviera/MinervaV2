@@ -117,15 +117,20 @@ async def insert_verdict(db: Database, v: BacktestVerdict) -> None:
             pf_oos_aggregate, pct_symbols_pf_gt1, pct_folds_positive, pf_stressed,
             pf_real_funding_only, pf_full_period_approx, max_drawdown_oos_pct,
             concentration_pct, pf_control_group, evidence_insufficient, discarded,
-            discard_reasons_json, run_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            discard_reasons_json, portfolio_max_drawdown_pct, portfolio_concentration_pct,
+            portfolio_final_capital_usdt, portfolio_trades_included,
+            portfolio_trades_skipped_no_margin, run_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             v.strategy, int(v.is_experimental), v.combos_tested, v.total_trades_all_segments,
             v.pf_oos_aggregate, v.pct_symbols_pf_gt1, v.pct_folds_positive, v.pf_stressed,
             v.pf_real_funding_only, v.pf_full_period_approx, v.max_drawdown_oos_pct,
             v.concentration_pct, v.pf_control_group, int(v.evidence_insufficient),
-            int(v.discarded), v.discard_reasons_json, v.run_at.isoformat(),
+            int(v.discarded), v.discard_reasons_json, v.portfolio_max_drawdown_pct,
+            v.portfolio_concentration_pct, v.portfolio_final_capital_usdt,
+            v.portfolio_trades_included, v.portfolio_trades_skipped_no_margin,
+            v.run_at.isoformat(),
         ),
     )
 

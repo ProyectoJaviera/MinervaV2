@@ -190,6 +190,15 @@ def _build_verdict(
     )
     discarded = bool(discard_reasons) and not is_experimental and not evidence_insufficient
 
+    # Informativo, NO participa en los criterios de descarte de arriba:
+    # drawdown/concentracion de una cuenta UNICA compartida (todo el
+    # periodo IS+OOS), con tope de posiciones simultaneas y margen fijo,
+    # en vez del supuesto de capital/margen ilimitado por celda.
+    portfolio = m.simulate_portfolio(
+        all_trades, settings.backtest_initial_capital,
+        settings.max_simultaneous_positions, settings.default_margin_usdt,
+    )
+
     return BacktestVerdict(
         strategy=strategy_name, is_experimental=is_experimental, combos_tested=combos_tested,
         total_trades_all_segments=len(all_trades),
@@ -202,6 +211,11 @@ def _build_verdict(
         concentration_pct=concentration, pf_control_group=_finite_or_none(pf_control),
         evidence_insufficient=evidence_insufficient, discarded=discarded,
         discard_reasons_json=json.dumps(discard_reasons) if discard_reasons else None,
+        portfolio_max_drawdown_pct=portfolio.max_drawdown_pct,
+        portfolio_concentration_pct=portfolio.concentration_pct,
+        portfolio_final_capital_usdt=portfolio.final_capital_usdt,
+        portfolio_trades_included=portfolio.trades_included,
+        portfolio_trades_skipped_no_margin=portfolio.trades_skipped_no_margin,
         run_at=datetime.now(UTC),
     )
 

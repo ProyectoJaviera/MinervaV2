@@ -200,3 +200,80 @@ def margin_loss_distribution(trades: list[RawTrade]) -> dict[str, float]:
     return {
         "count": n, "mean": sum(values) / n, "median": median, "max": values[-1],
     }
+
+
+@dataclass
+class PortfolioSimResult:
+    final_capital_usdt: float
+    max_drawdown_pct: float
+    concentration_pct: float | None
+    trades_included: int
+    trades_skipped_no_margin: int
+
+
+def simulate_portfolio(
+    trades: list[RawTrade],
+    initial_capital: float,
+    max_simultaneous_positions: int,
+    margin_per_trade: float,
+) -> PortfolioSimResult:
+    """Simula UNA sola cuenta compartida entre todos los simbolos/timeframes
+    de una estrategia (en vez del supuesto, irreal, de capital y margen
+    ilimitados por celda que usa `run_backtest`) -- metrica INFORMATIVA
+    agregada posterior, no participa en los criterios de descarte
+    congelados (docs/FASE2_CRITERIOS.md).
+
+    Reglas: capital inicial `initial_capital`; cada operacion usa un margen
+    fijo (`t.margin_usdt`, igual para todas en la practica); como maximo
+    `max_simultaneous_positions` operaciones abiertas a la vez; una
+    operacion que no tenga margen disponible o exceda el tope de
+    posiciones simultaneas en su `entry_time` se OMITE de la cuenta (no se
+    fuerza un tamano distinto -- simplemente no hay espacio). El capital
+    nunca queda negativo (una perdida que superaria el capital restante
+    se trunca en el cierre, caso extremo de "cuenta liquidada").
+
+    Limitacion documentada: los trades de entrada se generaron de forma
+    INDEPENDIENTE por simbolo/timeframe (sin conocimiento de esta cuenta
+    compartida) -- omitir una operacion aqui no cambia las demas (no hay
+    retroalimentacion). Es una aproximacion razonable para una cifra
+    informativa, no una re-simulacion completa consciente de cartera."""
+    ordered = sorted(trades, key=lambda t: t.entry_time)
+    open_positions: list[RawTrade] = []
+    capital = initial_capital
+    peak = initial_capital
+    max_dd_pct = 0.0
+    included: list[RawTrade] = []
+    skipped_no_margin = 0
+
+    def close_due(before_time: datetime) -> None:
+        nonlocal capital, peak, max_dd_pct
+        due = sorted((p for p in open_positions if p.exit_time <= before_time),
+                     key=lambda t: t.exit_time)
+        for p in due:
+            capital = max(0.0, capital + p.pnl_net_usdt)
+            peak = max(peak, capital)
+            if peak > 0:
+                max_dd_pct = max(max_dd_pct, (peak - capital) / peak * 100)
+            open_positions.remove(p)
+
+    for t in ordered:
+        close_due(t.entry_time)
+        margin_committed = sum(p.margin_usdt for p in open_positions)
+        available = capital - margin_committed
+        if len(open_positions) < max_simultaneous_positions and available >= margin_per_trade:
+            open_positions.append(t)
+            included.append(t)
+        else:
+            skipped_no_margin += 1
+
+    for p in sorted(open_positions, key=lambda t: t.exit_time):
+        capital = max(0.0, capital + p.pnl_net_usdt)
+        peak = max(peak, capital)
+        if peak > 0:
+            max_dd_pct = max(max_dd_pct, (peak - capital) / peak * 100)
+
+    return PortfolioSimResult(
+        final_capital_usdt=capital, max_drawdown_pct=max_dd_pct,
+        concentration_pct=concentration_pct(included), trades_included=len(included),
+        trades_skipped_no_margin=skipped_no_margin,
+    )

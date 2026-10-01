@@ -75,9 +75,9 @@ async def main() -> None:
             print(f"  trades totales: {v.total_trades_all_segments}")
             if v.is_experimental and v.total_trades_all_segments == 0:
                 print(
-                    "  NOTA: 0 senales generadas -- revisa si el umbral de la "
-                    "estrategia es alcanzable con el funding real observado "
-                    "(hallazgo legitimo, no un bug; ver docs/FASE2_CRITERIOS.md)"
+                    "  NOTA: 0 senales generadas -- revisa el umbral y la "
+                    "ventana de historia que necesita la estrategia (ver "
+                    "docs/FASE2_CRITERIOS.md)"
                 )
             print(f"  PF OOS: {v.pf_oos_aggregate}  PF estresado: {v.pf_stressed}")
             print(f"  PF funding real: {v.pf_real_funding_only}")
@@ -85,6 +85,13 @@ async def main() -> None:
             print(f"  % simbolos PF>1: {v.pct_symbols_pf_gt1}")
             print(f"  % folds positivos: {v.pct_folds_positive}")
             print(f"  drawdown OOS: {v.max_drawdown_oos_pct}")
+            print(
+                f"  [informativo] cartera unica: drawdown {v.portfolio_max_drawdown_pct}%, "
+                f"concentracion {v.portfolio_concentration_pct}, "
+                f"capital final {v.portfolio_final_capital_usdt} USDT, "
+                f"trades incluidos {v.portfolio_trades_included}, "
+                f"omitidos por falta de margen {v.portfolio_trades_skipped_no_margin}"
+            )
             print(f"  concentracion: {v.concentration_pct}")
             if v.discard_reasons_json:
                 print(f"  motivos de descarte: {v.discard_reasons_json}")
