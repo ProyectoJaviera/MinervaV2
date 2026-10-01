@@ -65,11 +65,18 @@ class CoinGeckoClient:
             try:
                 # Respaldo duro ademas del timeout de httpx (ver bitunix_rest.py).
                 response = await asyncio.wait_for(
-                    self._client.get(url, params=params, headers=headers), timeout=self.timeout * 2
+                    self._client.get(url, params=params, headers=headers), timeout=self.timeout
                 )
             except TimeoutError as exc:
                 last_exc = exc
                 logger.warning("Timeout duro en CoinGecko %s (intento %d): %s", path, attempt, exc)
+                # Ver bitunix_rest.py: el pool de conexiones puede quedar en
+                # mal estado tras un timeout duro -- se reconstruye el cliente.
+                try:
+                    await asyncio.wait_for(self._client.aclose(), timeout=5.0)
+                except Exception:  # noqa: BLE001
+                    pass
+                self._client = build_async_http_client(timeout=self.timeout)
             except httpx.TransportError as exc:
                 last_exc = exc
                 logger.warning("Error de red en CoinGecko %s (intento %d): %s", path, attempt, exc)

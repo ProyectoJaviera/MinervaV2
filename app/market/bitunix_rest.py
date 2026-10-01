@@ -57,11 +57,21 @@ class BitunixRestClient:
                 # asyncio/httpx en Windows) -- wait_for garantiza que esta
                 # llamada nunca bloquea mas de `timeout * 2`.
                 response = await asyncio.wait_for(
-                    self._client.get(url, params=params), timeout=self.timeout * 2
+                    self._client.get(url, params=params), timeout=self.timeout
                 )
             except TimeoutError as exc:
                 last_exc = exc
                 logger.warning("Timeout duro en %s (intento %d): %s", path, attempt, exc)
+                # Se observo que el timeout duro por si solo no bastaba: el
+                # siguiente intento volvia a colgarse igual, consistente con
+                # una conexion persistente (keep-alive) del pool quedando en
+                # mal estado. Se descarta el cliente entero y se construye
+                # uno nuevo antes de reintentar.
+                try:
+                    await asyncio.wait_for(self._client.aclose(), timeout=5.0)
+                except Exception:  # noqa: BLE001 - el cierre tambien puede colgarse/fallar
+                    pass
+                self._client = build_async_http_client(timeout=self.timeout)
             except httpx.TransportError as exc:
                 last_exc = exc
                 logger.warning("Error de red en %s (intento %d): %s", path, attempt, exc)
