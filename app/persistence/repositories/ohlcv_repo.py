@@ -76,6 +76,21 @@ async def get_covered_open_times(
     return {r["open_time"] for r in rows}
 
 
+async def get_bar_count(
+    db: Database, symbol: str, interval: str, price_type: str, start_time: int, end_time: int
+) -> int:
+    """Cuenta las velas realmente guardadas en [start_time, end_time] --
+    usado para detectar huecos internos (velas faltantes dentro de un
+    rango que se considera cubierto), comparando contra el numero
+    esperado segun el paso del intervalo."""
+    row = await db.fetch_one(
+        "SELECT COUNT(*) AS n FROM ohlcv_cache WHERE symbol = ? AND interval = ? "
+        "AND price_type = ? AND open_time >= ? AND open_time <= ?",
+        (symbol, interval, price_type, start_time, end_time),
+    )
+    return int(row["n"]) if row else 0
+
+
 async def get_covered_range(
     db: Database, symbol: str, interval: str, price_type: str
 ) -> tuple[int, int] | None:

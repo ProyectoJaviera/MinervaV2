@@ -424,3 +424,28 @@ async def test_precompute_gives_identical_trades_to_recompute_per_slice(db):
         assert cached.entry_price == pytest.approx(uncached.entry_price)
         assert cached.exit_price == pytest.approx(uncached.exit_price)
         assert cached.close_reason == uncached.close_reason
+
+
+@pytest.mark.asyncio
+async def test_logs_warning_when_last_and_mark_bars_dont_fully_align(db, caplog):
+    """Tarea 2b: si hay velas LAST_PRICE sin contraparte MARK_PRICE (o
+    viceversa), se descartan al alinear -- el motor debe registrar cuantas
+    se perdieron (diagnostico de integridad de datos)."""
+    import logging
+
+    last = _flat_series(N_PAD + 5, 100.0, "LAST_PRICE")
+    mark = _flat_series(N_PAD + 3, 100.0, "MARK_PRICE")  # faltan 2 velas MARK_PRICE
+    await _seed(db, last, mark)
+
+    settings = make_settings()
+    strategy = FakeStrategy(signal_at=N_PAD - 1, side=Signal.LONG)
+
+    with caplog.at_level(logging.WARNING):
+        await run_backtest(
+            db, strategy, "fake", "BTCUSDT", "4h",
+            BASE_MS, BASE_MS + (N_PAD + 4) * STEP_MS, settings, now_ms=NOW_MS,
+        )
+
+    warnings = [r.message for r in caplog.records if "descartadas al alinear" in r.message]
+    assert len(warnings) == 1
+    assert "2 velas LAST_PRICE" in warnings[0]

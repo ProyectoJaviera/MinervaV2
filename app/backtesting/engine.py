@@ -219,6 +219,15 @@ async def run_backtest(
     aligned = [(b, mark_by_time[b.open_time]) for b in last_bars if b.open_time in mark_by_time]
     aligned.sort(key=lambda pair: pair[0].open_time)
 
+    dropped_last_only = len(last_bars) - len(aligned)
+    dropped_mark_only = len(mark_bars) - len(aligned)
+    if dropped_last_only or dropped_mark_only:
+        logger.warning(
+            "%s %s %s: %d velas LAST_PRICE y %d velas MARK_PRICE descartadas al "
+            "alinear (sin contraparte en la otra serie)",
+            strategy_name, symbol, timeframe, dropped_last_only, dropped_mark_only,
+        )
+
     min_bars_required = 60
     if len(aligned) < min_bars_required:
         logger.info("%s %s %s: solo %d velas alineadas, se omite (minimo %d)",
