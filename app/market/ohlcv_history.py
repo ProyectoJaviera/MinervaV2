@@ -114,11 +114,15 @@ async def get_or_fetch(
         # cacheado "abarque" el pedido: hay una vela en o antes de
         # `start_time` (o, si `start_time` es anterior al piso real del
         # historial ya detectado, no hace falta ninguna mas antigua) y una
-        # vela en o despues de `end_time - step_ms` (la mas reciente que
-        # podria caber en el rango).
+        # vela en o despues de `end_time - 2*step_ms`: la ultima vela
+        # CERRADA puede estar hasta casi 2 intervalos detras de "ahora"
+        # (la vela en curso todavia no cerro) -- exigir `end_time -
+        # step_ms` como se intento primero es demasiado estricto y
+        # dispara una redescarga completa espuria en cada corrida real
+        # (encontrado en la corrida de Fase 2).
         if covered:
             min_ok = min(covered) <= start_time or (floor is not None and floor <= min(covered))
-            already_covered = min_ok and max(covered) >= end_time - step_ms
+            already_covered = min_ok and max(covered) >= end_time - 2 * step_ms
 
     if not already_covered:
         cursor = end_time
