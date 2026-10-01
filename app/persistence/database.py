@@ -218,6 +218,9 @@ CREATE TABLE IF NOT EXISTS backtest_verdicts (
     evidence_insufficient INTEGER NOT NULL DEFAULT 0,
     discarded INTEGER NOT NULL DEFAULT 0,
     discard_reasons_json TEXT,
+    pf_is_aggregate REAL,
+    is_trades_count INTEGER NOT NULL DEFAULT 0,
+    oos_trades_count INTEGER NOT NULL DEFAULT 0,
     portfolio_simulation_runs INTEGER NOT NULL DEFAULT 0,
     portfolio_final_capital_median REAL,
     portfolio_final_capital_p10 REAL,
@@ -231,6 +234,19 @@ CREATE TABLE IF NOT EXISTS backtest_verdicts (
     portfolio_concentration_pct_median REAL,
     portfolio_trades_included_median REAL,
     portfolio_trades_skipped_no_margin_median REAL,
+    portfolio_oos_simulation_runs INTEGER NOT NULL DEFAULT 0,
+    portfolio_oos_final_capital_median REAL,
+    portfolio_oos_final_capital_p10 REAL,
+    portfolio_oos_final_capital_p90 REAL,
+    portfolio_oos_max_drawdown_median REAL,
+    portfolio_oos_max_drawdown_p10 REAL,
+    portfolio_oos_max_drawdown_p90 REAL,
+    portfolio_oos_mtm_max_drawdown_median REAL,
+    portfolio_oos_mtm_max_drawdown_p10 REAL,
+    portfolio_oos_mtm_max_drawdown_p90 REAL,
+    portfolio_oos_concentration_pct_median REAL,
+    portfolio_oos_trades_included_median REAL,
+    portfolio_oos_trades_skipped_no_margin_median REAL,
     run_at TEXT NOT NULL
 );
 """
@@ -264,6 +280,24 @@ _BACKTEST_VERDICTS_MIGRATED_COLUMNS = {
     "portfolio_concentration_pct_median": "REAL",
     "portfolio_trades_included_median": "REAL",
     "portfolio_trades_skipped_no_margin_median": "REAL",
+    # V3: informe de degradacion IS/OOS y simulacion de cartera solo-OOS
+    # (tarea 4, segunda revision de Fase 2).
+    "pf_is_aggregate": "REAL",
+    "is_trades_count": "INTEGER NOT NULL DEFAULT 0",
+    "oos_trades_count": "INTEGER NOT NULL DEFAULT 0",
+    "portfolio_oos_simulation_runs": "INTEGER NOT NULL DEFAULT 0",
+    "portfolio_oos_final_capital_median": "REAL",
+    "portfolio_oos_final_capital_p10": "REAL",
+    "portfolio_oos_final_capital_p90": "REAL",
+    "portfolio_oos_max_drawdown_median": "REAL",
+    "portfolio_oos_max_drawdown_p10": "REAL",
+    "portfolio_oos_max_drawdown_p90": "REAL",
+    "portfolio_oos_mtm_max_drawdown_median": "REAL",
+    "portfolio_oos_mtm_max_drawdown_p10": "REAL",
+    "portfolio_oos_mtm_max_drawdown_p90": "REAL",
+    "portfolio_oos_concentration_pct_median": "REAL",
+    "portfolio_oos_trades_included_median": "REAL",
+    "portfolio_oos_trades_skipped_no_margin_median": "REAL",
 }
 
 

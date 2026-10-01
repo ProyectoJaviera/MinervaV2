@@ -152,6 +152,13 @@ def _build_verdict(
     settings: Settings,
 ) -> BacktestVerdict:
     oos_trades = [t for t in all_trades if _is_oos(t, oos_boundary_ms) == "OOS"]
+    is_trades = [t for t in all_trades if _is_oos(t, oos_boundary_ms) == "IS"]
+
+    # Informe de degradacion IS -> OOS (tarea 4): PF y numero de
+    # operaciones de cada segmento, lado a lado -- no es un criterio de
+    # descarte nuevo, solo contexto para ver cuanto se degrada el
+    # resultado entre el periodo de ajuste (IS) y el de prueba (OOS).
+    pf_is = m.profit_factor_only(is_trades)
 
     pf_oos = m.profit_factor_only(oos_trades)
     pct_symbols = m.pct_symbols_with_pf_gt1(oos_trades)
@@ -201,6 +208,14 @@ def _build_verdict(
         settings.max_simultaneous_positions, settings.default_margin_usdt,
         runs=settings.backtest_portfolio_sim_runs,
     )
+    # Tarea 4: la misma simulacion, pero SOLO con operaciones OOS -- la de
+    # arriba mezcla IS+OOS y puede esconder que el periodo OOS por si solo
+    # sea mucho peor (o mejor). Tambien informativo.
+    portfolio_oos = m.simulate_portfolio_monte_carlo(
+        oos_trades, settings.backtest_initial_capital,
+        settings.max_simultaneous_positions, settings.default_margin_usdt,
+        runs=settings.backtest_portfolio_sim_runs,
+    )
 
     return BacktestVerdict(
         strategy=strategy_name, is_experimental=is_experimental, combos_tested=combos_tested,
@@ -214,6 +229,8 @@ def _build_verdict(
         concentration_pct=concentration, pf_control_group=_finite_or_none(pf_control),
         evidence_insufficient=evidence_insufficient, discarded=discarded,
         discard_reasons_json=json.dumps(discard_reasons) if discard_reasons else None,
+        pf_is_aggregate=_finite_or_none(pf_is),
+        is_trades_count=len(is_trades), oos_trades_count=len(oos_trades),
         portfolio_simulation_runs=portfolio.runs,
         portfolio_final_capital_median=portfolio.final_capital_median,
         portfolio_final_capital_p10=portfolio.final_capital_p10,
@@ -227,6 +244,21 @@ def _build_verdict(
         portfolio_concentration_pct_median=portfolio.concentration_pct_median,
         portfolio_trades_included_median=portfolio.trades_included_median,
         portfolio_trades_skipped_no_margin_median=portfolio.trades_skipped_no_margin_median,
+        portfolio_oos_simulation_runs=portfolio_oos.runs,
+        portfolio_oos_final_capital_median=portfolio_oos.final_capital_median,
+        portfolio_oos_final_capital_p10=portfolio_oos.final_capital_p10,
+        portfolio_oos_final_capital_p90=portfolio_oos.final_capital_p90,
+        portfolio_oos_max_drawdown_median=portfolio_oos.max_drawdown_median,
+        portfolio_oos_max_drawdown_p10=portfolio_oos.max_drawdown_p10,
+        portfolio_oos_max_drawdown_p90=portfolio_oos.max_drawdown_p90,
+        portfolio_oos_mtm_max_drawdown_median=portfolio_oos.mtm_max_drawdown_median,
+        portfolio_oos_mtm_max_drawdown_p10=portfolio_oos.mtm_max_drawdown_p10,
+        portfolio_oos_mtm_max_drawdown_p90=portfolio_oos.mtm_max_drawdown_p90,
+        portfolio_oos_concentration_pct_median=portfolio_oos.concentration_pct_median,
+        portfolio_oos_trades_included_median=portfolio_oos.trades_included_median,
+        portfolio_oos_trades_skipped_no_margin_median=(
+            portfolio_oos.trades_skipped_no_margin_median
+        ),
         run_at=datetime.now(UTC),
     )
 

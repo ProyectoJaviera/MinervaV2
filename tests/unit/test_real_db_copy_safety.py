@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from app.config import settings
-from app.persistence.repositories.backtest_repo import _VERDICT_COLUMNS
+from app.persistence.models import BacktestVerdict
 
 
 def test_real_db_copy_path_is_never_the_real_path(real_db_copy, tmp_path):
@@ -50,10 +50,11 @@ async def test_writing_to_the_copy_never_touches_the_real_file(real_db_copy):
 async def test_real_database_backtest_verdicts_has_all_expected_columns(real_db_copy):
     """Version automatizada de la verificacion manual hecha en esta
     sesion: la tabla real `backtest_verdicts` (tras la migracion
-    automatica en `Database.connect()`) debe tener TODAS las columnas que
-    `backtest_repo._VERDICT_COLUMNS` usa en el INSERT -- el orden fisico
-    de la tabla no importa (el INSERT usa columnas con nombre, no
-    posicion), solo que existan."""
+    automatica en `Database.connect()`) debe tener una columna para CADA
+    campo de `BacktestVerdict` (salvo `id`, autogenerado) -- `insert_verdict`
+    ahora genera columnas y valores desde `model_dump()`, asi que esto es
+    exactamente lo que necesita para no fallar. El orden fisico de la
+    tabla no importa (el INSERT usa columnas con nombre, no posicion)."""
     real_path = Path(settings.database_path)
     if not real_path.exists():
         pytest.skip("no hay data/minerva.db real en este entorno")
@@ -62,5 +63,6 @@ async def test_real_database_backtest_verdicts_has_all_expected_columns(real_db_
     rows = await cursor.fetchall()
     actual_columns = {row[1] for row in rows}
 
-    missing = [c for c in _VERDICT_COLUMNS if c not in actual_columns]
+    expected_columns = set(BacktestVerdict.model_fields) - {"id"}
+    missing = sorted(expected_columns - actual_columns)
     assert missing == [], f"columnas esperadas por el INSERT pero ausentes en la tabla: {missing}"

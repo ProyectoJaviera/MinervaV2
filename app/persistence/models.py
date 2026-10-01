@@ -177,6 +177,13 @@ class BacktestVerdict(BaseModel):
     evidence_insufficient: bool = False
     discarded: bool = False
     discard_reasons_json: str | None = None
+    # Informe de degradacion IS -> OOS (tarea 4, informativo): PF y numero
+    # de operaciones del segmento in-sample, para comparar al lado de
+    # `pf_oos_aggregate`/`total_trades_all_segments` y ver cuanto se
+    # degrada el resultado al pasar de IS a OOS.
+    pf_is_aggregate: float | None = None
+    is_trades_count: int = 0
+    oos_trades_count: int = 0
     # Simulacion de cartera UNICA (informativa, no participa en los
     # criterios de descarte -- ver docs/FASE2_CRITERIOS.md): todas las
     # operaciones de la estrategia (todos los simbolos/timeframes) sobre
@@ -202,4 +209,21 @@ class BacktestVerdict(BaseModel):
     portfolio_concentration_pct_median: float | None = None
     portfolio_trades_included_median: float | None = None
     portfolio_trades_skipped_no_margin_median: float | None = None
+    # Misma simulacion de cartera, pero SOLO con operaciones OOS (tarea 4)
+    # -- el capital/drawdown de la simulacion de arriba mezcla IS+OOS, que
+    # puede ocultar que el periodo OOS por si solo sea mucho peor (o
+    # mejor). Informativo, no participa en los criterios de descarte.
+    portfolio_oos_simulation_runs: int = 0
+    portfolio_oos_final_capital_median: float | None = None
+    portfolio_oos_final_capital_p10: float | None = None
+    portfolio_oos_final_capital_p90: float | None = None
+    portfolio_oos_max_drawdown_median: float | None = None
+    portfolio_oos_max_drawdown_p10: float | None = None
+    portfolio_oos_max_drawdown_p90: float | None = None
+    portfolio_oos_mtm_max_drawdown_median: float | None = None
+    portfolio_oos_mtm_max_drawdown_p10: float | None = None
+    portfolio_oos_mtm_max_drawdown_p90: float | None = None
+    portfolio_oos_concentration_pct_median: float | None = None
+    portfolio_oos_trades_included_median: float | None = None
+    portfolio_oos_trades_skipped_no_margin_median: float | None = None
     run_at: datetime

@@ -116,7 +116,12 @@ async def main() -> None:
                     "ventana de historia que necesita la estrategia (ver "
                     "docs/FASE2_CRITERIOS.md)"
                 )
-            print(f"  PF OOS: {v.pf_oos_aggregate}  PF estresado: {v.pf_stressed}")
+            print(
+                f"  degradacion IS -> OOS: PF IS {v.pf_is_aggregate} "
+                f"({v.is_trades_count} trades) -> PF OOS {v.pf_oos_aggregate} "
+                f"({v.oos_trades_count} trades)"
+            )
+            print(f"  PF estresado: {v.pf_stressed}")
             print(f"  PF funding real: {v.pf_real_funding_only}")
             print(f"  PF control BTC/ETH: {v.pf_control_group}")
             print(f"  % simbolos PF>1: {v.pct_symbols_pf_gt1}")
@@ -140,6 +145,22 @@ async def main() -> None:
                 f"trades incluidos (mediana): {v.portfolio_trades_included_median}, "
                 f"omitidos por falta de margen (mediana): "
                 f"{v.portfolio_trades_skipped_no_margin_median}"
+            )
+            print(
+                f"  [informativo, {v.portfolio_oos_simulation_runs} corridas Monte Carlo, "
+                f"SOLO OOS] cartera unica -- capital final: mediana "
+                f"{v.portfolio_oos_final_capital_median} USDT (p10-p90: "
+                f"{v.portfolio_oos_final_capital_p10}-{v.portfolio_oos_final_capital_p90})"
+            )
+            print(
+                f"    drawdown solo-al-cierre (OOS): mediana "
+                f"{v.portfolio_oos_max_drawdown_median}% (p10-p90: "
+                f"{v.portfolio_oos_max_drawdown_p10}-{v.portfolio_oos_max_drawdown_p90})"
+            )
+            print(
+                f"    drawdown mark-to-market (OOS): mediana "
+                f"{v.portfolio_oos_mtm_max_drawdown_median}% (p10-p90: "
+                f"{v.portfolio_oos_mtm_max_drawdown_p10}-{v.portfolio_oos_mtm_max_drawdown_p90})"
             )
             print(f"  concentracion: {v.concentration_pct}")
             if v.discard_reasons_json:

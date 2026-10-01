@@ -105,3 +105,44 @@ def test_concentration_triggers_discard_despite_good_pf():
     )
     assert verdict.discarded is True
     assert "Concentracion" in verdict.discard_reasons_json
+
+
+def test_is_oos_degradation_report_splits_trades_by_boundary():
+    """Tarea 4: PF y numero de operaciones de IS junto a los de OOS --
+    meses 1-6 (perdedores) quedan del lado IS, meses 7-12 (ganadores) del
+    lado OOS, segun donde caiga `oos_boundary_ms`."""
+    is_trades = [_trade(-5.0, month) for month in range(1, 7)]
+    oos_trades = [_trade(5.0, month) for month in range(7, 13)]
+    settings = make_settings()
+    oos_boundary_ms = int(datetime(2022, 7, 1, tzinfo=UTC).timestamp() * 1000)
+
+    verdict = _build_verdict(
+        "ema_cross_9_21", is_trades + oos_trades, oos_boundary_ms=oos_boundary_ms,
+        start_ms=START_MS, end_ms=END_MS, combos_tested=1, settings=settings,
+    )
+
+    assert verdict.is_trades_count == 6
+    assert verdict.oos_trades_count == 6
+    assert verdict.pf_is_aggregate == 0.0  # todas perdedoras -> gross_profit 0
+    assert verdict.pf_oos_aggregate is None  # todas ganadoras, sin perdidas -> PF infinito -> None
+
+
+def test_oos_only_portfolio_simulation_ignores_is_trades():
+    """La simulacion de cartera "solo OOS" debe reflejar unicamente las
+    operaciones OOS -- aunque haya muchas mas operaciones IS, el numero de
+    trades incluidos (mediana) en la version OOS no puede superar la
+    cantidad de operaciones OOS disponibles."""
+    is_trades = [_trade(5.0, month, symbol="BTCUSDT") for month in range(1, 7)]
+    oos_trades = [_trade(5.0, month, symbol="ETHUSDT") for month in range(7, 10)]
+    settings = make_settings(BACKTEST_PORTFOLIO_SIM_RUNS=20)
+    oos_boundary_ms = int(datetime(2022, 7, 1, tzinfo=UTC).timestamp() * 1000)
+
+    verdict = _build_verdict(
+        "ema_cross_9_21", is_trades + oos_trades, oos_boundary_ms=oos_boundary_ms,
+        start_ms=START_MS, end_ms=END_MS, combos_tested=1, settings=settings,
+    )
+
+    assert verdict.oos_trades_count == 3
+    assert verdict.portfolio_oos_trades_included_median <= 3
+    # La version con todo el periodo (IS+OOS) si puede incluir las 9.
+    assert verdict.portfolio_trades_included_median <= 9

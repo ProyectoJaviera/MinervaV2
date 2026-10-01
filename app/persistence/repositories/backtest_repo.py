@@ -121,39 +121,21 @@ async def insert_run(db: Database, r: BacktestRun) -> None:
     )
 
 
-_VERDICT_COLUMNS = (
-    "strategy", "is_experimental", "combos_tested", "total_trades_all_segments",
-    "pf_oos_aggregate", "pct_symbols_pf_gt1", "pct_folds_positive", "pf_stressed",
-    "pf_real_funding_only", "pf_full_period_approx", "max_drawdown_oos_pct",
-    "concentration_pct", "pf_control_group", "evidence_insufficient", "discarded",
-    "discard_reasons_json", "portfolio_simulation_runs", "portfolio_final_capital_median",
-    "portfolio_final_capital_p10", "portfolio_final_capital_p90",
-    "portfolio_max_drawdown_median", "portfolio_max_drawdown_p10",
-    "portfolio_max_drawdown_p90", "portfolio_mtm_max_drawdown_median",
-    "portfolio_mtm_max_drawdown_p10", "portfolio_mtm_max_drawdown_p90",
-    "portfolio_concentration_pct_median", "portfolio_trades_included_median",
-    "portfolio_trades_skipped_no_margin_median", "run_at",
-)
-
-
 async def insert_verdict(db: Database, v: BacktestVerdict) -> None:
-    await _insert(
-        db, "backtest_verdicts", _VERDICT_COLUMNS,
-        (
-            v.strategy, int(v.is_experimental), v.combos_tested, v.total_trades_all_segments,
-            v.pf_oos_aggregate, v.pct_symbols_pf_gt1, v.pct_folds_positive, v.pf_stressed,
-            v.pf_real_funding_only, v.pf_full_period_approx, v.max_drawdown_oos_pct,
-            v.concentration_pct, v.pf_control_group, int(v.evidence_insufficient),
-            int(v.discarded), v.discard_reasons_json, v.portfolio_simulation_runs,
-            v.portfolio_final_capital_median, v.portfolio_final_capital_p10,
-            v.portfolio_final_capital_p90, v.portfolio_max_drawdown_median,
-            v.portfolio_max_drawdown_p10, v.portfolio_max_drawdown_p90,
-            v.portfolio_mtm_max_drawdown_median, v.portfolio_mtm_max_drawdown_p10,
-            v.portfolio_mtm_max_drawdown_p90, v.portfolio_concentration_pct_median,
-            v.portfolio_trades_included_median, v.portfolio_trades_skipped_no_margin_median,
-            v.run_at.isoformat(),
-        ),
-    )
+    """A diferencia de las demas funciones de este archivo, construye las
+    columnas Y los valores a partir de `v.model_dump()` en vez de listas
+    paralelas escritas a mano -- `BacktestVerdict` es, con mucho, el
+    modelo que mas crecio durante esta fase (de 17 a 36+ columnas en tres
+    revisiones) y es exactamente donde ocurrio el bug real ("29 values
+    for 30 columns"). Con esto, agregar un campo nuevo al modelo alcanza
+    por si solo: no hay una segunda lista de columnas que sincronizar a
+    mano y se pueda desincronizar otra vez."""
+    data = v.model_dump(exclude={"id"})
+    data["is_experimental"] = int(data["is_experimental"])
+    data["evidence_insufficient"] = int(data["evidence_insufficient"])
+    data["discarded"] = int(data["discarded"])
+    data["run_at"] = v.run_at.isoformat()
+    await _insert(db, "backtest_verdicts", tuple(data.keys()), tuple(data.values()))
 
 
 def _row_to_trade(row) -> BacktestTrade:
@@ -172,34 +154,24 @@ def _row_to_trade(row) -> BacktestTrade:
     )
 
 
+_VERDICT_BOOL_COLUMNS = ("is_experimental", "evidence_insufficient", "discarded")
+
+
 def _row_to_verdict(row) -> BacktestVerdict:
-    return BacktestVerdict(
-        id=row["id"], strategy=row["strategy"], is_experimental=bool(row["is_experimental"]),
-        combos_tested=row["combos_tested"],
-        total_trades_all_segments=row["total_trades_all_segments"],
-        pf_oos_aggregate=row["pf_oos_aggregate"], pct_symbols_pf_gt1=row["pct_symbols_pf_gt1"],
-        pct_folds_positive=row["pct_folds_positive"], pf_stressed=row["pf_stressed"],
-        pf_real_funding_only=row["pf_real_funding_only"],
-        pf_full_period_approx=row["pf_full_period_approx"],
-        max_drawdown_oos_pct=row["max_drawdown_oos_pct"],
-        concentration_pct=row["concentration_pct"], pf_control_group=row["pf_control_group"],
-        evidence_insufficient=bool(row["evidence_insufficient"]), discarded=bool(row["discarded"]),
-        discard_reasons_json=row["discard_reasons_json"],
-        portfolio_simulation_runs=row["portfolio_simulation_runs"],
-        portfolio_final_capital_median=row["portfolio_final_capital_median"],
-        portfolio_final_capital_p10=row["portfolio_final_capital_p10"],
-        portfolio_final_capital_p90=row["portfolio_final_capital_p90"],
-        portfolio_max_drawdown_median=row["portfolio_max_drawdown_median"],
-        portfolio_max_drawdown_p10=row["portfolio_max_drawdown_p10"],
-        portfolio_max_drawdown_p90=row["portfolio_max_drawdown_p90"],
-        portfolio_mtm_max_drawdown_median=row["portfolio_mtm_max_drawdown_median"],
-        portfolio_mtm_max_drawdown_p10=row["portfolio_mtm_max_drawdown_p10"],
-        portfolio_mtm_max_drawdown_p90=row["portfolio_mtm_max_drawdown_p90"],
-        portfolio_concentration_pct_median=row["portfolio_concentration_pct_median"],
-        portfolio_trades_included_median=row["portfolio_trades_included_median"],
-        portfolio_trades_skipped_no_margin_median=row["portfolio_trades_skipped_no_margin_median"],
-        run_at=datetime.fromisoformat(row["run_at"]),
-    )
+    """Igual que `insert_verdict`: construye los kwargs a partir de las
+    columnas de la fila (que, por convencion, se llaman igual que los
+    campos del modelo) en vez de enumerarlos a mano uno por uno -- un
+    campo nuevo en `BacktestVerdict` no requiere tocar esta funcion."""
+    data = {key: row[key] for key in row.keys()}
+    for column in _VERDICT_BOOL_COLUMNS:
+        data[column] = bool(data[column])
+    data["run_at"] = datetime.fromisoformat(data["run_at"])
+    # Columnas "v1" (simulacion de cartera de una sola corrida) que
+    # pueden existir en una base de datos migrada pero ya no tienen campo
+    # correspondiente en el modelo -- se descartan en vez de fallar.
+    model_fields = set(BacktestVerdict.model_fields)
+    data = {k: v for k, v in data.items() if k in model_fields}
+    return BacktestVerdict(**data)
 
 
 async def get_verdicts(db: Database, strategy: str | None = None) -> list[BacktestVerdict]:
