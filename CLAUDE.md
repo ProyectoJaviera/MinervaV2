@@ -13,6 +13,7 @@ Especificación completa en docs/SPEC.md y base previa en docs/openspec.md (nunc
 - Antes de implementar una fase: investiga, propón un plan en Plan Mode y espera aprobación.
 - Haz commits pequeños con mensajes claros (Conventional Commits). Nunca hagas push sin que yo lo pida.
 - Pruebas: pytest + pytest-asyncio. Toda función de riesgo y de simulación (SL/TP/trailing, liquidación, comisiones, funding) debe tener tests con casos límite.
+- Antes de dar por terminada cualquier tarea que toque el pipeline de datos o la persistencia, ejecuta un smoke test de punta a punta con un subconjunto pequeño; que los tests unitarios pasen no es suficiente.
 - Mantén PROGRESS.md: estado por fase, decisiones y pendientes.
 
 ## REGLAS DE TRABAJO
