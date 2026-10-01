@@ -10,6 +10,7 @@ from app.strategies.base import BaseStrategy
 from app.strategies.donchian_breakout import DonchianBreakoutStrategy
 from app.strategies.ema_cross import EMACrossStrategy
 from app.strategies.funding_contrarian import FundingContrarianStrategy
+from app.strategies.funding_contrarian_percentile import FundingContrarianPercentileStrategy
 from app.strategies.mean_reversion_rsi_bb import MeanReversionRSIBBStrategy
 from app.strategies.trend_atr_stop import TrendATRStopStrategy
 
@@ -19,6 +20,11 @@ STRATEGIES: dict[str, BaseStrategy] = {
     "mean_reversion_rsi14_bb20": MeanReversionRSIBBStrategy(),
     "donchian_breakout_20": DonchianBreakoutStrategy(period=20),
     "funding_contrarian_experimental": FundingContrarianStrategy(),
+    # v2 propuesta por separado (umbral por percentiles, no absoluto) tras
+    # observar que la original no genera senales -- ver el docstring de
+    # `funding_contrarian_percentile.py` y docs/FASE2_CRITERIOS.md. La
+    # original NO se modifica.
+    "funding_contrarian_percentile_experimental": FundingContrarianPercentileStrategy(),
 }
 
 # Timeframes en los que se evalua cada estrategia en el backtest de Fase 2
@@ -29,9 +35,13 @@ STRATEGY_TIMEFRAMES: dict[str, list[str]] = {
     "mean_reversion_rsi14_bb20": ["1h"],
     "donchian_breakout_20": ["4h", "1d"],
     "funding_contrarian_experimental": ["4h"],
+    "funding_contrarian_percentile_experimental": ["4h"],
 }
 
-EXPERIMENTAL_STRATEGIES = {"funding_contrarian_experimental"}
+EXPERIMENTAL_STRATEGIES = {
+    "funding_contrarian_experimental",
+    "funding_contrarian_percentile_experimental",
+}
 
 
 def get_strategy(name: str) -> BaseStrategy:

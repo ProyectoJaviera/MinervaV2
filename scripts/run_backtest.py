@@ -73,6 +73,12 @@ async def main() -> None:
             print(f"--- {r.strategy_name}: {estado} ---")
             print(f"  combos probados: {v.combos_tested}")
             print(f"  trades totales: {v.total_trades_all_segments}")
+            if v.is_experimental and v.total_trades_all_segments == 0:
+                print(
+                    "  NOTA: 0 senales generadas -- revisa si el umbral de la "
+                    "estrategia es alcanzable con el funding real observado "
+                    "(hallazgo legitimo, no un bug; ver docs/FASE2_CRITERIOS.md)"
+                )
             print(f"  PF OOS: {v.pf_oos_aggregate}  PF estresado: {v.pf_stressed}")
             print(f"  PF funding real: {v.pf_real_funding_only}")
             print(f"  PF control BTC/ETH: {v.pf_control_group}")
