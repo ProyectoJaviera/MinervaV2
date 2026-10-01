@@ -146,7 +146,7 @@ async def _fetch_funding_events(
             cursor = oldest - 1
             # Pausa deliberada entre paginas -- ver la misma nota en
             # app/market/ohlcv_history.py::get_or_fetch.
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(1.0)
 
     return await funding_repo.get_funding(db, symbol, start_time_ms, end_time_ms)
 

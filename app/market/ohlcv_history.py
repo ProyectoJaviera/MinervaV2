@@ -165,6 +165,6 @@ async def get_or_fetch(
             # API de Bitunix, que nunca respondio con 429/error) cuelgue la
             # conexion sin mas aviso. Bajar el ritmo evito el problema de
             # forma reproducible -- ver docs/PROGRESS.md.
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(1.0)
 
     return await ohlcv_repo.get_bars(db, symbol, interval, price_type, start_time, end_time)
