@@ -6,6 +6,8 @@ Permite paginar la descarga historica de Bitunix (max 200 velas/llamada,
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from app.persistence.database import Database
 from app.persistence.models import OHLCVBar
 
@@ -131,3 +133,38 @@ async def set_floor(
         """,
         (symbol, interval, price_type, floor_open_time),
     )
+
+
+async def mark_series_complete(
+    db: Database, symbol: str, interval: str, price_type: str, start_time: int, end_time: int,
+) -> None:
+    """Escrita por `scripts/download_history.py` al terminar una serie SIN
+    errores -- senal afirmativa de que [start_time, end_time] quedo
+    completo, independiente de si `ohlcv_floor` tiene fila (ver docstring
+    de la tabla en `database.py`)."""
+    await db.execute(
+        """
+        INSERT INTO ohlcv_series_complete (
+            symbol, interval, price_type, start_time, end_time, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (symbol, interval, price_type) DO UPDATE SET
+            start_time = MIN(start_time, excluded.start_time),
+            end_time = MAX(end_time, excluded.end_time),
+            completed_at = excluded.completed_at
+        """,
+        (symbol, interval, price_type, start_time, end_time, datetime.now(UTC).isoformat()),
+    )
+
+
+async def get_series_complete_start(
+    db: Database, symbol: str, interval: str, price_type: str
+) -> int | None:
+    """`start_time` de la marca de "serie completa" mas antigua registrada
+    para este (symbol, interval, price_type), o `None` si nunca se marco
+    como completa. Ver `mark_series_complete`."""
+    row = await db.fetch_one(
+        "SELECT start_time FROM ohlcv_series_complete "
+        "WHERE symbol = ? AND interval = ? AND price_type = ?",
+        (symbol, interval, price_type),
+    )
+    return int(row["start_time"]) if row else None

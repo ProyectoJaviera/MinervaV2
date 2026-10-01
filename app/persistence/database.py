@@ -72,6 +72,26 @@ CREATE TABLE IF NOT EXISTS ohlcv_floor (
     PRIMARY KEY (symbol, interval, price_type)
 );
 
+-- Marca afirmativa de "esta serie se descargo completa" escrita por
+-- scripts/download_history.py al terminar cada serie SIN errores --
+-- corrige un bug real donde `ohlcv_floor` podia no tener fila (p.ej. una
+-- descarga anterior interrumpida) aunque el rango pedido SI estuviera
+-- completo, causando un MissingHistoricalDataError evitable. Es una señal
+-- mas fuerte que inferir a partir de `ohlcv_floor` + el rango cacheado:
+-- solo existe si `download_history.py` llego al final de esa serie sin
+-- lanzar ninguna excepcion. `get_cached_or_raise` la usa para el extremo
+-- "cabeza" (dato antiguo) ademas del chequeo de piso existente, no lo
+-- reemplaza.
+CREATE TABLE IF NOT EXISTS ohlcv_series_complete (
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    price_type TEXT NOT NULL,
+    start_time INTEGER NOT NULL,
+    end_time INTEGER NOT NULL,
+    completed_at TEXT NOT NULL,
+    PRIMARY KEY (symbol, interval, price_type)
+);
+
 -- Cache de funding_rate_history (igual proposito que ohlcv_cache): evita
 -- re-descargar en cada corrida/reintento del backtest. `floor_time` (en
 -- `ohlcv_floor` con interval='__funding__', price_type='__funding__' para

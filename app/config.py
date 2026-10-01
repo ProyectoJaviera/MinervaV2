@@ -125,6 +125,13 @@ class Settings(BaseSettings):
     # desempate de entry_time con una semilla fija) por estrategia --
     # informativo, no participa en los criterios de descarte.
     backtest_portfolio_sim_runs: int = Field(default=200, alias="BACKTEST_PORTFOLIO_SIM_RUNS")
+    # Fecha final FIJA (UTC) del backtest "oficial" -- congelada para que
+    # dos corridas de `scripts/run_backtest.py` den exactamente los mismos
+    # numeros (antes se usaba la hora real de cada corrida, haciendo cada
+    # resultado irreproducible). Ver docs/FASE2_CRITERIOS.md.
+    backtest_official_end_date: str = Field(
+        default="2026-10-01", alias="BACKTEST_OFFICIAL_END_DATE"
+    )
 
     # --- Claude / Anthropic (usado desde Fase 4) ---
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
@@ -165,6 +172,14 @@ class Settings(BaseSettings):
     @property
     def backtest_control_symbols_list(self) -> list[str]:
         return [s.strip().upper() for s in self.backtest_control_symbols.split(",") if s.strip()]
+
+    @property
+    def backtest_official_end_ms(self) -> int:
+        """`backtest_official_end_date` ("YYYY-MM-DD", UTC) en epoch ms."""
+        from datetime import UTC, datetime
+
+        dt = datetime.strptime(self.backtest_official_end_date, "%Y-%m-%d").replace(tzinfo=UTC)
+        return int(dt.timestamp() * 1000)
 
     def max_margin_for_new_trade(
         self,

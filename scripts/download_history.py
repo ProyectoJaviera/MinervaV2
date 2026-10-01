@@ -48,19 +48,33 @@ async def _check_internal_gaps(
     db: Database, symbol: str, interval: str, price_type: str, start_ms: int, end_ms: int
 ) -> None:
     """Compara velas esperadas vs. realmente guardadas dentro del rango
-    que ya se considera cubierto -- detecta huecos INTERNOS (p.ej. una
+    que REALMENTE se descargo -- detecta huecos INTERNOS (p.ej. una
     interrupcion real del exchange), no la falta de historial anterior al
-    piso real (que no es un hueco, es el limite real de los datos)."""
+    piso real (que no es un hueco, es el limite real de los datos) NI la
+    vela mas reciente que todavia no cierra.
+
+    Correccion de un off-by-one real: antes se comparaba contra `end_ms`
+    (el instante en que corre el script, "ahora"), no contra la ultima
+    vela que realmente se alcanzo a descargar (`max_cached`) -- como la
+    vela en curso nunca esta cerrada, "ahora" casi nunca coincide con un
+    borde de vela real, y eso se contaba como "1 vela faltante" en la
+    enorme mayoria de las series (46 de 60 en la corrida real), escondiendo
+    los huecos genuinos entre el ruido."""
     step_ms = interval_to_ms(interval)
     if step_ms is None:
         return
-    floor = await ohlcv_repo.get_floor(db, symbol, interval, price_type)
-    effective_start = max(start_ms, floor) if floor is not None else start_ms
-    if effective_start > end_ms:
+    covered = await ohlcv_repo.get_covered_range(db, symbol, interval, price_type)
+    if covered is None:
         return
-    expected = int((end_ms - effective_start) // step_ms) + 1
+    min_cached, max_cached = covered
+    floor = await ohlcv_repo.get_floor(db, symbol, interval, price_type)
+    effective_start = max(start_ms, floor) if floor is not None else max(start_ms, min_cached)
+    effective_end = min(end_ms, max_cached)  # nunca exigir mas alla de lo realmente descargado
+    if effective_start > effective_end:
+        return
+    expected = int((effective_end - effective_start) // step_ms) + 1
     actual = await ohlcv_repo.get_bar_count(
-        db, symbol, interval, price_type, effective_start, end_ms
+        db, symbol, interval, price_type, effective_start, effective_end
     )
     if actual < expected:
         logger.warning(
@@ -121,6 +135,11 @@ async def main() -> None:
             t_series = time.time()
             await download_missing(rest_client, db, symbol, tf, START_MS, end_ms, price_type)
             await _check_internal_gaps(db, symbol, tf, price_type, START_MS, end_ms)
+            # Solo se llega aqui si `download_missing` no lanzo ninguna
+            # excepcion -- marca afirmativa de "serie completa" (tarea 1b,
+            # corrige que `ohlcv_floor` pueda faltar aunque la cabeza SI
+            # este completa, p.ej. tras una descarga interrumpida).
+            await ohlcv_repo.mark_series_complete(db, symbol, tf, price_type, START_MS, end_ms)
             logger.info(
                 "serie %d/%d: terminada (%.1fs)", series_num, total_series, time.time() - t_series
             )

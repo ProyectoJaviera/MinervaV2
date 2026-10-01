@@ -227,6 +227,57 @@ async def download_missing(
         )
 
 
+async def check_series_availability(
+    db: Database,
+    symbol: str,
+    interval: str,
+    start_time: int,
+    end_time: int,
+    price_type: str = "LAST_PRICE",
+) -> str | None:
+    """Verifica si [start_time, end_time] esta completo en `ohlcv_cache`
+    SIN lanzar nada -- devuelve `None` si esta completo, o un mensaje
+    describiendo que falta. Usada tanto por `get_cached_or_raise` (que
+    lanza `MissingHistoricalDataError` con ese mismo mensaje) como por
+    `scripts/run_backtest.py` para validar TODAS las series necesarias de
+    antemano y listarlas juntas, antes de calcular nada (tarea 1a)."""
+    step_ms = interval_to_ms(interval)
+    if step_ms is None:
+        return None
+
+    covered = await ohlcv_repo.get_covered_range(db, symbol, interval, price_type)
+    if covered is None:
+        return (
+            f"No hay velas cacheadas para {symbol} {interval} {price_type}. "
+            "Corre primero: python scripts/download_history.py"
+        )
+
+    min_cached, max_cached = covered
+    floor = await ohlcv_repo.get_floor(db, symbol, interval, price_type)
+    # Ademas del piso (que puede faltar aunque la cabeza SI este completa
+    # -- bug real encontrado: una descarga interrumpida deja datos
+    # cacheados sin que `ohlcv_floor` llegue a escribirse), se confia en
+    # la marca afirmativa de "serie completa" que
+    # `scripts/download_history.py` escribe al terminar sin errores.
+    series_complete_start = await ohlcv_repo.get_series_complete_start(
+        db, symbol, interval, price_type
+    )
+    head_ok = (
+        min_cached <= start_time
+        or (floor is not None and floor <= min_cached)
+        or (series_complete_start is not None and series_complete_start <= start_time)
+    )
+    tail_ok = max_cached >= end_time - 2 * step_ms
+    if head_ok and tail_ok:
+        return None
+    return (
+        f"Velas incompletas para {symbol} {interval} {price_type} en rango "
+        f"[{_fmt(start_time)}, {_fmt(end_time)}] (cacheado: "
+        f"[{_fmt(min_cached)}, {_fmt(max_cached)}]). "
+        "Corre primero: python scripts/download_history.py"
+    )
+
+
 async def get_cached_or_raise(
     db: Database,
     symbol: str,
@@ -238,23 +289,9 @@ async def get_cached_or_raise(
     """Lee SOLO de `ohlcv_cache` (nunca toca la red). Si el rango pedido no
     esta completo, lanza `MissingHistoricalDataError` -- el llamador debe
     correr `scripts/download_history.py` primero."""
-    step_ms = interval_to_ms(interval)
-    if step_ms is not None:
-        floor = await ohlcv_repo.get_floor(db, symbol, interval, price_type)
-        covered = await ohlcv_repo.get_covered_range(db, symbol, interval, price_type)
-        if covered is None:
-            raise MissingHistoricalDataError(
-                f"No hay velas cacheadas para {symbol} {interval} {price_type}. "
-                "Corre primero: python scripts/download_history.py"
-            )
-        min_cached, max_cached = covered
-        head_ok = min_cached <= start_time or (floor is not None and floor <= min_cached)
-        tail_ok = max_cached >= end_time - 2 * step_ms
-        if not (head_ok and tail_ok):
-            raise MissingHistoricalDataError(
-                f"Velas incompletas para {symbol} {interval} {price_type} en rango "
-                f"[{_fmt(start_time)}, {_fmt(end_time)}] (cacheado: "
-                f"[{_fmt(min_cached)}, {_fmt(max_cached)}]). "
-                "Corre primero: python scripts/download_history.py"
-            )
+    problem = await check_series_availability(
+        db, symbol, interval, start_time, end_time, price_type
+    )
+    if problem is not None:
+        raise MissingHistoricalDataError(problem)
     return await ohlcv_repo.get_bars(db, symbol, interval, price_type, start_time, end_time)

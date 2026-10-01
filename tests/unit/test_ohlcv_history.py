@@ -265,6 +265,76 @@ async def test_get_cached_or_raise_succeeds_when_range_fully_covered(db):
     assert len(bars) == 10
 
 
+@pytest.mark.asyncio
+async def test_get_cached_or_raise_raises_when_floor_missing_despite_complete_head(db):
+    """Reproduce el bug real: datos cacheados que en los hechos SI cubren
+    la cabeza pedida, pero sin fila en `ohlcv_floor` (p.ej. una descarga
+    interrumpida) -- sin la marca de "serie completa", debe seguir
+    lanzando (es exactamente el caso que causo el `MissingHistoricalDataError`
+    evitable en produccion)."""
+    bars = [
+        OHLCVBar(
+            symbol="BTCUSDT", interval="4h", price_type="LAST_PRICE",
+            open_time=BASE_MS + i * STEP_MS, open=100, high=101, low=99, close=100.5,
+        )
+        for i in range(5, 15)  # cubre desde el indice 5, NO desde 0
+    ]
+    await ohlcv_repo.upsert_bars(db, bars)
+    # Sin set_floor y sin mark_series_complete: la cabeza (indice 0) no
+    # esta demostrada como completa.
+    start = BASE_MS  # pide desde el indice 0
+    end = BASE_MS + 14 * STEP_MS
+
+    with pytest.raises(MissingHistoricalDataError):
+        await get_cached_or_raise(db, "BTCUSDT", "4h", start, end, "LAST_PRICE")
+
+
+@pytest.mark.asyncio
+async def test_series_complete_marker_resolves_missing_floor_row(db):
+    """Misma situacion que el test anterior, pero esta vez
+    `download_history.py` SI llego a marcar la serie como completa (sin
+    excepciones) -- `get_cached_or_raise` debe confiar en eso aunque
+    `ohlcv_floor` siga sin fila."""
+    bars = [
+        OHLCVBar(
+            symbol="BTCUSDT", interval="4h", price_type="LAST_PRICE",
+            open_time=BASE_MS + i * STEP_MS, open=100, high=101, low=99, close=100.5,
+        )
+        for i in range(5, 15)
+    ]
+    await ohlcv_repo.upsert_bars(db, bars)
+    start = BASE_MS
+    end = BASE_MS + 14 * STEP_MS
+    await ohlcv_repo.mark_series_complete(db, "BTCUSDT", "4h", "LAST_PRICE", start, end)
+
+    result = await get_cached_or_raise(db, "BTCUSDT", "4h", start, end, "LAST_PRICE")
+    assert len(result) == 10
+
+
+@pytest.mark.asyncio
+async def test_series_complete_marker_does_not_mask_a_tail_gap(db):
+    """La marca de "serie completa" solo se usa para el extremo de cabeza
+    (dato antiguo) -- un hueco en la cola (dato reciente faltante) debe
+    seguir lanzando igual."""
+    bars = [
+        OHLCVBar(
+            symbol="BTCUSDT", interval="4h", price_type="LAST_PRICE",
+            open_time=BASE_MS + i * STEP_MS, open=100, high=101, low=99, close=100.5,
+        )
+        for i in range(10)  # solo hasta el indice 9
+    ]
+    await ohlcv_repo.upsert_bars(db, bars)
+    await ohlcv_repo.mark_series_complete(
+        db, "BTCUSDT", "4h", "LAST_PRICE", BASE_MS, BASE_MS + 9 * STEP_MS
+    )
+
+    with pytest.raises(MissingHistoricalDataError):
+        # Pide hasta mucho mas alla de lo cacheado -- la cola SI falta.
+        await get_cached_or_raise(
+            db, "BTCUSDT", "4h", BASE_MS, BASE_MS + 100 * STEP_MS, "LAST_PRICE"
+        )
+
+
 def test_drop_incomplete_last_bar_excludes_unclosed_candle():
     now_ms = BASE_MS + 2 * STEP_MS + 1000  # la vela 2 recien abrio, no cerro
     bars = [

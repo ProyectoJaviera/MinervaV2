@@ -28,14 +28,39 @@ sys.path.insert(0, ".")
 from app.backtesting.report import run_full_backtest  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.core.logging import get_logger, setup_logging  # noqa: E402
+from app.market.ohlcv_history import check_series_availability  # noqa: E402
 from app.persistence.database import Database  # noqa: E402
 from app.persistence.repositories import universe_repo  # noqa: E402
+from app.strategies.registry import STRATEGY_TIMEFRAMES  # noqa: E402
 
 logger = get_logger("run_backtest")
 
 # Ancla de inicio anterior al piso real verificado de Bitunix (~2022-04-17):
 # la paginacion hacia atras se detiene sola al agotar el historial.
 START_MS = int(datetime(2022, 1, 1, tzinfo=UTC).timestamp() * 1000)
+
+
+async def _find_missing_series(
+    db: Database, universe_symbols: list[str], start_ms: int, end_ms: int
+) -> list[str]:
+    """Verifica TODAS las series (simbolo x timeframe x tipo de precio)
+    que alguna estrategia va a necesitar, ANTES de calcular nada -- evita
+    descubrir a mitad de una corrida (tras minutos de computo ya hecho)
+    que falta una sola serie (tarea 1a, correccion post-Fase-2: una
+    corrida real fallo asi en BNBUSDT 1h)."""
+    all_symbols = sorted(set(universe_symbols) | set(settings.backtest_control_symbols_list))
+    timeframes = sorted({tf for tfs in STRATEGY_TIMEFRAMES.values() for tf in tfs})
+
+    problems: list[str] = []
+    for symbol in all_symbols:
+        for tf in timeframes:
+            for price_type in ("LAST_PRICE", "MARK_PRICE"):
+                problem = await check_series_availability(
+                    db, symbol, tf, start_ms, end_ms, price_type
+                )
+                if problem is not None:
+                    problems.append(problem)
+    return problems
 
 
 async def main() -> None:
@@ -53,12 +78,24 @@ async def main() -> None:
             )
         logger.info("Universo (desde cache): %s", universe_symbols)
 
-        end_ms = int(time.time() * 1000)
+        # Fecha final FIJA para que el veredicto oficial sea reproducible
+        # (dos corridas dan exactamente los mismos numeros) -- ver
+        # docs/FASE2_CRITERIOS.md para la fecha congelada y por que.
+        end_ms = settings.backtest_official_end_ms
         logger.info(
             "Corriendo backtest completo (%s a %s)...",
             datetime.fromtimestamp(START_MS / 1000, tz=UTC).date(),
             datetime.fromtimestamp(end_ms / 1000, tz=UTC).date(),
         )
+
+        missing = await _find_missing_series(db, universe_symbols, START_MS, end_ms)
+        if missing:
+            print(f"\nFaltan {len(missing)} serie(s) antes de poder correr el backtest:\n")
+            for problem in missing:
+                print(f"  - {problem}")
+            print("\nCorre primero: python scripts/download_history.py")
+            return
+
         results = await run_full_backtest(db, settings, universe_symbols, START_MS, end_ms)
 
         print("\n=== RESUMEN DE VEREDICTOS (Fase 2) ===\n")
