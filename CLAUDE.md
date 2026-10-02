@@ -3,6 +3,9 @@
 ## Contexto
 Especificación completa en docs/SPEC.md y base previa en docs/openspec.md (nunca probada: evalúala críticamente, no la copies a ciegas). Lee SPEC.md al inicio de cada sesión.
 
+## Idioma
+A partir de ahora, todas las respuestas, resúmenes y documentos para este proyecto deben estar en español. Los identificadores de código (variables, funciones, clases, tablas, columnas) siguen en inglés.
+
 ## Reglas críticas
 - v1 es 100% paper trading. Prohibido escribir código que envíe órdenes reales a Bitunix. La ejecución real solo existe como interfaz/documentación (BitunixBackend desactivado).
 - Nunca leas, imprimas ni pidas archivos .env ni credenciales. Usa solo .env.example con valores vacíos. Nunca incluyas claves en código, tests, logs ni commits.
