@@ -140,11 +140,23 @@ de ruina) y si los límites del punto 4 se sostienen en la práctica -- no
 para la comparación de calidad del LLM, que ya está limpia en
 `shadow_trades`.
 
-**Umbral de "evidencia baja"**: 30 operaciones por lado de la comparación
-`APROBADA` vs. `RECHAZADA` (mismo `BACKTEST_MIN_TRADES_PER_CELL` ya usado
-en Fase 2) -- por debajo de eso, el `/metrics` de Telegram y el reporte de
+**Criterio de valor de la IA** (explícito, para no dejarlo implícito en un
+umbral de paso): se considera que hay evidencia suficiente para juzgar si
+el LLM aporta valor cuando existen, en `shadow_trades`, **al menos N=30
+operaciones `APROBADA` Y al menos N=30 `RECHAZADA`** (mismo
+`BACKTEST_MIN_TRADES_PER_CELL` ya usado en Fase 2 -- no se introduce un
+segundo número sin justificar; es el mínimo que Fase 2 ya definió para que
+una celda cuente en el reporte agregado). Por debajo de ese N en
+CUALQUIERA de los dos lados, el `/metrics` de Telegram y el reporte de
 paso a dinero real (punto 8) muestran la cifra junto con una advertencia
-explícita, nunca la ocultan ni la redondean a "sin datos".
+explícita de evidencia insuficiente -- nunca la ocultan, nunca la
+redondean a "sin datos", y nunca se usan para concluir que el LLM aporta o
+no aporta valor. Esta comparación ocurre enteramente dentro de
+`shadow_trades` (operación sombra, margen ilimitado, mismo motor para
+ambos lados) -- la cuenta real NO es la fuente de este criterio, es
+intencionalmente una población distinta y más chica (solo lo que además
+pasó el motor de riesgo); la cuenta real sirve para medir drawdown y
+supervivencia (punto 8), nunca para decidir si el LLM vale la pena.
 
 ## 3. Un único motor de riesgo compartido (backtest + paper trading)
 
