@@ -275,17 +275,21 @@ secciones "Correcciones..." de `docs/FASE2_CRITERIOS.md` y en
 
 ### Pendientes explicitos para fases siguientes
 
-- Fase 3: ver `docs/FASE3_PLAN.md` (plan propuesto, pendiente de tu
-  aprobacion).
-- Fase 3: simulador realista completo (SL/TP escalonado, trailing,
-  liquidacion por tiers de `position_tiers`, funding periodico, slippage,
-  reconciliacion tras downtime), motor de riesgo completo (circuit breaker
-  con enfriamiento de 8h + pausa indefinida separada para drawdown/perdida
-  diaria, limites de correlacion).
-- Fase 4: noticias (RSS CoinDesk/Cointelegraph, sentimiento con
-  `claude-haiku-4-5`), Claude como motor de decision completo
-  (`claude-sonnet-5`) con memoria/lecciones y calibracion del % de exito,
-  presupuesto diario de 1 USD con corte duro.
+- **Fase 3**: plan propuesto en `docs/FASE3_PLAN.md`, **pendiente de tu
+  aprobacion del contenido** (distinto de la aprobacion del proceso de
+  planificacion en Plan Mode, ya obtenida). Fusiona deliberadamente lo que
+  `docs/FASE0.md` separaba en "Fase 3" (motor de riesgo, simulador
+  realista con SL/TP/trailing/liquidacion por tiers, funding periodico,
+  slippage, reconciliacion tras downtime) y "Fase 4" (LLM como motor de
+  decision) -- medir el valor del LLM (brazo B vs. C vs. A, ver el plan)
+  exige que el LLM ya este tomando decisiones reales, asi que no puede
+  quedar en una fase posterior separada. 8 subfases con criterios de
+  aceptacion propios (3.1 a 3.8), ver el plan para el detalle completo.
+- Fase 4 (lo que queda tras la fusion anterior): noticias (RSS CoinDesk/
+  Cointelegraph, sentimiento), memoria/lecciones entre operaciones,
+  recalibracion automatica del umbral de confianza del LLM -- mejoras
+  sobre el filtro aprobar/rechazar que Fase 3 ya entrega, no requisitos
+  para su primera medicion.
 - Fase 5: autenticacion (un usuario/password), dashboard completo (tiempo
   real via WS, graficos, controles), API completa, Telegram.
 - Fase 6: Docker final multi-stage, pruebas E2E, informe de metricas de
