@@ -47,10 +47,14 @@ async def populated_db(tmp_path, monkeypatch):
             _trade(strategy, 2, pnl_net=-2.0, sl_margin_loss_pct=20.0),
             _trade(strategy, 3, pnl_net=9.0, sl_margin_loss_pct=60.0),  # excluida con tope 30%
         ]
+    # Reproduce el fallo real reportado: una estrategia cuyo UNICO SL es el
+    # de respaldo porcentual fijo (100% de sus operaciones en 50.0) queda
+    # sin operaciones elegibles bajo el tope de 40% de la grilla -- el
+    # script completo no debe romperse por esto (antes, si lo hacia).
     one_experimental = next(iter(EXPERIMENTAL_STRATEGIES))
     trades += [
-        _trade(one_experimental, 0, pnl_net=2.0, sl_margin_loss_pct=15.0),
-        _trade(one_experimental, 1, pnl_net=-1.0, sl_margin_loss_pct=15.0),
+        _trade(one_experimental, 0, pnl_net=2.0, sl_margin_loss_pct=50.0),
+        _trade(one_experimental, 1, pnl_net=-1.0, sl_margin_loss_pct=50.0),
     ]
     await backtest_repo.insert_trades(database, trades)
     await database.close()
@@ -90,6 +94,21 @@ async def test_main_reports_sl_cap_exclusions(populated_db):
     report_path = populated_db
     await analyze_risk.main()
     content = report_path.read_text(encoding="utf-8")
-    # La fila de tope 30% debe mostrar al menos 1 excluida por estrategia
-    # (la operacion sintetica con sl_margin_loss_pct=60.0).
-    assert "| 30%" in content
+    # La fila de tope 40% debe aparecer (grilla default revisada:
+    # 40%/50%/sin tope, ya no 30%/50%).
+    assert "| 40%" in content
+    assert "sin tope" in content
+    # La estrategia experimental con SL fijo en 50.0 queda "n/a" (0
+    # elegibles) a tope 40% -- el script no se cae por esto.
+    assert "n/a" in content
+
+
+@pytest.mark.asyncio
+async def test_main_does_not_crash_when_a_strategy_has_zero_eligible_trades(populated_db):
+    """Regresion directa del fallo real: antes, `ValueError: pct_returns no
+    puede estar vacio` tumbaba el script entero a mitad de la grilla de
+    `ema_cross_9_21`/las de funding (SL fijo en 50%, tope de grilla mas
+    ajustado). Ahora debe terminar y escribir el reporte completo."""
+    report_path = populated_db
+    await analyze_risk.main()  # no debe lanzar
+    assert report_path.exists()

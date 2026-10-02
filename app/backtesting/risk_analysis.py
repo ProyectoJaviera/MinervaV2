@@ -81,10 +81,43 @@ negativa" (ver `scripts/analyze_risk.py`), y es tambien la base de los
 escenarios de sensibilidad (deriva neutra / PF 1.2) que separan el efecto
 de la deriva de la estrategia del efecto puramente estructural de
 margen/posiciones simultaneas.
+
+**Grilla de topes de SL (sexta revision -- corregido tras un fallo real al
+ejecutar `scripts/analyze_risk.py` contra la base real)**: `ema_cross_9_21`
+y las 2 estrategias de funding no definen un `stop_price` propio -- su SL
+es el de respaldo porcentual (`BACKTEST_FALLBACK_SL_PCT=5%` de movimiento
+de precio, que a 10x de apalancamiento es EXACTAMENTE 50% de perdida de
+margen) en el 100% de sus operaciones. La grilla anterior incluia un tope
+de 30%, que las deja con 0 operaciones elegibles -- `pct_returns` vacio,
+lo que antes lanzaba `ValueError` y tumbaba el script entero a mitad de
+camino. Dos correcciones, separadas:
+
+- **Un escenario con 0 operaciones elegibles ya NO lanza excepcion**: se
+  reporta como una fila valida con `prob_ruin_pct`/`prob_drawdown_gt_30_pct`
+  en `None` (la tabla la muestra como "n/a") y `included_trades=0` --
+  informativo, no un error. El resto de la grilla sigue calculandose
+  normalmente.
+- **La grilla de topes default cambia a `(0.40, 0.50, float("inf"))`**
+  ("sin tope" representado como infinito, nunca excluye nada): a 40%
+  seguiran apareciendo filas "n/a" para esas 3 estrategias (mismo motivo,
+  informativo, no un bug); a 50% y "sin tope", el POOL incluido es
+  IDENTICO para todas las estrategias de este dataset (mismas operaciones,
+  0 excluidas en ambos casos), porque el backtest ya solo admitio
+  operaciones con `sl_margin_loss_pct <= 50` (`MAX_SL_MARGIN_LOSS_PCT`) al
+  generarlas -- un tope en vivo de 50% o mas permisivo no excluye nada que
+  el backtest no haya excluido ya. Las PROBABILIDADES de esas dos filas
+  pueden diferir levemente entre si de todos modos (`run_full_grid` usa un
+  solo `random.Random` que avanza secuencialmente por toda la grilla, asi
+  que cada fila consume un tramo distinto del muestreo aunque el pool de
+  entrada sea igual) -- esa diferencia es ruido de Monte Carlo, no un
+  error de calculo; lo que confirma la coincidencia es la columna
+  "Incluidas"/"Excluidas por tope", no que las probabilidades deban salir
+  bit a bit iguales.
 """
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 from typing import Protocol
@@ -93,7 +126,12 @@ RUIN_DRAWDOWN_THRESHOLD_PCT = 30.0
 
 DEFAULT_MARGINS_USDT = (5.0, 10.0)
 DEFAULT_POSITION_CAPS = (1, 2, 3)
-DEFAULT_SL_CAPS_PCT = (0.30, 0.50)
+# 0.40 y 0.50 exploran el limite real (ver docstring del modulo); inf =
+# "sin tope" (nunca excluye nada), de referencia -- a este dataset incluye
+# el MISMO pool que 0.50 (0 exclusiones en ambos casos) porque el backtest
+# ya no genero ninguna operacion con mas de 50% de riesgo planeado; las
+# probabilidades de cada fila pueden diferir por ruido de muestreo.
+DEFAULT_SL_CAPS_PCT = (0.40, 0.50, float("inf"))
 DEFAULT_TRIALS = 2000
 DEFAULT_TRIAL_LENGTH = 100
 DEFAULT_BLOCK_SIZE_FOR_COMPARISON = 5
@@ -116,8 +154,10 @@ class RiskScenario:
     margin_usdt: float
     max_simultaneous_positions: int
     sl_cap_pct: float
-    prob_ruin_pct: float
-    prob_drawdown_gt_30_pct: float
+    # `None` cuando 0 operaciones sobreviven el tope de SL de esta fila --
+    # escenario informativo ("n/a" en la tabla), no un error.
+    prob_ruin_pct: float | None
+    prob_drawdown_gt_30_pct: float | None
     trials: int
     trial_length: int
     excluded_by_sl_cap: int
@@ -253,6 +293,24 @@ def run_bootstrap_scenario(
 ) -> RiskScenario:
     kept, excluded = filter_trades_by_sl_cap(trades, sl_cap_pct)
     pct_returns = pct_returns_from_trades(kept)
+
+    if not pct_returns:
+        # 0 operaciones elegibles bajo este tope (p.ej. una estrategia cuyo
+        # unico SL es un porcentaje fijo mas amplio que el tope de esta
+        # fila): informativo, no un error -- ver docstring del modulo.
+        return RiskScenario(
+            margin_usdt=margin_usdt,
+            max_simultaneous_positions=max_simultaneous_positions,
+            sl_cap_pct=sl_cap_pct,
+            prob_ruin_pct=None,
+            prob_drawdown_gt_30_pct=None,
+            trials=trials,
+            trial_length=trial_length,
+            excluded_by_sl_cap=excluded,
+            included_trades=0,
+            block_size=block_size,
+        )
+
     prob_ruin, prob_dd = _run_bootstrap_core(
         pct_returns, initial_capital, margin_usdt, max_simultaneous_positions,
         rng, trials, trial_length, block_size,
@@ -339,11 +397,18 @@ def format_markdown_table(results: list[RiskScenario]) -> str:
         "|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
+        sl_cap_str = "sin tope" if math.isinf(r.sl_cap_pct) else f"{r.sl_cap_pct * 100:.0f}%"
+        if r.prob_ruin_pct is None:
+            total = r.excluded_by_sl_cap + r.included_trades
+            ruin_str = f"n/a (0 de {total} elegibles)"
+            dd_str = "n/a"
+        else:
+            ruin_str = f"{r.prob_ruin_pct:.1f}%"
+            dd_str = f"{r.prob_drawdown_gt_30_pct:.1f}%"
         lines.append(
             f"| {r.margin_usdt:.0f} | {r.max_simultaneous_positions} | "
-            f"{r.sl_cap_pct * 100:.0f}% | {r.block_size} | {r.excluded_by_sl_cap} | "
-            f"{r.included_trades} | {r.prob_ruin_pct:.1f}% | "
-            f"{r.prob_drawdown_gt_30_pct:.1f}% |"
+            f"{sl_cap_str} | {r.block_size} | {r.excluded_by_sl_cap} | "
+            f"{r.included_trades} | {ruin_str} | {dd_str} |"
         )
     return "\n".join(lines)
 

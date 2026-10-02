@@ -1,7 +1,8 @@
 """Tests de `app/backtesting/risk_analysis.py` -- bootstrap de riesgo de
 ruina sobre operaciones del backtest (tarea 5; quinta revision: el tope de
-SL excluye operaciones enteras en vez de truncar perdidas, ver el
-docstring del modulo)."""
+SL excluye operaciones enteras en vez de truncar perdidas; sexta revision:
+0 operaciones elegibles ya no lanza excepcion, ver el docstring del
+modulo)."""
 
 from __future__ import annotations
 
@@ -189,12 +190,90 @@ def test_block_bootstrap_preserves_consecutive_order():
     assert scenario.prob_ruin_pct == 0.0
 
 
-def test_empty_trades_raises():
-    with pytest.raises(ValueError):
-        run_bootstrap_scenario(
-            [], initial_capital=100.0, margin_usdt=10.0,
-            max_simultaneous_positions=1, sl_cap_pct=0.5, rng=random.Random(0),
-        )
+def test_empty_trades_returns_na_scenario_instead_of_raising():
+    """`trades` vacio de entrada (nunca hubo operaciones) debe comportarse
+    igual que 0 operaciones elegibles tras el filtro -- escenario "n/a",
+    nunca una excepcion que tumbe el resto de la grilla."""
+    scenario = run_bootstrap_scenario(
+        [], initial_capital=100.0, margin_usdt=10.0,
+        max_simultaneous_positions=1, sl_cap_pct=0.5, rng=random.Random(0),
+    )
+    assert scenario.prob_ruin_pct is None
+    assert scenario.prob_drawdown_gt_30_pct is None
+    assert scenario.included_trades == 0
+    assert scenario.excluded_by_sl_cap == 0
+
+
+def test_fixed_fallback_sl_strategy_is_na_under_a_tighter_cap_without_raising():
+    """Reproduce el fallo real reportado contra la base real: una
+    estrategia (p.ej. `ema_cross_9_21` o las de funding) cuyo UNICO SL es
+    el de respaldo porcentual fijo cae con `sl_margin_loss_pct=50.0` en el
+    100% de sus operaciones -- un tope mas ajustado (30%) las deja con 0
+    operaciones elegibles. Antes esto lanzaba `ValueError` y tumbaba
+    `scripts/analyze_risk.py` a mitad de la grilla; ahora debe devolver un
+    escenario "n/a" sin excepcion, reportando cuantas se excluyeron."""
+    trades = [_trade(4.0, sl_margin_loss_pct=50.0) for _ in range(5)] + [
+        _trade(-3.0, sl_margin_loss_pct=50.0) for _ in range(5)
+    ]
+    scenario = run_bootstrap_scenario(
+        trades, initial_capital=100.0, margin_usdt=10.0,
+        max_simultaneous_positions=1, sl_cap_pct=0.30, rng=random.Random(0),
+        trials=50, trial_length=10,
+    )
+    assert scenario.prob_ruin_pct is None
+    assert scenario.prob_drawdown_gt_30_pct is None
+    assert scenario.included_trades == 0
+    assert scenario.excluded_by_sl_cap == 10
+
+    table = format_markdown_table([scenario])
+    assert "n/a" in table
+    assert "0 de 10 elegibles" in table
+
+    # El mismo pool, con un tope que SI cubre su SL fijo (50%), si opera.
+    scenario_ok = run_bootstrap_scenario(
+        trades, initial_capital=100.0, margin_usdt=10.0,
+        max_simultaneous_positions=1, sl_cap_pct=0.50, rng=random.Random(0),
+        trials=50, trial_length=10,
+    )
+    assert scenario_ok.prob_ruin_pct is not None
+    assert scenario_ok.included_trades == 10
+    assert scenario_ok.excluded_by_sl_cap == 0
+
+
+def test_run_full_grid_does_not_raise_when_one_cell_is_empty():
+    """Toda la grilla debe terminar de calcularse aunque alguna de sus
+    filas quede sin operaciones elegibles -- no debe interrumpirse a mitad
+    de camino (el fallo real reportado)."""
+    trades = [_trade(4.0, sl_margin_loss_pct=50.0), _trade(-3.0, sl_margin_loss_pct=50.0)]
+    results = run_full_grid(
+        trades, margins=(10.0,), position_caps=(1,), sl_caps=(0.30, 0.50),
+        trials=20, trial_length=10, seed=0,
+    )
+    assert len(results) == 2
+    na_row, ok_row = results
+    assert na_row.prob_ruin_pct is None
+    assert ok_row.prob_ruin_pct is not None
+
+
+def test_sin_tope_matches_50_percent_cap_when_no_trade_exceeds_it():
+    """`sl_cap_pct=inf` ("sin tope") y 50% deben dar el MISMO resultado
+    cuando ninguna operacion del pool supera el 50% (el caso real de este
+    dataset, donde el backtest ya solo admite operaciones <= 50% de
+    riesgo planeado) -- confirma que la fila "sin tope" no es un error de
+    calculo, es la evidencia de que 50% ya no excluye nada."""
+    trades = [_trade(4.0, sl_margin_loss_pct=50.0), _trade(-3.0, sl_margin_loss_pct=20.0)]
+    scenario_50 = run_bootstrap_scenario(
+        trades, initial_capital=100.0, margin_usdt=10.0,
+        max_simultaneous_positions=1, sl_cap_pct=0.50, rng=random.Random(5),
+        trials=50, trial_length=10,
+    )
+    scenario_inf = run_bootstrap_scenario(
+        trades, initial_capital=100.0, margin_usdt=10.0,
+        max_simultaneous_positions=1, sl_cap_pct=float("inf"), rng=random.Random(5),
+        trials=50, trial_length=10,
+    )
+    assert scenario_50.included_trades == scenario_inf.included_trades == 2
+    assert scenario_50.prob_ruin_pct == scenario_inf.prob_ruin_pct
 
 
 def test_run_full_grid_covers_all_combinations():

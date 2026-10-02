@@ -17,6 +17,7 @@ A partir de ahora, todas las respuestas, resúmenes y documentos para este proye
 - Haz commits pequeños con mensajes claros (Conventional Commits). Nunca hagas push sin que yo lo pida.
 - Pruebas: pytest + pytest-asyncio. Toda función de riesgo y de simulación (SL/TP/trailing, liquidación, comisiones, funding) debe tener tests con casos límite.
 - Antes de dar por terminada cualquier tarea que toque el pipeline de datos o la persistencia, ejecuta un smoke test de punta a punta con un subconjunto pequeño; que los tests unitarios pasen no es suficiente.
+- Todo script que lea la base real debe ejecutarse antes de entregarlo contra una copia temporal de esa base (ruta distinta de `settings.database_path`, verificada con un assert explícito) y confirmar que termina sin errores con sus datos reales; los tests con datos sintéticos no bastan para esto (ver el fallo real de `scripts/analyze_risk.py` que esta regla previene).
 - Mantén PROGRESS.md: estado por fase, decisiones y pendientes.
 
 ## REGLAS DE TRABAJO
