@@ -281,3 +281,20 @@ cualquier estrategia con un perfil de resultados parecido:
   juntas (1 = i.i.d., el default; mayor a 1 = preserva algo de la
   correlación temporal real entre pérdidas consecutivas, que el i.i.d.
   subestima).
+
+**Advertencia importante sobre la columna "Máx. posiciones simultáneas"**:
+esta tabla NO es fiable para decidir cuántas posiciones simultáneas
+permitir en vivo. Dos sesgos van en la misma dirección equivocada: (1) el
+drawdown se mide solo al cierre de cada lote de posiciones, nunca dentro
+de él -- con lotes más grandes hay menos puntos de medición en el mismo
+ensayo, lo que sesga el drawdown medido hacia abajo; (2) el método trata
+cada operación remuestreada como independiente, pero las altcoins del
+universo están correlacionadas entre sí -- "3 posiciones simultáneas" en
+la práctica se parece más a una apuesta direccional grande que a 3
+apuestas independientes, algo que este bootstrap no puede capturar. El
+resultado neto es que más posiciones simultáneas aparenta menos riesgo en
+esta tabla -- al revés de la realidad. No usar esta columna para justificar
+`MAX_SIMULTANEOUS_POSITIONS`; el riesgo de correlación entre símbolos se
+acota aparte con `MAX_SAME_DIRECTION_POSITIONS` (ver `docs/FASE3_PLAN.md`
+sección 4). Ver también `app/backtesting/risk_analysis.py` (limitación 2
+del docstring del módulo).

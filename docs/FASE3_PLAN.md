@@ -1,12 +1,18 @@
 # Fase 3 -- Gestión de riesgo, ejecución realista en paper trading y medición del valor del LLM
 
-> Plan propuesto por el asistente, documento únicamente -- sin código hasta
-> que se apruebe el contenido de este plan (distinto de la aprobación del
-> propio proceso de planificación en Plan Mode, ya obtenida). Revisión
-> (segunda ronda, tras feedback del usuario): corrige el diseño de los tres
-> brazos de comparación, el modelo y costo del LLM, el tope de SL de la
-> sección 4 (hallazgo empírico nuevo, ver abajo) y el ritmo esperado de
-> operaciones reales -- ver el detalle de cada cambio en su sección.
+> **Plan aprobado por el usuario, con los ajustes de la tercera ronda ya
+> incorporados** (ver abajo). Documento únicamente -- la implementación
+> real avanza subfase por subfase (ver la tabla de subfases), deteniéndose
+> a esperar aprobación al terminar cada una. Revisión (segunda ronda, tras
+> feedback del usuario): corrige el diseño de los tres brazos de
+> comparación, el modelo y costo del LLM, el tope de SL de la sección 4
+> (hallazgo empírico nuevo) y el ritmo esperado de operaciones reales.
+> Tercera ronda: corrige la fiabilidad de la dimensión "posiciones
+> simultáneas" del bootstrap (sección 4), corrige el ritmo de operaciones
+> con las cifras OOS reales (sección 8, antes mezclaba IS+OOS), eleva el
+> criterio de valor de la IA a N=100 por lado con intervalo de confianza
+> (sección 2), hace configurable el stop por drawdown (sección 4), y deja
+> explícito que el precio de Sonnet no está verificado (sección 6).
 > Investigación de respaldo: dos agentes Explore (hechos verbatim de
 > `docs/SPEC.md` / `docs/FASE0.md`, y del código actual de `app/execution/`,
 > `app/backtesting/engine.py`, `app/core/scheduler.py`,
@@ -140,23 +146,49 @@ de ruina) y si los límites del punto 4 se sostienen en la práctica -- no
 para la comparación de calidad del LLM, que ya está limpia en
 `shadow_trades`.
 
-**Criterio de valor de la IA** (explícito, para no dejarlo implícito en un
-umbral de paso): se considera que hay evidencia suficiente para juzgar si
-el LLM aporta valor cuando existen, en `shadow_trades`, **al menos N=30
-operaciones `APROBADA` Y al menos N=30 `RECHAZADA`** (mismo
-`BACKTEST_MIN_TRADES_PER_CELL` ya usado en Fase 2 -- no se introduce un
-segundo número sin justificar; es el mínimo que Fase 2 ya definió para que
-una celda cuente en el reporte agregado). Por debajo de ese N en
-CUALQUIERA de los dos lados, el `/metrics` de Telegram y el reporte de
-paso a dinero real (punto 8) muestran la cifra junto con una advertencia
-explícita de evidencia insuficiente -- nunca la ocultan, nunca la
-redondean a "sin datos", y nunca se usan para concluir que el LLM aporta o
-no aporta valor. Esta comparación ocurre enteramente dentro de
-`shadow_trades` (operación sombra, margen ilimitado, mismo motor para
-ambos lados) -- la cuenta real NO es la fuente de este criterio, es
-intencionalmente una población distinta y más chica (solo lo que además
-pasó el motor de riesgo); la cuenta real sirve para medir drawdown y
-supervivencia (punto 8), nunca para decidir si el LLM vale la pena.
+**Criterio de valor de la IA** (revisado, tercera ronda -- el umbral
+anterior de N=30 por lado medía solo que hubiera "algo" de muestra, no que
+la diferencia fuera real): se considera que hay evidencia SUFICIENTE para
+concluir si el LLM aporta valor cuando existen, en `shadow_trades`, **al
+menos N=100 operaciones `APROBADA` Y al menos N=100 `RECHAZADA`**, Y el
+intervalo de confianza bootstrap (remuestreo con reemplazo, mismo método
+ya construido en `app/backtesting/risk_analysis.py`, aplicado aquí a la
+diferencia de esperanza `esperanza(APROBADA) - esperanza(RECHAZADA)`) al
+95% **excluye el cero** -- si el intervalo cruza el cero, la diferencia
+observada podría ser ruido, y se reporta así explícitamente (no se
+redondea a "el LLM ayuda" ni a "el LLM no ayuda"). Con N entre 30 y 100 en
+cualquiera de los dos lados, el `/metrics` de Telegram y el reporte de
+paso a dinero real (punto 8) muestran las cifras igual, con una advertencia
+de **evidencia baja** (no "insuficiente" -- se muestra, pero no decide
+nada); por debajo de 30 por lado, se muestra la cifra cruda sin más
+análisis. Esta comparación ocurre enteramente dentro de `shadow_trades`
+(operación sombra, margen ilimitado, mismo motor para ambos lados) -- la
+cuenta real NO es la fuente de este criterio, es intencionalmente una
+población distinta y más chica (solo lo que además pasó el motor de
+riesgo); la cuenta real sirve para medir drawdown y supervivencia (punto
+8), nunca para decidir si el LLM vale la pena.
+
+**Deduplicación de señales simultáneas (nuevo)**: la tabla `signals` del
+punto 1 registra SIEMPRE una fila por cada (símbolo, estrategia,
+timeframe, vela) -- nunca se deduplica en el origen, es el registro
+auditable completo. Pero cuando dos o más estrategias distintas emiten
+señal accionable en el MISMO símbolo, la MISMA dirección y la MISMA vela
+(p. ej. `ema_cross_9_21` y `donchian_breakout_20` ambas LONG en BTCUSDT al
+cierre de la misma vela de 4h), se agrupan en UN solo candidato de
+operación antes de simular/decidir -- no se abren 2-3 posiciones
+(sombra o reales) por lo que es, en la práctica, la misma oportunidad de
+mercado, y no se le hacen 2-3 llamadas al LLM por lo mismo. El candidato
+agrupado guarda la lista completa de estrategias que coincidieron
+(`contributing_strategies`); el LLM recibe el contexto de todas ellas
+junto (esto es, en los hechos, la señal de confluencia que ya preveía
+`docs/SPEC.md`). Para que el reporte "por estrategia" (`/metrics`, punto 8)
+siga siendo posible pese a esta agrupación, el resultado de la operación
+agrupada se atribuye a CADA estrategia contribuyente en su propio desglose
+-- nunca solo a la primera o a una "estrategia ganadora" arbitraria. Todos
+los reportes de este punto (y de `/metrics`, punto 5, y del reporte de
+paso a dinero real, punto 8) muestran SIEMPRE el desglose por estrategia,
+nunca solo el agregado -- el agregado puede ocultar que una sola
+estrategia domina el resultado.
 
 ## 3. Un único motor de riesgo compartido (backtest + paper trading)
 
@@ -228,15 +260,50 @@ como parámetro EN VIVO excluiría justo a la estrategia que mejor pasó Fase
 2 (`ema_cross_9_21`) y a las dos que `docs/FASE2_RESULTADOS.md` ya marcó
 explícitamente para observación hacia adelante.
 
+**Advertencia sobre la dimensión "posiciones simultáneas" del bootstrap**
+(tercera ronda, corrección del usuario): `docs/FASE2_RIESGO.md` NO es
+fiable para justificar `MAX_SIMULTANEOUS_POSITIONS` por dos motivos
+metodológicos documentados ahí mismo: (1) el bootstrap por lotes
+(`app/backtesting/risk_analysis.py`) mide el drawdown solo al CIERRE de
+cada lote, no dentro de él -- con más posiciones por lote, menos lotes
+totales en el mismo ensayo, así que hay MENOS puntos de medición, lo que
+sesga el drawdown medido hacia abajo (parece menos riesgoso de lo que es);
+(2) el método asume operaciones independientes, pero las altcoins del
+universo están correlacionadas entre sí (suelen moverse juntas) -- abrir
+"3 posiciones simultáneas" en la práctica es más parecido a una sola
+apuesta direccional grande que a 3 apuestas independientes, algo que el
+bootstrap no puede capturar porque remuestrea operaciones sueltas sin
+noción de qué símbolo o dirección tenía cada una. El efecto neto de ambos
+sesgos es que MÁS posiciones simultáneas aparenta MENOS riesgo en la
+tabla -- al revés de la realidad. Por eso el valor de
+`MAX_SIMULTANEOUS_POSITIONS` de abajo NO se justifica con esa columna
+(se mantiene en 3 porque ya estaba fijado desde Fase 0/1, no porque la
+grilla lo confirme), y se agrega un límite nuevo e independiente,
+`MAX_SAME_DIRECTION_POSITIONS`, para acotar directamente el riesgo de
+correlación que el bootstrap no puede medir.
+
 | Parámetro | Valor propuesto | Por qué | Qué de `docs/FASE2_RIESGO.md` lo confirma o lo cambia |
 |---|---|---|---|
 | Margen por operación | **5 USDT** (bajar de los 10 ya configurados) | La simulación de cartera de Fase 2 arruina la cuenta a 10 USDT/3 posiciones en 3 de 4 estrategias por reglas; bajar el margen reduce la exposición por ronda mientras el filtro del LLM todavía no tiene evidencia propia. | Fila margen=5 en la grilla por estrategia de `ema_cross_9_21` y las 2 experimentales de funding (las elegibles para cuenta real, ver abajo): si P(ruina) ahí es alta, reconsiderar a la baja. |
-| Máximo de posiciones simultáneas | **3** (sin cambio) | Ya fijado en `MAX_SIMULTANEOUS_POSITIONS`; coincide con el techo de la grilla, no se introduce un número nuevo. | Columna 1 vs. 3 posiciones en esas mismas filas -- si 3 posiciones sube mucho el P(ruina) frente a 1, bajar el máximo. |
-| Tope de pérdida del SL sobre el margen | **50%** (revisado desde 30% -- ver hallazgo arriba; es exactamente `MAX_SL_MARGIN_LOSS_PCT`, no un número nuevo) | A 30%, las 3 estrategias elegibles para cuenta real quedan con 0 operaciones posibles. 50% es el mismo tope que ya usa el backtest, así que todo lo que el backtest aprobó sigue siendo operable en vivo. | La columna "Excluidas por tope" en la fila de 50% para esas 3 estrategias debe dar 0 (si no, hay una discrepancia que investigar); la fila de 30% es la evidencia documentada de por qué ese valor no es viable para ellas. |
+| Máximo de posiciones simultáneas | **3** (sin cambio) | Ya fijado en `MAX_SIMULTANEOUS_POSITIONS` desde Fase 0/1 -- **NO** se justifica con la columna de posiciones de `docs/FASE2_RIESGO.md` (ver advertencia arriba: esa columna está sesgada hacia "más posiciones = menos riesgo", al revés de la realidad). | Ninguna -- esta columna del archivo no es apta para decidir este parámetro. |
+| **Máximo de posiciones en la misma dirección** (nuevo) | **`MAX_SAME_DIRECTION_POSITIONS=2`** | Acota directamente el riesgo de correlación entre altcoins que el bootstrap no puede medir: nunca más de 2 posiciones LONG (o 2 SHORT) abiertas a la vez, sin importar en qué símbolos, para no convertir "3 posiciones simultáneas" en una sola apuesta direccional triple. `.env`-configurable. | No aplica (es precisamente la limitación que la grilla no cubre). |
+| Tope de pérdida del SL sobre el margen | **50%** (revisado desde 30% -- ver hallazgo arriba; es exactamente `MAX_SL_MARGIN_LOSS_PCT`, no un número nuevo) | A 30%, las 3 estrategias elegibles para cuenta real quedan con 0 operaciones posibles. 50% es el mismo tope que ya usa el backtest, así que todo lo que el backtest aprobó sigue siendo operable en vivo. | La columna "Excluidas por tope" en la fila de 50% para esas 3 estrategias debe dar 0 (si no, hay una discrepancia que investigar); la fila de 40% es la evidencia documentada de por qué un tope más ajustado no es viable para ellas. |
 | Pérdida máxima diaria | **5%** (sin cambio, `MAX_DAILY_LOSS_PCT`) | Ya fijado, sin evidencia en Fase 2 para moverlo. | No depende de la grilla de riesgo de ruina por operación -- es un límite de cuenta independiente. |
 | Circuit breaker | **4 pérdidas consecutivas**, cooldown **8h**, auto-resume (sin cambio) | Ya fijados; el auto-resume es apropiado porque es una pausa táctica, no una señal de emergencia. | idem (independiente de la grilla). |
-| Stop total por drawdown | **20%** (`MAX_DRAWDOWN_PCT`, sin cambio), resume manual | Distinto del `BACKTEST_MAX_DRAWDOWN_PCT=50%` -- ese es un criterio de descarte de ESTRATEGIA en el backtest; este es el límite de SEGURIDAD de la cuenta en vivo. | idem (independiente de la grilla). |
+| Stop total por drawdown | **20%** (`MAX_DRAWDOWN_PCT`, sin cambio) -- modo configurable, ver abajo | Distinto del `BACKTEST_MAX_DRAWDOWN_PCT=50%` -- ese es un criterio de descarte de ESTRATEGIA en el backtest; este es el límite de SEGURIDAD de la cuenta en vivo. | idem (independiente de la grilla). |
 | Kill switch manual | Inmediato, resume manual, vía `/kill`/`/resume` | Pausa el scheduler; a diferencia del circuit breaker, nunca se levanta solo. | No aplica. |
+
+**Stop por drawdown configurable (nuevo, tercera ronda)**:
+`DRAWDOWN_STOP_MODE` (`.env`, valores `"duro"` o `"alerta"`, default
+**`"duro"`**) -- en modo `"duro"` el stop del 20% detiene el scheduler de
+verdad (resume manual, igual que antes); en modo `"alerta"` el bot sigue
+operando pero notifica por Telegram. En AMBOS modos se incrementa un
+contador persistente `system_state.drawdown_stop_would_have_triggered_count`
+cada vez que el drawdown cruza el 20%, se esté deteniendo el bot o no --
+este contador alimenta el criterio de paso a dinero real (punto 8) sin
+importar en qué modo haya corrido la cuenta: una cuenta que pasó meses en
+modo `"alerta"` y cruzó el umbral muchas veces no debe parecer más segura
+que una en modo `"duro"` solo porque nunca se detuvo de verdad.
 
 **Riesgo por operación con estos valores** (regla simple, pedida
 explícitamente): margen 5 USDT × tope de SL 50% = **2.5 USDT = 2.5% del
@@ -331,25 +398,33 @@ frecuencia real puede variar entre regímenes y (b) el conteo del backtest
 no incluye las señales que el motor de riesgo omitió por SL excesivo, que
 en vivo sí llegarían al LLM (antes del filtro del punto 2).
 
-**Estimación de costo con precios vigentes** (consultados contra la
-documentación oficial de Anthropic en esta sesión -- igual que los IDs de
-modelo, a reconfirmar en la subfase 3.6 antes de depender de ellos para
-nada crítico): el nivel Sonnet cuesta **$2.00 por millón de tokens de
-entrada y $10.00 por millón de salida**, con lecturas de caché de prompt a
-~10% del precio de entrada (descuento estándar documentado). Con hasta 25
-señales/día, un contexto fijo cacheado de ~2500 tokens (instrucciones,
-límites de riesgo del punto 4, esquema de la cuenta), ~700 tokens variables
-por señal (indicadores, funding, señales relacionadas de otras estrategias
-en el mismo símbolo) y ~250 tokens de salida (decisión + razón corta):
+**Estimación de costo -- precio NO verificado** (tercera ronda: no se da
+por confirmado el precio de Sonnet en este documento, ni siquiera el
+consultado en esta sesión contra la documentación de Anthropic -- los
+precios cambian y este plan no debe quedar con una cifra vieja grabada
+como si fuera un hecho. **El usuario confirma el precio vigente de Sonnet
+directamente en la consola de Anthropic (console.anthropic.com, sección
+de pricing/billing) antes de implementar la subfase 3.6** -- es el mismo
+paso que ya exige `CLAUDE.md` para no inventar parámetros sin verificar).
+Como referencia de orden de magnitud, NO como dato confirmado: el nivel
+Sonnet rondaría $2.00 por millón de tokens de entrada y $10.00 por millón
+de salida, con lecturas de caché de prompt a ~10% del precio de entrada
+(descuento estándar documentado). Con hasta 25 señales/día, un contexto
+fijo cacheado de ~2500 tokens (instrucciones, límites de riesgo del punto
+4, esquema de la cuenta), ~700 tokens variables por señal (indicadores,
+funding, señales relacionadas de otras estrategias en el mismo símbolo) y
+~250 tokens de salida (decisión + razón corta):
 
 - Con el caché de prompt funcionando: **≈ $0.10-0.12/día**.
 - Sin caché (escenario conservador, por si algo invalida el caché): **≈
   $0.22/día**.
 
 Ambos escenarios quedan muy por debajo del tope de **$1/día** -- incluso el
-escenario sin caché deja más de 4x de margen. Son cifras de diseño, no una
-medición real; se reevalúan con el gasto real una vez implementado (ver
-`llm_logs` abajo).
+escenario sin caché deja más de 4x de margen, con suficiente colchón para
+absorber que el precio real resulte distinto al de referencia de arriba.
+Son cifras de diseño sobre un precio no confirmado, no una medición real;
+se reevalúan con el precio real (confirmado en la consola antes de 3.6) y
+el gasto real una vez implementado (ver `llm_logs` abajo).
 
 **Registro (`llm_logs`, tabla nueva)**: cada llamada al LLM guarda
 `signal_id, prompt, response, model, input_tokens, output_tokens, cost_usd,
@@ -389,51 +464,66 @@ por el resto del día (ver punto 2, status `SIN_LLM`).
 
 ## 8. Criterios de paso a dinero real (evaluados, no automáticos)
 
-**Estimación de ritmo real de operaciones** (dato real de `backtest_trades`,
-antes de que exista paper trading real -- revisa el criterio de abajo en
-consecuencia): de las estrategias elegibles para cuenta real (punto 4) --
-`ema_cross_9_21` (659 operaciones en 1621 días ≈ 0.41/día),
-`funding_contrarian_experimental` (154 en 911 días ≈ 0.17/día) y
-`funding_contrarian_percentile_experimental` (363 en 820 días ≈ 0.44/día),
-todas ya sobreviven el tope de SL del 50% (punto 4) -- la suma da **≈ 1.0
-señal accionable elegible/día**. Es un techo optimista: no resta las que el
-LLM rechace ni las que el motor de riesgo bloquee por cupos ocupados.
+**Estimación de ritmo real de operaciones -- corregida (tercera ronda)**:
+la versión anterior usaba conteos IS+OOS combinados sobre todo el rango
+histórico, lo cual es incorrecto para estimar el ritmo EN VIVO -- lo
+correcto es usar solo las operaciones OOS (el segmento que realmente
+evalúa desempeño fuera de muestra) sobre la duración real de la ventana
+OOS, no sobre toda la historia. Corregido con datos reales de
+`backtest_trades` (`segment='OOS'`): la ventana OOS real es
+2025-04-30 a 2026-10-01, **≈519 días**. Operaciones OOS de las estrategias
+elegibles para cuenta real (punto 4): `ema_cross_9_21` **243** (≈0.47/día),
+`funding_contrarian_percentile_experimental` **184** (≈0.35/día),
+`funding_contrarian_experimental` **14** (≈0.03/día). La suma da **≈0.85
+señales accionables elegibles/día** -- techo optimista, no resta las que
+el LLM rechace ni las que el motor de riesgo bloquee por cupos ocupados.
 
-A ese ritmo, **llegar a 100 operaciones cerradas en la cuenta real toma
-aproximadamente 100 días (~3.3 meses), no 30**. El criterio "mínimo 30 días
-Y 100 operaciones" (`MIN_PAPER_TRADING_DAYS`/`MIN_CLOSED_TRADES`, ya
-fijados en Fase 0) en la práctica queda determinado por el conteo de
+**`funding_contrarian_experimental` con solo 14 operaciones OOS NO es
+evidencia sólida**: su PF de 1.43 (citado en `docs/FASE2_RESULTADOS.md`)
+viene de una muestra demasiado chica para confiar en él -- ni para
+aprobarla ni para descartarla. Se mantiene elegible para cuenta real
+(Fase 2 ya la marcó para observación hacia adelante) pero su contribución
+al ritmo de operaciones y a cualquier métrica se reporta siempre junto a
+su N, nunca como si el PF 1.43 estuviera confirmado.
+
+A ≈0.85 señales/día, **llegar a 100 operaciones cerradas en la cuenta real
+toma aproximadamente 118 días (~3.9 meses), no 30**. El criterio "mínimo
+30 días Y 100 operaciones" (`MIN_PAPER_TRADING_DAYS`/`MIN_CLOSED_TRADES`,
+ya fijados en Fase 0) en la práctica queda determinado por el conteo de
 operaciones, no por los días -- 30 días se cumple mucho antes de llegar a
 100 operaciones a este ritmo. Opciones si se quiere evaluar antes: (a)
-aceptar la ventana más larga (~100+ días), o (b) ampliar la elegibilidad de
+aceptar la ventana más larga (~120+ días), o (b) ampliar la elegibilidad de
 cuenta real a estrategias con más volumen (p. ej. `donchian_breakout_20`,
-≈1.18 operaciones/día por sí sola) a costa de un perfil de riesgo menos
-probado -- esta decisión queda para el usuario, este plan no la fuerza. No
-se recomienda bajar el umbral de 100 operaciones: Fase 0 ya lo fijó
-explícitamente para tener muestra estadística suficiente.
+749 operaciones OOS ≈1.44/día por sí sola) a costa de un perfil de riesgo
+menos probado -- esta decisión queda para el usuario, este plan no la
+fuerza. No se recomienda bajar el umbral de 100 operaciones: Fase 0 ya lo
+fijó explícitamente para tener muestra estadística suficiente.
 
 Reutiliza, además, valores YA fijados en `app/config.py` desde Fase 0/1:
 **PF > 1.3** tras costos (`MIN_PROFIT_FACTOR`) en la cuenta real (brazo
 ejecutado). Se agregan:
 
-- **Drawdown**: máximo observado en la ventana de evaluación no debe
-  superar el límite de seguridad en vivo ya definido en el punto 4 (20%,
-  `MAX_DRAWDOWN_PCT`) más de una vez (una sola activación del stop total se
-  tolera como evento aislado revisado manualmente; una segunda activación
-  dentro de la misma ventana descarta el paso a dinero real sin excepción).
+- **Drawdown**: `system_state.drawdown_stop_would_have_triggered_count`
+  (punto 4 -- se incrementa en cualquier modo, `"duro"` o `"alerta"`) no
+  debe superar 1 durante la ventana de evaluación (una sola activación se
+  tolera como evento aislado revisado manualmente; una segunda descarta el
+  paso a dinero real sin excepción). Usar el contador en vez del modo en
+  sí evita que correr en `"alerta"` haga parecer la cuenta más segura de
+  lo que realmente fue.
 - **Sin dependencia de una sola operación/activo**: mismo criterio ya
   congelado para el backtest (`BACKTEST_CONCENTRATION_LIMIT_PCT=40%` del
   PnL neto total) -- se reutiliza tal cual, no se define un segundo umbral.
 - **Sin errores críticos de reconciliación**: cero eventos de severidad
   CRITICAL en el log de reconciliación (punto 7) durante la ventana.
 - **Atribución a la IA**: el reporte de paso a dinero real muestra PF/
-  expectativa de `APROBADA` vs. `RECHAZADA` (punto 2), por estrategia y
-  agregado, lado a lado con el tamaño de muestra de cada uno. Si
-  `APROBADA` no supera a `RECHAZADA` con evidencia suficiente (≥30
-  operaciones por lado), se documenta explícitamente como una señal para
-  CONSIDERAR operar sin el filtro del LLM en vez de asumir que aporta
-  valor por defecto -- el reporte informa esta comparación, la decisión
-  final de pasar a dinero real sigue siendo manual del usuario.
+  expectativa de `APROBADA` vs. `RECHAZADA` (punto 2), SIEMPRE por
+  estrategia y agregado, lado a lado con el tamaño de muestra de cada uno.
+  Usa el criterio de valor de la IA ya definido en el punto 2 (N=100 por
+  lado Y el intervalo de confianza bootstrap de la diferencia de esperanza
+  excluyendo el cero) -- si no se cumple, se documenta explícitamente como
+  una señal para CONSIDERAR operar sin el filtro del LLM en vez de asumir
+  que aporta valor por defecto -- el reporte informa esta comparación, la
+  decisión final de pasar a dinero real sigue siendo manual del usuario.
 
 ## 9. Fuera de alcance de esta fase (y por qué)
 
@@ -482,13 +572,13 @@ ejecutado). Se agregan:
 | Subfase | Contenido | Aceptación |
 |---|---|---|
 | 3.1 | Extraer `stop_engine.py` (punto 3, modo vela) + agregar modo tick | Tests de backtest existentes siguen verdes sin tocarlos (prueba de que la extracción no cambió comportamiento); tests nuevos de modo tick con los mismos casos límite que el modo vela (SL+TP mismo tick, orden SL vs. liquidación) |
-| 3.2 | Motor de riesgo en vivo (punto 4): límites, lista de elegibilidad por estrategia, circuit breaker, stop por drawdown, kill switch, migración de `trades`/`Trade` | Test por límite (cada uno bloquea entradas nuevas sin afectar el cierre de posiciones ya abiertas); test de elegibilidad (una señal de una estrategia no elegible nunca llega a `PaperBackend.open_position`); escenario de racha de pérdidas confirma que el circuit breaker activa a la N-ésima pérdida exacta y se auto-reanuda tras el cooldown |
+| 3.2 | Motor de riesgo en vivo (punto 4): límites (incl. `MAX_SAME_DIRECTION_POSITIONS`), lista de elegibilidad por estrategia, circuit breaker, stop por drawdown configurable (`DRAWDOWN_STOP_MODE` + contador `drawdown_stop_would_have_triggered_count`), kill switch, migración de `trades`/`Trade` | Test por límite (cada uno bloquea entradas nuevas sin afectar el cierre de posiciones ya abiertas); test de elegibilidad (una señal de una estrategia no elegible nunca llega a `PaperBackend.open_position`); test de `MAX_SAME_DIRECTION_POSITIONS` (una 3ª señal LONG se bloquea aunque `MAX_SIMULTANEOUS_POSITIONS` todavía tenga cupo); test de ambos modos de `DRAWDOWN_STOP_MODE` (el contador sube en los dos, solo `"duro"` detiene el scheduler); escenario de racha de pérdidas confirma que el circuit breaker activa a la N-ésima pérdida exacta y se auto-reanuda tras el cooldown |
 | 3.3 | Generador de señales (punto 1) + tabla `signals` + filtro de tope de SL (`signals_discarded_by_sl_cap`, punto 2) | Smoke test sintético: una fila por (símbolo, estrategia, timeframe, vela), sin duplicados en polls repetidos de la misma vela cerrada; una señal con SL planeado por encima del tope queda en `signals_discarded_by_sl_cap`, no en `signals`; corrida real de 2 minutos contra copia de la BD real puebla `signals` para el universo vigente |
 | 3.4 | Integración del WS (punto 3) + monitor de posiciones en vivo + reconciliación al reiniciar (punto 7) + `data_source_health` | Test de integración: secuencia de ticks que cruza el SL cierra la posición con el precio/razón correctos; test de reconciliación: vela sintética de SL durante una caída simulada cierra la posición retroactivamente antes de retomar ticks |
-| 3.5 | `shadow_trades` sin LLM todavía (punto 2 parcial): toda señal que sobrevive el filtro de SL se simula con margen ilimitado, `llm_decision` queda `PENDIENTE` hasta 3.6 | Smoke test: shadow trades usan exactamente el mismo cálculo de fees/PnL que `PaperBackend` para la misma señal (fixture compartida); no dependen de margen/posiciones disponibles en la cuenta real |
+| 3.5 | `shadow_trades` sin LLM todavía (punto 2 parcial): señales que sobreviven el filtro de SL se AGRUPAN primero por (símbolo, dirección, vela) entre estrategias (`contributing_strategies`) y luego se simulan con margen ilimitado, `llm_decision` queda `PENDIENTE` hasta 3.6 | Smoke test: shadow trades usan exactamente el mismo cálculo de fees/PnL que `PaperBackend` para la misma señal (fixture compartida); no dependen de margen/posiciones disponibles en la cuenta real; test de agrupación: 2 señales de estrategias distintas, mismo símbolo/dirección/vela, producen UN solo `shadow_trade` con ambas estrategias listadas, no dos |
 | 3.6 | LLM (punto 6): cliente Anthropic (Sonnet), `llm_logs`, validación con pydantic, cache de prompt, temperatura baja, tope de $1/día, etiquetado `APROBADA`/`RECHAZADA`/`SIN_LLM` | Tests unitarios con el cliente de Anthropic mockeado (nunca una llamada real en tests) para aprobar/rechazar/presupuesto agotado; UNA llamada real manual (modelo y precio a confirmar contra la documentación oficial en ese momento) la corre el usuario para validar credenciales, modelo y costo real vs. la estimación de la sección 6, nunca el asistente (`CLAUDE.md`: nunca leer `.env`/credenciales) |
 | 3.7 | Bot de Telegram (punto 5): 7 comandos, long-polling, allowlist por `TELEGRAM_CHAT_ID` | Test que confirma que un `chat_id` distinto del configurado no dispara ningún comando; smoke test manual del usuario contra una instancia de paper (requiere token real de Telegram) |
-| 3.8 | Reporte de paso a dinero real (punto 8), con el ritmo de operaciones revisado | Tests contra fixtures sintéticas que cubren cada combinación de criterio pasa/falla, incluida la comparación `APROBADA` vs. `RECHAZADA` con muestra insuficiente |
+| 3.8 | Reporte de paso a dinero real (punto 8), con el ritmo de operaciones revisado (≈0.85 señales/día elegibles, ≈118 días a 100 operaciones) | Tests contra fixtures sintéticas que cubren cada combinación de criterio pasa/falla, incluido el intervalo de confianza bootstrap de `APROBADA` vs. `RECHAZADA` en los tres regímenes de evidencia (<30, 30-100, ≥100 por lado) |
 
 Orden deliberado: el motor de riesgo (3.2) va ANTES de que el generador de
 señales (3.3) multiplique de 1 símbolo/1 estrategia a 10 símbolos/6

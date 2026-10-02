@@ -38,14 +38,30 @@ es deliberadamente una aproximacion barata, no una re-simulacion completa):
    amplio pero nunca se activo), excluirla puede EMPEORAR la esperanza del
    pool sobreviviente. Ver los tests que reemplazan a los anteriores
    (tautologicos) por este comportamiento real.
-2. **Concurrencia por lotes**: en vez de modelar la superposicion temporal
-   real de posiciones abiertas, se agrupan `max_simultaneous_positions`
-   resultados remuestreados por lote, y el capital se actualiza con la
-   SUMA del lote de una sola vez. Esto captura la direccion correcta del
-   efecto (mas posiciones simultaneas -> mas varianza por ronda -> mas
-   riesgo) sin necesitar reconstruir cuando exactamente se solapan en el
-   tiempo las operaciones remuestreadas (que, al venir de un bootstrap, no
-   tienen una linea de tiempo real propia).
+2. **Concurrencia por lotes -- NO FIABLE para decidir cuantas posiciones
+   simultaneas permitir en vivo** (advertencia agregada en esta revision,
+   tras feedback del usuario, antes de que se usara mal esta columna): en
+   vez de modelar la superposicion temporal real de posiciones abiertas,
+   se agrupan `max_simultaneous_positions` resultados remuestreados por
+   lote, y el capital se actualiza con la SUMA del lote de una sola vez.
+   Esto tiene DOS sesgos que van en la misma direccion equivocada: (a) el
+   drawdown solo se mide al CIERRE de cada lote, nunca dentro de el -- con
+   lotes mas grandes hay MENOS puntos de medicion en el mismo ensayo de
+   `trial_length` operaciones, lo que sesga el drawdown medido hacia
+   ABAJO; (b) el metodo trata cada operacion remuestreada como
+   independiente de las demas, pero en la practica las altcoins del
+   universo estan correlacionadas (tienden a moverse juntas) -- "3
+   posiciones simultaneas" en la realidad se parece mas a una sola
+   apuesta direccional grande que a 3 apuestas independientes, y el
+   bootstrap no tiene forma de capturar esto porque remuestrea retornos
+   sueltos sin ninguna nocion de que simbolo o direccion tenia cada uno.
+   El resultado neto es que la tabla hace parecer que MAS posiciones
+   simultaneas significa MENOS riesgo -- exactamente al reves de lo
+   esperable. **No usar la columna de posiciones simultaneas de este
+   modulo para justificar `MAX_SIMULTANEOUS_POSITIONS`** -- el riesgo de
+   correlacion entre simbolos necesita un limite propio e independiente
+   (`MAX_SAME_DIRECTION_POSITIONS`, ver `docs/FASE3_PLAN.md` seccion 4),
+   no esta grilla.
 3. **Reescalado por margen**: el PnL de cada operacion remuestreada se
    reescala como `pct_return * margin_usdt` de la grilla -- asume que
    comisiones/slippage escalan proporcionalmente con el tamano de la
