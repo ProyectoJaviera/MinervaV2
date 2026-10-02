@@ -1,5 +1,7 @@
 """Tests de `app/backtesting/risk_analysis.py` -- bootstrap de riesgo de
-ruina sobre operaciones del backtest (tarea 5)."""
+ruina sobre operaciones del backtest (tarea 5; quinta revision: el tope de
+SL excluye operaciones enteras en vez de truncar perdidas, ver el
+docstring del modulo)."""
 
 from __future__ import annotations
 
@@ -10,24 +12,30 @@ import pytest
 
 from app.backtesting.engine import RawTrade
 from app.backtesting.risk_analysis import (
+    filter_trades_by_sl_cap,
     format_markdown_table,
+    format_sensitivity_table,
     pct_returns_from_trades,
+    rescale_returns_to_target_pf,
     run_bootstrap_scenario,
     run_full_grid,
+    run_sensitivity_grid,
 )
 from app.persistence.models import Side
 
 T0 = datetime(2024, 1, 1, tzinfo=UTC)
 
 
-def _trade(pnl_net: float, margin_usdt: float = 10.0) -> RawTrade:
+def _trade(
+    pnl_net: float, margin_usdt: float = 10.0, sl_margin_loss_pct: float | None = None
+) -> RawTrade:
     return RawTrade(
         strategy="x", symbol="BTCUSDT", timeframe="4h", side=Side.LONG,
         entry_time=T0, exit_time=T0, entry_price=100.0, exit_price=100.0, qty=1.0,
         margin_usdt=margin_usdt, leverage=10, fee_entry_usdt=0.0, fee_exit_usdt=0.0,
         slippage_cost_usdt=0.0, funding_paid_usdt=0.0, funding_is_approximated=False,
         pnl_gross_usdt=pnl_net, pnl_net_usdt=pnl_net, close_reason="TP",
-        sl_margin_loss_pct=None,
+        sl_margin_loss_pct=sl_margin_loss_pct,
     )
 
 
@@ -41,11 +49,69 @@ def test_pct_returns_skips_zero_margin_trades():
     assert pct_returns_from_trades(trades) == [0.5]
 
 
+def test_filter_by_sl_cap_excludes_whole_trades_above_threshold():
+    """El tope de SL excluye la operacion ENTERA (con su ganancia incluida
+    si la tenia) cuyo riesgo planeado al abrir supera el tope -- no trunca
+    nada. Caso deterministico, sin aleatoriedad."""
+    trades = [
+        _trade(50.0, margin_usdt=10.0, sl_margin_loss_pct=60.0),  # excluida (tope 30%)
+        _trade(5.0, margin_usdt=10.0, sl_margin_loss_pct=20.0),
+        _trade(-3.0, margin_usdt=10.0, sl_margin_loss_pct=20.0),
+    ]
+    kept, excluded = filter_trades_by_sl_cap(trades, sl_cap_pct=0.30)
+    assert excluded == 1
+    assert [t.pnl_net_usdt for t in kept] == [5.0, -3.0]
+
+
+def test_filter_by_sl_cap_keeps_trades_with_no_recorded_sl_risk():
+    """Si una operacion no tiene `sl_margin_loss_pct` (None -- p.ej. datos
+    antiguos o una entrada sin SL propio), no se excluye por este filtro."""
+    trades = [_trade(5.0, sl_margin_loss_pct=None)]
+    kept, excluded = filter_trades_by_sl_cap(trades, sl_cap_pct=0.30)
+    assert excluded == 0
+    assert len(kept) == 1
+
+
+def test_excluding_high_risk_winner_can_worsen_survivor_expectancy():
+    """Prueba de que la propiedad "tope mas ajustado nunca empeora las
+    cosas" YA NO es cierta por construccion (a diferencia del diseno
+    anterior, que truncaba perdidas): si la operacion de riesgo planeado
+    alto es la UNICA ganadora del pool, un tope mas ajustado la excluye y
+    EMPEORA la esperanza del pool sobreviviente, no la mejora."""
+    trades = [
+        _trade(50.0, margin_usdt=10.0, sl_margin_loss_pct=60.0),
+        _trade(-3.0, margin_usdt=10.0, sl_margin_loss_pct=20.0),
+        _trade(-2.0, margin_usdt=10.0, sl_margin_loss_pct=20.0),
+    ]
+    kept_loose, _ = filter_trades_by_sl_cap(trades, sl_cap_pct=0.70)
+    kept_tight, _ = filter_trades_by_sl_cap(trades, sl_cap_pct=0.30)
+    expectancy_loose = sum(t.pnl_net_usdt for t in kept_loose) / len(kept_loose)
+    expectancy_tight = sum(t.pnl_net_usdt for t in kept_tight) / len(kept_tight)
+    assert expectancy_tight < expectancy_loose
+
+
+def test_rescale_returns_to_target_pf_hits_target_exactly():
+    pct_returns = [0.5, 0.3, -0.4, -0.6, -0.2]
+    rescaled = rescale_returns_to_target_pf(pct_returns, target_pf=1.2)
+    gains = sum(r for r in rescaled if r > 0)
+    losses = -sum(r for r in rescaled if r < 0)
+    assert gains / losses == pytest.approx(1.2)
+    # las ganancias no se tocan
+    assert sorted(r for r in rescaled if r > 0) == sorted(
+        r for r in pct_returns if r > 0
+    )
+
+
+def test_rescale_raises_without_losses():
+    with pytest.raises(ValueError):
+        rescale_returns_to_target_pf([0.1, 0.2], target_pf=1.0)
+
+
 def test_all_winning_returns_never_ruin_or_drawdown():
-    pct_returns = [0.1, 0.2, 0.3]  # solo ganancias
+    trades = [_trade(1.0), _trade(2.0), _trade(3.0)]  # solo ganancias
     rng = random.Random(0)
     scenario = run_bootstrap_scenario(
-        pct_returns, initial_capital=100.0, margin_usdt=10.0,
+        trades, initial_capital=100.0, margin_usdt=10.0,
         max_simultaneous_positions=1, sl_cap_pct=0.5, rng=rng,
         trials=200, trial_length=50,
     )
@@ -54,72 +120,76 @@ def test_all_winning_returns_never_ruin_or_drawdown():
 
 
 def test_all_losing_returns_always_ruin():
-    pct_returns = [-0.9, -0.8, -0.95]  # siempre pierde casi todo el margen
+    trades = [_trade(-9.0), _trade(-8.0), _trade(-9.5)]  # pierde casi todo el margen
     rng = random.Random(0)
     scenario = run_bootstrap_scenario(
-        pct_returns, initial_capital=100.0, margin_usdt=10.0,
+        trades, initial_capital=100.0, margin_usdt=10.0,
         max_simultaneous_positions=1, sl_cap_pct=0.95, rng=rng,
         trials=200, trial_length=50,
     )
     assert scenario.prob_ruin_pct == 100.0
 
 
-def test_sl_cap_truncates_losses_beyond_the_cap():
-    """Una sola operacion que perderia el 90% del margen, con un tope de
-    SL de 30%: la perdida real aplicada no puede superar el 30% del
-    margen -- un solo trial, una sola operacion, resultado exacto."""
-    pct_returns = [-0.9]
-    rng = random.Random(0)
+def test_run_bootstrap_scenario_reports_exclusion_counts():
+    trades = [
+        _trade(50.0, sl_margin_loss_pct=60.0),  # excluida
+        _trade(1.0, sl_margin_loss_pct=20.0),
+        _trade(-1.0, sl_margin_loss_pct=20.0),
+    ]
     scenario = run_bootstrap_scenario(
-        pct_returns, initial_capital=100.0, margin_usdt=10.0,
-        max_simultaneous_positions=1, sl_cap_pct=0.30, rng=rng,
-        trials=1, trial_length=1,
+        trades, initial_capital=100.0, margin_usdt=10.0,
+        max_simultaneous_positions=1, sl_cap_pct=0.30, rng=random.Random(0),
+        trials=50, trial_length=10,
     )
-    # perdida aplicada = 30% de 10 = 3.0 -> capital final = 97.0, no ruina
-    assert scenario.prob_ruin_pct == 0.0
-
-
-def test_tighter_sl_cap_never_increases_ruin_probability():
-    """Un tope de SL mas ajustado (30%) nunca deberia dar MAS ruina que
-    uno mas laxo (50%) sobre la MISMA distribucion de retornos -- limita
-    las perdidas, nunca las agranda."""
-    rng_seed = 7
-    pct_returns = [-0.6, -0.4, -0.2, 0.1, 0.3, 0.5, -0.8]
-
-    scenario_30 = run_bootstrap_scenario(
-        pct_returns, initial_capital=100.0, margin_usdt=10.0,
-        max_simultaneous_positions=2, sl_cap_pct=0.30,
-        rng=random.Random(rng_seed), trials=1000, trial_length=100,
-    )
-    scenario_50 = run_bootstrap_scenario(
-        pct_returns, initial_capital=100.0, margin_usdt=10.0,
-        max_simultaneous_positions=2, sl_cap_pct=0.50,
-        rng=random.Random(rng_seed), trials=1000, trial_length=100,
-    )
-    assert scenario_30.prob_ruin_pct <= scenario_50.prob_ruin_pct
+    assert scenario.excluded_by_sl_cap == 1
+    assert scenario.included_trades == 2
 
 
 def test_more_simultaneous_positions_does_not_decrease_ruin_probability():
-    """Mas posiciones simultaneas (mas exposicion por ronda) no deberia
-    REDUCIR el riesgo de ruina frente a menos posiciones, sobre la misma
-    distribucion de retornos con sesgo perdedor."""
+    """Con la MISMA distribucion de retornos (sesgo perdedor) y el MISMO
+    tope de SL (por lo tanto la MISMA exclusion en ambas corridas), mas
+    posiciones simultaneas no deberia REDUCIR el riesgo de ruina frente a
+    menos posiciones."""
     rng_seed = 11
-    pct_returns = [-0.5, -0.3, -0.1, 0.2, -0.4]  # sesgo perdedor
+    trades = [
+        _trade(-5.0, sl_margin_loss_pct=20.0), _trade(-3.0, sl_margin_loss_pct=20.0),
+        _trade(-1.0, sl_margin_loss_pct=20.0), _trade(2.0, sl_margin_loss_pct=20.0),
+        _trade(-4.0, sl_margin_loss_pct=20.0),
+    ]
 
     scenario_1 = run_bootstrap_scenario(
-        pct_returns, initial_capital=100.0, margin_usdt=10.0,
+        trades, initial_capital=100.0, margin_usdt=10.0,
         max_simultaneous_positions=1, sl_cap_pct=0.50,
         rng=random.Random(rng_seed), trials=1000, trial_length=100,
     )
     scenario_3 = run_bootstrap_scenario(
-        pct_returns, initial_capital=100.0, margin_usdt=10.0,
+        trades, initial_capital=100.0, margin_usdt=10.0,
         max_simultaneous_positions=3, sl_cap_pct=0.50,
         rng=random.Random(rng_seed), trials=1000, trial_length=100,
     )
     assert scenario_3.prob_ruin_pct >= scenario_1.prob_ruin_pct
 
 
-def test_empty_returns_raises():
+def test_block_bootstrap_preserves_consecutive_order():
+    """Con `block_size` igual a la longitud del pool, cada bloque remuestreado
+    es SIEMPRE el pool entero en su orden original (rotado) -- en este caso
+    con retornos que alternan ganar/perder en un orden fijo, el resultado
+    de ruina debe coincidir exactamente con simular esa secuencia fija
+    repetida, no con un remuestreo i.i.d. independiente."""
+    trades = [_trade(5.0, sl_margin_loss_pct=10.0), _trade(-9.0, sl_margin_loss_pct=10.0)]
+    scenario = run_bootstrap_scenario(
+        trades, initial_capital=100.0, margin_usdt=10.0,
+        max_simultaneous_positions=1, sl_cap_pct=0.50, rng=random.Random(3),
+        trials=20, trial_length=10, block_size=2,
+    )
+    # La secuencia (ganar, perder) o (perder, ganar) repetida 5 veces da el
+    # mismo capital final sin importar la fase -- nunca ruina (10% margen,
+    # perdidas de 9 USDT no bajan el capital de 10 USDT en ningun punto
+    # porque siempre alternan con una ganancia antes de la siguiente).
+    assert scenario.prob_ruin_pct == 0.0
+
+
+def test_empty_trades_raises():
     with pytest.raises(ValueError):
         run_bootstrap_scenario(
             [], initial_capital=100.0, margin_usdt=10.0,
@@ -128,9 +198,10 @@ def test_empty_returns_raises():
 
 
 def test_run_full_grid_covers_all_combinations():
-    pct_returns = [0.1, -0.2, 0.3, -0.1]
+    trades = [_trade(1.0, sl_margin_loss_pct=10.0), _trade(-2.0, sl_margin_loss_pct=10.0),
+              _trade(3.0, sl_margin_loss_pct=10.0), _trade(-1.0, sl_margin_loss_pct=10.0)]
     results = run_full_grid(
-        pct_returns, margins=(5.0, 10.0), position_caps=(1, 2, 3),
+        trades, margins=(5.0, 10.0), position_caps=(1, 2, 3),
         sl_caps=(0.30, 0.50), trials=50, trial_length=20, seed=1,
     )
     assert len(results) == 2 * 3 * 2
@@ -139,9 +210,11 @@ def test_run_full_grid_covers_all_combinations():
 
 
 def test_run_full_grid_is_deterministic_with_fixed_seed():
-    pct_returns = [0.1, -0.2, 0.3, -0.1, -0.5]
-    first = run_full_grid(pct_returns, trials=100, trial_length=30, seed=42)
-    second = run_full_grid(pct_returns, trials=100, trial_length=30, seed=42)
+    trades = [_trade(1.0, sl_margin_loss_pct=10.0), _trade(-2.0, sl_margin_loss_pct=10.0),
+              _trade(3.0, sl_margin_loss_pct=10.0), _trade(-1.0, sl_margin_loss_pct=10.0),
+              _trade(-5.0, sl_margin_loss_pct=10.0)]
+    first = run_full_grid(trades, trials=100, trial_length=30, seed=42)
+    second = run_full_grid(trades, trials=100, trial_length=30, seed=42)
     assert [r.prob_ruin_pct for r in first] == [r.prob_ruin_pct for r in second]
     assert [r.prob_drawdown_gt_30_pct for r in first] == [
         r.prob_drawdown_gt_30_pct for r in second
@@ -149,13 +222,36 @@ def test_run_full_grid_is_deterministic_with_fixed_seed():
 
 
 def test_format_markdown_table_has_header_and_one_row_per_scenario():
-    pct_returns = [0.1, -0.2]
+    trades = [_trade(1.0, sl_margin_loss_pct=10.0), _trade(-2.0, sl_margin_loss_pct=10.0)]
     results = run_full_grid(
-        pct_returns, margins=(10.0,), position_caps=(1,), sl_caps=(0.5,),
+        trades, margins=(10.0,), position_caps=(1,), sl_caps=(0.5,),
         trials=10, trial_length=5, seed=0,
     )
     table = format_markdown_table(results)
     lines = table.splitlines()
     assert lines[0].startswith("| Margen")
+    assert lines[1].startswith("|---")
+    assert len(lines) == 2 + len(results)
+
+
+def test_run_sensitivity_grid_covers_all_combinations():
+    pct_returns = [0.1, -0.2, 0.3, -0.1, -0.4]
+    results = run_sensitivity_grid(
+        pct_returns, margins=(5.0, 10.0), position_caps=(1, 3),
+        target_pfs=(1.0, 1.2), trials=50, trial_length=20, seed=0,
+    )
+    assert len(results) == 2 * 2 * 2
+    combos = {(r.target_pf, r.margin_usdt, r.max_simultaneous_positions) for r in results}
+    assert len(combos) == 8
+
+
+def test_format_sensitivity_table_has_header_and_one_row_per_scenario():
+    results = run_sensitivity_grid(
+        [0.1, -0.2, 0.3, -0.1], margins=(10.0,), position_caps=(1,),
+        target_pfs=(1.0,), trials=10, trial_length=5, seed=0,
+    )
+    table = format_sensitivity_table(results)
+    lines = table.splitlines()
+    assert lines[0].startswith("| PF objetivo")
     assert lines[1].startswith("|---")
     assert len(lines) == 2 + len(results)
