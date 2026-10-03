@@ -56,6 +56,7 @@ from app.persistence.database import Database
 from app.persistence.models import Side
 from app.persistence.repositories import funding_repo, specs_repo
 from app.strategies.base import BaseStrategy, Signal
+from app.trading.sl_calc import fallback_sl_tp_prices, margin_loss_pct
 from app.trading.stop_engine import check_adverse_bar, check_favorable_tp_bar
 
 logger = get_logger(__name__)
@@ -126,14 +127,6 @@ class _Position:
     sl_margin_loss_pct: float | None
     funding_paid_usdt: float = 0.0
     funding_is_approximated: bool = False
-
-
-def _fallback_sl_tp(side: Signal, entry_price: float, settings: Settings) -> tuple[float, float]:
-    sl_pct = settings.backtest_fallback_sl_pct
-    tp_pct = settings.backtest_fallback_tp_pct
-    if side == Signal.LONG:
-        return entry_price * (1 - sl_pct), entry_price * (1 + tp_pct)
-    return entry_price * (1 + sl_pct), entry_price * (1 - tp_pct)
 
 
 async def run_backtest(
@@ -313,7 +306,7 @@ async def run_backtest(
             fill = compute_open_fill(margin_usdt, leverage, fill_price, taker_fee_pct)
 
             sl = strategy.stop_price(sub_df, side, fill_price)
-            fallback_sl, fallback_tp = _fallback_sl_tp(side, fill_price, settings)
+            fallback_sl, fallback_tp = fallback_sl_tp_prices(side, fill_price, settings)
             if sl is None:
                 sl = fallback_sl
             trailing = strategy.trailing_distance(sub_df)
@@ -321,8 +314,7 @@ async def run_backtest(
             if tp is None and trailing is None:
                 tp = fallback_tp
 
-            price_distance = abs(fill_price - sl)
-            sl_margin_loss_pct = (price_distance / fill_price) * leverage * 100
+            sl_margin_loss_pct = margin_loss_pct(fill_price, sl, leverage)
 
             if sl_margin_loss_pct > settings.max_sl_margin_loss_pct:
                 skipped.append(RawSkip(

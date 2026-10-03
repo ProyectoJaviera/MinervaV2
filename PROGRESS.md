@@ -388,4 +388,73 @@ una:
     5. `.env.example` actualizado con `MAX_SAME_DIRECTION_POSITIONS`,
        `LIVE_SL_MARGIN_CAP_PCT`, `DRAWDOWN_STOP_MODE` y
        `REAL_ACCOUNT_ELIGIBLE_STRATEGIES`.
-- 3.3 a 3.8: pendientes.
+- **3.3 -- Generador de senales en vivo: HECHA.** Nuevo
+  `app/trading/signal_generator.py`: `run_signal_generation_cycle` reemplaza
+  `Scheduler._evaluate_symbol` (Fase 1, una estrategia sobre un simbolo fijo
+  -- `settings.active_strategy`/`settings.symbols` quedan vestigiales, ya no
+  se usan) por un generador que en cada tick itera TODO el universo vigente
+  (`asset_universe` con `included=1`) x las 6 estrategias de
+  `app/strategies/registry.py` en sus timeframes, llamando
+  `precompute`+`evaluate` -- mismo codigo de indicadores que el backtest.
+  - **Tabla nueva `signals`**: una fila por (simbolo, estrategia, timeframe,
+    vela cerrada), HOLD incluido -- `UNIQUE(symbol, strategy, timeframe,
+    candle_close_time)` + `INSERT OR IGNORE` (verificado: `cursor.rowcount`
+    de aiosqlite reporta correctamente 0 en el duplicado) evita reprocesar
+    una vela ya evaluada en un poll anterior. Solo velas CERRADAS
+    (`drop_incomplete_last_bar`, reutilizado de `app/market/ohlcv_history.py`
+    sin cambios). OHLCV se descarga/cachea con el mismo
+    `download_missing`/`get_cached_or_raise` que ya usa el backtest (nunca
+    un cliente REST aparte) -- polls sucesivos de la misma vela no vuelven a
+    tocar la red. Funding (solo para las 2 estrategias `funding_contrarian_*`)
+    se lee de `funding_cache` (nunca red nueva); si esta vacia para un
+    simbolo, la estrategia simplemente HOLD (degradacion ya incorporada en
+    su diseno de Fase 2).
+  - **Filtro de tope de SL** (`signals_discarded_by_sl_cap`, nueva tabla):
+    `sl_margin_loss_pct` se calcula con la MISMA formula que el backtest,
+    ahora extraida a `app/trading/sl_calc.py` (`fallback_sl_tp_prices`,
+    `margin_loss_pct` -- extraccion PURA de `app/backtesting/engine.py`,
+    verificada porque sus 23 tests existentes pasan sin tocarlos). Si supera
+    `LIVE_SL_MARGIN_CAP_PCT`, la fila de `signals` queda
+    `status="DISCARDED_SL_CAP"` y se audita en la tabla nueva; nunca se
+    agrupa ni se intenta abrir.
+  - **Deduplicacion de senales simultaneas entre estrategias** (adelantada
+    de la subfase 3.5 por pedido explicito del usuario, porque este
+    generador ya intenta abrir posiciones reales): las senales accionables
+    que sobreviven el tope de SL se agrupan por (simbolo, direccion, vela)
+    en un `SignalCandidate` con `contributing_strategies` -- nunca se abren
+    2-3 posiciones por la misma oportunidad de mercado.
+    `pick_representative_strategy` elige, para el intento de apertura real,
+    la primera (orden alfabetico) que SI este en
+    `REAL_ACCOUNT_ELIGIBLE_STRATEGIES`; si ninguna lo esta, la primera sin
+    mas (el motor de riesgo audita el rechazo igual). El desglose COMPLETO
+    por estrategia contribuyente es diseno de `shadow_trades` (subfase 3.5),
+    fuera de alcance aqui.
+  - **`app/core/scheduler.py` reescrito**: `run_cycle` llama al generador,
+    agrupa, y por cada candidato cierra la posicion OPUESTA abierta (señal
+    contraria) o abre una nueva via `PaperBackend.open_position` --
+    `sl_margin_loss_pct` SIEMPRE se envia (nunca `None`), cumpliendo la
+    obligatoriedad agregada en el fix de la subfase 3.2. Un candidato que
+    falla (rechazo de riesgo o error inesperado) no tumba el resto del ciclo.
+  - 29 tests nuevos (`test_sl_calc.py`, `test_signals_repo.py`,
+    `test_signal_generator.py`, `test_scheduler.py`): formulas de SL/TP de
+    respaldo y riesgo planeado: casos limite LONG/SHORT/leverage/distancia
+    cero; dedup de `insert_signal` (estrategia distinta = fila nueva, misma
+    clave = `None`); `_evaluate_one` HOLD/accionable-dentro-del-tope/
+    accionable-sobre-el-tope/vela-repetida; `_group_actionable_signals`
+    (confluencia, simbolos/lados distintos, peor-caso de SL);
+    `pick_representative_strategy` (prefiere elegible, fallback alfabetico);
+    smoke test de punta a punta con las 6 estrategias REALES sobre universo
+    sintetico (vela en formacion excluida, segundo poll sin duplicados, cero
+    llamadas a la red tras el primer poll); `Scheduler._process_candidate`
+    (abre, revierte, no duplica misma direccion, no tumba el ciclo ante un
+    rechazo o un candidato invalido).
+  - **Verificado contra una copia temporal de la base real** (universo
+    vigente real, 10 simbolos: BTCUSDT, ETHUSDT, BNBUSDT, XRPUSDT, SOLUSDT,
+    TRXUSDT, ZECUSDT, HYPEUSDT, DOGEUSDT, LINKUSDT): ciclo 1 completo en
+    14.9s, puebla `signals` con exactamente 70 filas (10 simbolos x 7 pares
+    estrategia/timeframe -- `donchian_breakout_20` corre en 4h Y 1d);
+    ciclo 2 inmediato (misma vela, sin red) en 0.6s, 70 filas sin cambios
+    (confirma "sin duplicados"); 0 candidatos accionables y 0 descartes por
+    tope de SL en el mercado real del momento de la corrida (sin señal
+    vigente en ninguna estrategia/simbolo -- resultado valido, no un fallo).
+- 3.4 a 3.8: pendientes.

@@ -2,7 +2,9 @@
 
 Fase 1 creo `trades`, `system_state`, `ohlcv_cache`, `contract_specs_cache`.
 Fase 2 agrega `asset_universe`, `backtest_trades`, `backtest_skipped_entries`,
-`backtest_runs`, `backtest_verdicts`. El resto del esquema propuesto en
+`backtest_runs`, `backtest_verdicts`. Fase 3 subfase 3.2 agrega
+`risk_rejections`; subfase 3.3 agrega `signals` y
+`signals_discarded_by_sl_cap`. El resto del esquema propuesto en
 docs/FASE0.md (llm_logs, news_items, lessons_learned, etc.) se crea en la
 fase que los necesite, para no mantener tablas vacias sin dueno.
 """
@@ -215,6 +217,56 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
 
 CREATE INDEX IF NOT EXISTS idx_backtest_runs_cell
     ON backtest_runs (strategy, symbol, timeframe, segment);
+
+-- Generador de senales en vivo (Fase 3, subfase 3.3) -- una fila por CADA
+-- evaluacion (simbolo, estrategia, timeframe, vela cerrada), HOLD incluido
+-- (registro auditable completo, ver `app/trading/signal_generator.py`).
+-- `UNIQUE` + `INSERT OR IGNORE` evita duplicar la fila si el scheduler
+-- vuelve a evaluar la misma vela ya cerrada en un poll posterior.
+-- `sl_margin_loss_pct` NO esta en la lista de columnas de docs/FASE3_PLAN.md
+-- punto 1, pero se agrega aqui para auditar el MISMO numero que decide
+-- `status`/`signals_discarded_by_sl_cap` sin tener que recalcularlo despues.
+CREATE TABLE IF NOT EXISTS signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    is_experimental INTEGER NOT NULL DEFAULT 0,
+    timeframe TEXT NOT NULL,
+    candle_close_time TEXT NOT NULL,
+    evaluated_at TEXT NOT NULL,
+    signal TEXT NOT NULL CHECK (signal IN ('LONG', 'SHORT', 'HOLD')),
+    price_at_eval REAL NOT NULL,
+    stop_price REAL,
+    take_profit_price REAL,
+    trailing_distance REAL,
+    funding_rate_pct REAL,
+    funding_is_approximated INTEGER NOT NULL DEFAULT 0,
+    sl_margin_loss_pct REAL,
+    indicators_json TEXT,
+    status TEXT,
+    UNIQUE (symbol, strategy, timeframe, candle_close_time)
+);
+
+CREATE INDEX IF NOT EXISTS idx_signals_actionable
+    ON signals (symbol, signal, candle_close_time);
+
+-- Senal accionable (LONG/SHORT) cuyo `sl_margin_loss_pct` supero
+-- `LIVE_SL_MARGIN_CAP_PCT` -- se descarta ANTES de cualquier simulacion o
+-- decision del LLM (docs/FASE3_PLAN.md punto 2). `signal_id` referencia la
+-- fila ya existente en `signals` (que queda con `status='DISCARDED_SL_CAP'`,
+-- nunca se borra -- sigue siendo el registro auditable completo).
+CREATE TABLE IF NOT EXISTS signals_discarded_by_sl_cap (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    candle_close_time TEXT NOT NULL,
+    side TEXT NOT NULL CHECK (side IN ('LONG', 'SHORT')),
+    sl_margin_loss_pct REAL NOT NULL,
+    cap_pct REAL NOT NULL,
+    created_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS backtest_verdicts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

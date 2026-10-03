@@ -56,6 +56,50 @@ class RiskRejection(BaseModel):
     details: dict
 
 
+class SignalRecord(BaseModel):
+    """Una fila de `signals` (Fase 3, subfase 3.3) -- una evaluacion de UNA
+    estrategia sobre UN simbolo/timeframe para UNA vela cerrada, HOLD
+    incluido (ver el docstring de `app/trading/signal_generator.py`).
+    `status` es `None` para HOLD (no aplica), `"PENDING"` para una senal
+    accionable que sobrevivio el tope de SL, o `"DISCARDED_SL_CAP"` si lo
+    supero (ver `SignalDiscardedBySLCap`)."""
+
+    id: int | None = None
+    symbol: str
+    strategy: str
+    is_experimental: bool = False
+    timeframe: str
+    candle_close_time: datetime
+    evaluated_at: datetime
+    signal: str  # "LONG" | "SHORT" | "HOLD"
+    price_at_eval: float
+    stop_price: float | None = None
+    take_profit_price: float | None = None
+    trailing_distance: float | None = None
+    funding_rate_pct: float | None = None
+    funding_is_approximated: bool = False
+    sl_margin_loss_pct: float | None = None
+    indicators_json: str | None = None
+    status: str | None = None
+
+
+class SignalDiscardedBySLCap(BaseModel):
+    """Una senal accionable descartada porque `sl_margin_loss_pct` supero
+    `Settings.live_sl_margin_cap_pct` -- nunca llega a simularse ni a
+    pedirsele una decision al LLM (docs/FASE3_PLAN.md punto 2)."""
+
+    id: int | None = None
+    signal_id: int
+    symbol: str
+    strategy: str
+    timeframe: str
+    candle_close_time: datetime
+    side: Side
+    sl_margin_loss_pct: float
+    cap_pct: float
+    created_at: datetime
+
+
 class OHLCVBar(BaseModel):
     symbol: str
     interval: str
