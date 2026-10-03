@@ -16,11 +16,18 @@ que puede BLOQUEAR una entrada nueva (posiciones, misma direccion,
 estrategia no elegible, tope de SL, perdida diaria, drawdown, circuit
 breaker, kill switch) o ajustar el margen hacia abajo. `close_position`
 nunca pasa por ahi -- el motor de riesgo solo bloquea entradas, nunca
-cierres (ver el docstring de `risk_engine.py`).
+cierres (ver el docstring de `risk_engine.py`). La comprobacion y la
+escritura son atomicas (`asyncio.Lock` en `__init__`): necesario desde que
+el generador de senales de la subfase 3.3 puede evaluar varios simbolos
+con llamadas concurrentes. `is_manual=True` (nuevo) es para una entrada
+tecleada por un humano -- salta la lista de elegibilidad por estrategia y
+permite omitir `sl_margin_loss_pct`; toda entrada generada por una
+estrategia automatica DEBE declarar ambos (ver `risk_engine.py`).
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 from app.config import Settings
@@ -47,6 +54,14 @@ class PaperBackend(ExecutionBackend):
         self.db = db
         self.rest_client = rest_client
         self.settings = settings
+        # Serializa comprobacion+apertura (ver `open_position`): sin esto,
+        # dos llamadas concurrentes (p.ej. el generador de senales de la
+        # subfase 3.3 evaluando varios simbolos con asyncio.gather) podian
+        # leer ambas "0/3 posiciones abiertas" ANTES de que ninguna hubiera
+        # insertado su fila, y las dos pasaban el motor de riesgo -- la
+        # comprobacion de cupo y la escritura en `trades` deben ser una
+        # sola operacion atomica a nivel de proceso.
+        self._open_lock = asyncio.Lock()
 
     async def _get_mark_price(self, symbol: str) -> float:
         tickers = await self.rest_client.get_tickers(symbol)
@@ -83,54 +98,60 @@ class PaperBackend(ExecutionBackend):
         leverage: int,
         strategy: str | None = None,
         sl_margin_loss_pct: float | None = None,
+        is_manual: bool = False,
     ) -> Trade:
-        equity = await self.get_equity()
-        decision = await risk_engine.check_new_entry(
-            self.db, self.settings, symbol=symbol, side=side, strategy=strategy,
-            margin_usdt=margin_usdt, current_equity=equity,
-            sl_margin_loss_pct=sl_margin_loss_pct,
-        )
-        if not decision.allowed:
-            logger.info(
-                "Entrada rechazada por el motor de riesgo: %s %s %s -- %s %s",
-                symbol, side.value, strategy, decision.reason, decision.details,
+        # Todo el ciclo comprobacion-de-cupo + escritura es atomico a nivel
+        # de proceso (ver el comentario en __init__) -- el motor de riesgo
+        # cuenta posiciones abiertas, y esa cuenta no puede cambiar entre
+        # que se aprueba una entrada y que se inserta su fila.
+        async with self._open_lock:
+            equity = await self.get_equity()
+            decision = await risk_engine.check_new_entry(
+                self.db, self.settings, symbol=symbol, side=side, strategy=strategy,
+                margin_usdt=margin_usdt, current_equity=equity,
+                sl_margin_loss_pct=sl_margin_loss_pct, is_manual=is_manual,
             )
-            raise risk_engine.RiskRejectedError(decision.reason, decision.details)
-        assert decision.approved_margin_usdt is not None
-        if decision.approved_margin_usdt < margin_usdt:
-            logger.info(
-                "Margen solicitado %.4f excede el maximo permitido %.4f para %s; se ajusta.",
-                margin_usdt, decision.approved_margin_usdt, symbol,
+            if not decision.allowed:
+                logger.info(
+                    "Entrada rechazada por el motor de riesgo: %s %s %s -- %s %s",
+                    symbol, side.value, strategy, decision.reason, decision.details,
+                )
+                raise risk_engine.RiskRejectedError(decision.reason, decision.details)
+            assert decision.approved_margin_usdt is not None
+            if decision.approved_margin_usdt < margin_usdt:
+                logger.info(
+                    "Margen solicitado %.4f excede el maximo permitido %.4f para %s; se ajusta.",
+                    margin_usdt, decision.approved_margin_usdt, symbol,
+                )
+            margin_usdt = decision.approved_margin_usdt
+
+            spec = await specs_repo.get_spec(self.db, symbol)
+            price = await self._get_mark_price(symbol)
+            fill = compute_open_fill(margin_usdt, leverage, price, self.settings.taker_fee_pct)
+
+            if spec and spec.min_trade_volume and fill.qty < spec.min_trade_volume:
+                raise InsufficientRiskBudgetError(
+                    f"qty {fill.qty} por debajo del minimo operable de {symbol} "
+                    f"({spec.min_trade_volume})"
+                )
+
+            trade = Trade(
+                symbol=symbol,
+                side=side,
+                strategy=strategy,
+                status=TradeStatus.OPEN,
+                leverage=leverage,
+                margin_usdt=margin_usdt,
+                notional_usdt=fill.notional_usdt,
+                qty=fill.qty,
+                entry_price=price,
+                fee_entry_usdt=fill.fee_entry_usdt,
+                opened_at=datetime.now(UTC),
             )
-        margin_usdt = decision.approved_margin_usdt
-
-        spec = await specs_repo.get_spec(self.db, symbol)
-        price = await self._get_mark_price(symbol)
-        fill = compute_open_fill(margin_usdt, leverage, price, self.settings.taker_fee_pct)
-
-        if spec and spec.min_trade_volume and fill.qty < spec.min_trade_volume:
-            raise InsufficientRiskBudgetError(
-                f"qty {fill.qty} por debajo del minimo operable de {symbol} "
-                f"({spec.min_trade_volume})"
-            )
-
-        trade = Trade(
-            symbol=symbol,
-            side=side,
-            strategy=strategy,
-            status=TradeStatus.OPEN,
-            leverage=leverage,
-            margin_usdt=margin_usdt,
-            notional_usdt=fill.notional_usdt,
-            qty=fill.qty,
-            entry_price=price,
-            fee_entry_usdt=fill.fee_entry_usdt,
-            opened_at=datetime.now(UTC),
-        )
-        trade = await trades_repo.create_trade(self.db, trade)
-        logger.info("Posicion abierta (paper): %s %s margen=%.2f qty=%.6f @ %.4f",
-                    symbol, side.value, margin_usdt, fill.qty, price)
-        return trade
+            trade = await trades_repo.create_trade(self.db, trade)
+            logger.info("Posicion abierta (paper): %s %s margen=%.2f qty=%.6f @ %.4f",
+                        symbol, side.value, margin_usdt, fill.qty, price)
+            return trade
 
     async def close_position(self, trade_id: int, reason: str = "MANUAL") -> Trade:
         trade = await trades_repo.get_trade(self.db, trade_id)

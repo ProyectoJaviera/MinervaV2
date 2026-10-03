@@ -10,8 +10,34 @@ credenciales de Bitunix (solo endpoints publicos de mercado).
 
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# **Unidades de los campos "_pct" (Fase 3, subfase 3.2, correccion)**: el
+# nombre `_pct` por si solo NO dice la escala -- el codebase mezcla dos
+# convenciones y mezclarlas es un error facil (p.ej. escribir
+# `MAX_DRAWDOWN_PCT=20` pensando "20%" cuando el codigo espera `0.20`):
+#   - FRACCION [0, 1] (0.20 = 20%): se multiplica/compara directo contra
+#     una proporcion ya calculada como fraccion (equity, capital, conteos).
+#   - PORCENTAJE [0, 100] (50.0 = 50%): se compara directo contra
+#     `sl_margin_loss_pct`, que el motor de riesgo/backtest calcula como
+#     `(distancia_precio / precio) * leverage * 100` -- ya en escala 0-100.
+# Documentado para TODOS los campos "_pct" junto a su `Field(...)`, pero
+# `_FRACTION_PCT_FIELDS`/`_PERCENT_PCT_FIELDS` (que `_validate_pct_units`
+# usa para fallar fuerte al arrancar) cubren deliberadamente solo la
+# configuracion de riesgo EN VIVO que el usuario edita en `.env` con
+# consecuencias reales -- los parametros de investigacion del backtest
+# (`max_sl_margin_loss_pct`, `backtest_fallback_sl_pct/tp_pct`, etc.) se
+# usan a proposito con valores "fuera de escala" en los tests existentes
+# para desactivar un tope o forzar un caso limite (p.ej.
+# `MAX_SL_MARGIN_LOSS_PCT=1000.0` para que el tope de riesgo nunca se
+# alcance en un escenario sintetico) -- validarlos aqui romperia esos tests
+# sin aportar seguridad real (nunca controlan dinero, ni siquiera de papel).
+_FRACTION_PCT_FIELDS = (
+    "maker_fee_pct", "taker_fee_pct", "max_drawdown_pct", "max_daily_loss_pct",
+    "max_capital_pct_per_asset",
+)
+_PERCENT_PCT_FIELDS = ("live_sl_margin_cap_pct",)
 
 
 class Settings(BaseSettings):
@@ -36,7 +62,7 @@ class Settings(BaseSettings):
     strategy_history_bars: int = Field(default=100, alias="STRATEGY_HISTORY_BARS")
     active_strategy: str = Field(default="ema_cross_9_21", alias="ACTIVE_STRATEGY")
 
-    # --- Comisiones simuladas ---
+    # --- Comisiones simuladas (FRACCION 0-1: 0.0006 = 0.06%) ---
     maker_fee_pct: float = Field(default=0.0002, alias="MAKER_FEE_PCT")
     taker_fee_pct: float = Field(default=0.0006, alias="TAKER_FEE_PCT")
 
@@ -47,6 +73,7 @@ class Settings(BaseSettings):
     margin_mode: str = Field(default="ISOLATED", alias="MARGIN_MODE")
 
     # --- Gestion de riesgo (motor en vivo desde Fase 3 subfase 3.2) ---
+    # FRACCION 0-1 (0.20 = 20%) -- ver la nota de unidades al inicio del archivo.
     max_drawdown_pct: float = Field(default=0.20, alias="MAX_DRAWDOWN_PCT")
     max_daily_loss_pct: float = Field(default=0.05, alias="MAX_DAILY_LOSS_PCT")
     max_simultaneous_positions: int = Field(default=3, alias="MAX_SIMULTANEOUS_POSITIONS")
@@ -66,6 +93,9 @@ class Settings(BaseSettings):
     # analogo a MAX_SL_MARGIN_LOSS_PCT del backtest, pero configurable por
     # separado porque la evidencia que lo informa (docs/FASE2_RIESGO.md) es
     # distinta de los criterios de descarte del backtest.
+    # PORCENTAJE 0-100 (50.0 = 50%, NO 0.50) -- se compara contra
+    # `sl_margin_loss_pct`, que ya viene en esa escala (ver la nota de
+    # unidades al inicio del archivo).
     live_sl_margin_cap_pct: float = Field(default=50.0, alias="LIVE_SL_MARGIN_CAP_PCT")
     # Modo del stop por drawdown: "duro" detiene nuevas entradas de verdad
     # (reanudacion manual); "alerta" solo notifica y sigue operando. En
@@ -100,6 +130,7 @@ class Settings(BaseSettings):
         alias="UNIVERSE_EXCLUDE_CATEGORIES",
     )
     universe_manual_exclusions: str = Field(default="", alias="UNIVERSE_MANUAL_EXCLUSIONS")
+    # FRACCION 0-1 (0.05 = 5%).
     universe_price_sanity_tolerance_pct: float = Field(
         default=0.05, alias="UNIVERSE_PRICE_SANITY_TOLERANCE_PCT"
     )
@@ -110,6 +141,7 @@ class Settings(BaseSettings):
     backtest_min_trades_per_cell: int = Field(default=30, alias="BACKTEST_MIN_TRADES_PER_CELL")
     backtest_min_trades_total: int = Field(default=100, alias="BACKTEST_MIN_TRADES_TOTAL")
     backtest_min_profit_factor: float = Field(default=1.2, alias="BACKTEST_MIN_PROFIT_FACTOR")
+    # Los 4 campos que siguen son FRACCION 0-1 (0.50 = 50%).
     backtest_max_drawdown_pct: float = Field(default=0.50, alias="BACKTEST_MAX_DRAWDOWN_PCT")
     backtest_concentration_limit_pct: float = Field(
         default=0.40, alias="BACKTEST_CONCENTRATION_LIMIT_PCT"
@@ -126,6 +158,7 @@ class Settings(BaseSettings):
     backtest_stress_slippage_multiplier: float = Field(
         default=2.0, alias="BACKTEST_STRESS_SLIPPAGE_MULTIPLIER"
     )
+    # FRACCION 0-1.
     backtest_oos_split_pct: float = Field(default=0.30, alias="BACKTEST_OOS_SPLIT_PCT")
     backtest_walk_forward_fold_months: int = Field(
         default=6, alias="BACKTEST_WALK_FORWARD_FOLD_MONTHS"
@@ -139,9 +172,13 @@ class Settings(BaseSettings):
     # Tope de riesgo por operacion: si el SL configurado de una estrategia
     # perderia mas de este % del margen (a 10x), la entrada se omite (no se
     # fuerza un SL mas ajustado) y se registra como "omitida por riesgo".
+    # PORCENTAJE 0-100 (50.0 = 50%, NO 0.50) -- misma escala que
+    # `live_sl_margin_cap_pct`, ver la nota de unidades al inicio del archivo.
     max_sl_margin_loss_pct: float = Field(default=50.0, alias="MAX_SL_MARGIN_LOSS_PCT")
-    # SL/TP de respaldo (en % de movimiento de precio) para estrategias que
-    # no implementan stop_price/take_profit_price (None).
+    # SL/TP de respaldo, en FRACCION 0-1 de movimiento de precio (0.05 =
+    # 5%, NO 50.0 -- a pesar del nombre "_pct", esta escala es distinta de
+    # `max_sl_margin_loss_pct` arriba) para estrategias que no implementan
+    # stop_price/take_profit_price (None).
     backtest_fallback_sl_pct: float = Field(default=0.05, alias="BACKTEST_FALLBACK_SL_PCT")
     backtest_fallback_tp_pct: float = Field(default=0.10, alias="BACKTEST_FALLBACK_TP_PCT")
     # Numero de corridas de `simulate_portfolio_monte_carlo` (barajando el
@@ -161,6 +198,7 @@ class Settings(BaseSettings):
     anthropic_haiku_model: str = Field(default="claude-haiku-4-5", alias="ANTHROPIC_HAIKU_MODEL")
     anthropic_sonnet_model: str = Field(default="claude-sonnet-5", alias="ANTHROPIC_SONNET_MODEL")
     llm_daily_budget_usd: float = Field(default=1.0, alias="LLM_DAILY_BUDGET_USD")
+    # FRACCION 0-1 (score de confluencia, no un porcentaje de precio).
     confluence_score_threshold: float = Field(
         default=0.6, alias="CONFLUENCE_SCORE_THRESHOLD"
     )
@@ -235,6 +273,32 @@ class Settings(BaseSettings):
             self.default_margin_usdt * self.max_simultaneous_positions - margin_committed_total,
         )
         return max(0.0, min(self.default_margin_usdt, per_asset_cap, remaining_slots_margin))
+
+    @model_validator(mode="after")
+    def _validate_pct_units(self) -> Settings:
+        """Falla fuerte al arrancar si un campo "_pct" quedo fuera de su
+        escala declarada (ver `_FRACTION_PCT_FIELDS`/`_PERCENT_PCT_FIELDS`
+        arriba) -- p.ej. `MAX_DRAWDOWN_PCT=20` (deberia ser `0.20`) o
+        `LIVE_SL_MARGIN_CAP_PCT=0.5` (deberia ser `50.0`). Deliberadamente
+        estricto: estos valores controlan limites de riesgo, un error de
+        escala silencioso puede desactivar un limite por completo (una
+        fraccion de 20.0 nunca se alcanza) o activarlo siempre (un
+        porcentaje de 0.5 se cruza con cualquier operacion)."""
+        for name in _FRACTION_PCT_FIELDS:
+            value = getattr(self, name)
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(
+                    f"{name}={value!r} debe ser una FRACCION entre 0.0 y 1.0 (p.ej. 0.20 "
+                    "para 20%), no un porcentaje 0-100."
+                )
+        for name in _PERCENT_PCT_FIELDS:
+            value = getattr(self, name)
+            if not 0.0 <= value <= 100.0:
+                raise ValueError(
+                    f"{name}={value!r} debe ser un PORCENTAJE entre 0.0 y 100.0 (p.ej. 50.0 "
+                    "para 50%), no una fraccion 0-1."
+                )
+        return self
 
 
 settings = Settings()

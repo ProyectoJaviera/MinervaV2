@@ -23,11 +23,16 @@ class ExecutionBackend(ABC):
         leverage: int,
         strategy: str | None = None,
         sl_margin_loss_pct: float | None = None,
+        is_manual: bool = False,
     ) -> Trade:
         """Abre una posicion LONG o SHORT (capacidad 1 de SPEC.md).
-        `sl_margin_loss_pct` (opcional, Fase 3 subfase 3.2) es el riesgo
-        planeado al abrir -- si se provee, el motor de riesgo lo compara
-        contra `Settings.live_sl_margin_cap_pct`."""
+        `sl_margin_loss_pct` (Fase 3 subfase 3.2) es el riesgo planeado al
+        abrir -- el motor de riesgo lo compara contra
+        `Settings.live_sl_margin_cap_pct`. `is_manual` (subfase 3.2,
+        correccion) marca una entrada tecleada por un humano: solo esas
+        pueden omitir `sl_margin_loss_pct` y saltar la lista de
+        elegibilidad por estrategia -- toda entrada generada por una
+        estrategia automatica debe declarar ambos."""
         raise NotImplementedError
 
     @abstractmethod

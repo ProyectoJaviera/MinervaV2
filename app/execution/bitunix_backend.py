@@ -48,6 +48,7 @@ class BitunixBackend(ExecutionBackend):
         leverage: int,
         strategy: str | None = None,
         sl_margin_loss_pct: float | None = None,
+        is_manual: bool = False,
     ) -> Trade:
         raise NotImplementedError("Ejecucion real desactivada en v1.")
 

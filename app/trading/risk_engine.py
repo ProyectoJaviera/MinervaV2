@@ -24,18 +24,25 @@ exactos involucrados):
   `circuit_breaker_cooldown_hours` (sin accion manual).
 - `DAILY_LOSS_LIMIT` -- perdida del dia (ver abajo) >= `max_daily_loss_pct`.
 - `STRATEGY_NOT_ELIGIBLE` -- la estrategia no esta en
-  `REAL_ACCOUNT_ELIGIBLE_STRATEGIES` (vacio = todas elegibles).
-  `strategy=None` (entrada sin estrategia identificada, p.ej. manual)
-  nunca se bloquea por este motivo -- el filtro es sobre estrategias
-  CONOCIDAS que no pasaron la evaluacion, no una exigencia de que toda
-  entrada declare una.
+  `REAL_ACCOUNT_ELIGIBLE_STRATEGIES` (vacio = todas elegibles). **Corregido**:
+  `strategy=None` ya NO salta este filtro por defecto -- solo lo salta
+  cuando la entrada se marca explicitamente `is_manual=True` (un humano
+  tecleando una orden). Antes cualquier entrada con `strategy=None` (incluida
+  una generada por el pipeline automatico que perdiera el nombre de su
+  estrategia por un bug) se colaba sin pasar por la lista de elegibilidad;
+  ahora una entrada no-manual con `strategy=None` se evalua contra la lista
+  igual que cualquier otra (y, si la lista no esta vacia, `None` nunca
+  pertenece a ella -> se rechaza).
 - `MAX_SIMULTANEOUS_POSITIONS` -- cupo total de posiciones abiertas.
 - `MAX_SAME_DIRECTION_POSITIONS` -- cupo de posiciones en la MISMA
   direccion (LONG o SHORT), para acotar el riesgo de correlacion entre
   altcoins que `docs/FASE2_RIESGO.md` no puede medir.
-- `SL_CAP_EXCEEDED` -- si se pasa `sl_margin_loss_pct` (riesgo planeado al
-  abrir) y supera `LIVE_SL_MARGIN_CAP_PCT`. Opcional: `None` omite este
-  chequeo (el generador de señales que lo provee llega en la subfase 3.3).
+- `SL_CAP_EXCEEDED` -- si `sl_margin_loss_pct` (riesgo planeado al abrir)
+  supera `LIVE_SL_MARGIN_CAP_PCT`. **Corregido**: ya no es opcional para
+  entradas no manuales -- `check_new_entry` lanza `ValueError` de inmediato
+  (no un rechazo auditado, es un bug del llamador) si una entrada con
+  `is_manual=False` no trae `sl_margin_loss_pct`. Solo las entradas
+  `is_manual=True` pueden omitirlo.
 - `MARGIN_UNAVAILABLE` -- el margen maximo permitido para esta entrada
   (`Settings.max_margin_for_new_trade`) calcula a <= 0.
 
@@ -47,8 +54,14 @@ nunca solo lo realizado -- una cuenta con posiciones abiertas perdiendo
 fuerte no debe parecer "sana" solo porque nada se ha cerrado todavia. El
 "dia" para la perdida diaria se define en la zona horaria configurable
 `Settings.report_timezone` (default `America/Santiago`, ya usada para
-reportes desde Fase 0) -- la linea base del dia se fija a la primera
-consulta de cada dia nuevo (hora local de esa zona), no a medianoche UTC.
+reportes desde Fase 0) -- la linea base del dia se fija al cambio de dia
+local con el equity de ESE instante (el primer dato disponible del dia
+nuevo). **Corregido**: el bloqueo por `DAILY_LOSS_LIMIT` ahora queda
+"enganchado" (persistido en `system_state`) la primera vez que se cruza el
+umbral, y dura hasta el cambio de dia local -- antes se recalculaba el %
+de perdida contra el equity actual en cada consulta, asi que una
+recuperacion del PnL flotante dentro del MISMO dia lo desactivaba sola, sin
+esperar al dia siguiente.
 
 **Persistencia entre reinicios** (pedido explicitamente): todo el estado
 (kill switch, drawdown stop, circuit breaker, racha de perdidas, pico de
@@ -79,6 +92,8 @@ _KEY_CONSECUTIVE_LOSSES = "consecutive_losses"
 _KEY_CIRCUIT_BREAKER_UNTIL = "circuit_breaker_until"
 _KEY_DAILY_LOSS_DAY = "daily_loss_day"
 _KEY_DAILY_LOSS_BASELINE = "daily_loss_baseline_usdt"
+_KEY_DAILY_LOSS_LOCKED = "daily_loss_limit_locked"
+_KEY_DRAWDOWN_STOP_LAST_RESUMED_AT = "drawdown_stop_last_resumed_at"
 
 
 class RiskRejectedError(RuntimeError):
@@ -168,16 +183,36 @@ async def update_equity_tracking(db: Database, settings: Settings, current_equit
     today = today_key(settings.report_timezone)
     stored_day = await system_state_repo.get_state(db, _KEY_DAILY_LOSS_DAY)
     if stored_day != today:
+        # Cambio de dia: la linea base se fija con el equity de ESTE
+        # instante (el primer dato disponible del dia nuevo, sea por un
+        # chequeo de entrada o por el cierre de una operacion) -- nunca con
+        # un valor cacheado de una consulta anterior. El bloqueo de
+        # perdida diaria del dia que termino se LIBERA aqui (bug corregido:
+        # antes `_daily_loss_breached` recalculaba el % cada vez contra el
+        # equity actual, asi que una recuperacion del PnL flotante dentro
+        # del MISMO dia lo desactivaba solo, sin que hiciera falta esperar
+        # al dia siguiente).
         await system_state_repo.set_state(db, _KEY_DAILY_LOSS_DAY, today)
         await _set_float(db, _KEY_DAILY_LOSS_BASELINE, current_equity)
+        await _set_bool(db, _KEY_DAILY_LOSS_LOCKED, False)
+    else:
+        baseline = await _get_float(db, _KEY_DAILY_LOSS_BASELINE, current_equity)
+        if baseline > 0:
+            loss_pct = (baseline - current_equity) / baseline
+            if loss_pct >= settings.max_daily_loss_pct:
+                # Una vez que se cruza el umbral, el bloqueo queda "enganchado"
+                # (persistido) por el resto del dia -- nunca se vuelve a
+                # poner en False por una recuperacion del equity, solo por
+                # el cambio de dia de arriba.
+                await _set_bool(db, _KEY_DAILY_LOSS_LOCKED, True)
 
 
-async def _daily_loss_breached(db: Database, settings: Settings, current_equity: float) -> bool:
-    baseline = await _get_float(db, _KEY_DAILY_LOSS_BASELINE, current_equity)
-    if baseline <= 0:
-        return False
-    loss_pct = (baseline - current_equity) / baseline
-    return loss_pct >= settings.max_daily_loss_pct
+async def _daily_loss_breached(db: Database) -> bool:
+    """Lee el enganche persistente de `update_equity_tracking` -- NUNCA
+    recalcula el % contra el equity actual aqui, para que una recuperacion
+    del PnL flotante dentro del mismo dia no libere el bloqueo (ver el
+    comentario en `update_equity_tracking`)."""
+    return await _get_bool(db, _KEY_DAILY_LOSS_LOCKED, False)
 
 
 # --- circuit breaker: se actualiza al cerrar una operacion --------------
@@ -216,10 +251,29 @@ async def deactivate_kill_switch(db: Database) -> None:
     await _set_bool(db, _KEY_KILL_SWITCH, False)
 
 
-async def resume_drawdown_stop(db: Database) -> None:
+async def resume_drawdown_stop(db: Database, current_equity: float) -> None:
     """Reanudacion manual del stop por drawdown (modo `"duro"`) -- a
-    diferencia del circuit breaker, este nunca se levanta solo."""
+    diferencia del circuit breaker, este nunca se levanta solo.
+
+    **Corregido** (antes esta funcion solo apagaba el flag activo): el pico
+    historico de equity se REINICIA al equity actual y la marca de "brecha
+    en curso" se limpia -- sin esto, tras reanudar, el drawdown seguia
+    calculandose por encima del umbral contra el pico VIEJO, y como
+    `update_equity_tracking` solo dispara el stop en el flanco de subida
+    (`breaching and not was_breaching`), nunca volvia a activarse hasta que
+    el equity se recuperara por completo al pico viejo -- en la practica,
+    el stop quedaba inerte para el resto de la vida de la cuenta. El
+    contador `drawdown_stop_would_have_triggered_count` (criterio de paso a
+    dinero real) NO se toca aqui -- es deliberadamente una metrica aparte
+    del drawdown acumulado desde el pico HISTORICO, nunca reiniciada por una
+    reanudacion manual. Se registra el instante de la reanudacion en
+    `system_state` para poder auditarlo."""
     await _set_bool(db, _KEY_DRAWDOWN_STOP_ACTIVE, False)
+    await _set_bool(db, _KEY_DRAWDOWN_BREACH_IN_PROGRESS, False)
+    await _set_float(db, _KEY_EQUITY_PEAK, current_equity)
+    await system_state_repo.set_state(
+        db, _KEY_DRAWDOWN_STOP_LAST_RESUMED_AT, datetime.now(UTC).isoformat()
+    )
 
 
 async def get_drawdown_stop_trigger_count(db: Database) -> int:
@@ -250,11 +304,29 @@ async def check_new_entry(
     margin_usdt: float,
     current_equity: float,
     sl_margin_loss_pct: float | None = None,
+    is_manual: bool = False,
 ) -> RiskDecision:
     """Decide si una entrada nueva se puede abrir. Nunca evalua cierres --
     ver el docstring del modulo. Actualiza los trackers de equity primero
     (para que el drawdown/perdida diaria reflejen `current_equity` aunque
-    esta entrada termine rechazada por otro motivo)."""
+    esta entrada termine rechazada por otro motivo).
+
+    `is_manual` (nuevo) distingue una entrada tecleada por el usuario (sin
+    estrategia, nunca sujeta a la lista de elegibilidad ni al SL
+    obligatorio) de una entrada generada por el pipeline automatico
+    (generador de senales, Fase 3 subfase 3.3) que simplemente perdio el
+    nombre de su estrategia por un bug -- antes `strategy=None` saltaba la
+    lista de elegibilidad SIEMPRE, lo que habria dejado pasar ese bug sin
+    aviso. `sl_margin_loss_pct` es obligatorio para toda entrada NO manual
+    (`ValueError`, no un rechazo auditado -- es un error de programacion
+    del llamador, no una decision de riesgo)."""
+    if not is_manual and sl_margin_loss_pct is None:
+        raise ValueError(
+            "sl_margin_loss_pct es obligatorio para entradas generadas por una estrategia "
+            f"(symbol={symbol}, strategy={strategy!r}); solo las entradas manuales "
+            "(is_manual=True) pueden omitirlo."
+        )
+
     await update_equity_tracking(db, settings, current_equity)
 
     if await _get_bool(db, _KEY_KILL_SWITCH, False):
@@ -274,14 +346,14 @@ async def check_new_entry(
             db, symbol, side, strategy, "CIRCUIT_BREAKER_ACTIVE", {"until": cb_until_raw},
         )
 
-    if await _daily_loss_breached(db, settings, current_equity):
+    if await _daily_loss_breached(db):
         return await _reject(
             db, symbol, side, strategy, "DAILY_LOSS_LIMIT",
             {"max_daily_loss_pct": settings.max_daily_loss_pct},
         )
 
     eligible = settings.real_account_eligible_strategies_list
-    if strategy is not None and eligible and strategy not in eligible:
+    if not is_manual and eligible and strategy not in eligible:
         return await _reject(
             db, symbol, side, strategy, "STRATEGY_NOT_ELIGIBLE", {"eligible": eligible},
         )

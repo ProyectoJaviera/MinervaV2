@@ -358,4 +358,34 @@ una:
   que colgaba el proceso entero al salir (hilo de aiosqlite nunca se unia)
   -- corregido con `try/finally` alrededor de todo ciclo de vida de una
   `Database` sobre archivo en los tests nuevos.
+  - **Correcciones solicitadas al aprobar 3.2 (hechas antes de iniciar 3.3,
+    commit separado pequeno con tests)**:
+    1. `resume_drawdown_stop` ahora reinicia el pico de equity al equity
+       actual y la marca de brecha en curso, y registra el instante de la
+       reanudacion en `system_state` -- antes el stop quedaba inerte para
+       el resto de la vida de la cuenta tras reanudar (el pico viejo nunca
+       se volvia a cruzar). El contador `drawdown_stop_would_have_triggered_count`
+       (criterio de paso a dinero real) sigue sin tocarse por una
+       reanudacion manual, a proposito.
+    2. `PaperBackend.open_position` serializa comprobacion+apertura con un
+       `asyncio.Lock` -- antes dos aperturas concurrentes podian leer
+       ambas "cupo libre" antes de que ninguna hubiera escrito su fila.
+    3. Perdida diaria: el bloqueo por `DAILY_LOSS_LIMIT` ahora queda
+       enganchado (persistido) hasta el cambio de dia local, sin importar
+       si el PnL flotante se recupera dentro del mismo dia -- antes se
+       recalculaba el % contra el equity actual en cada consulta y se
+       desactivaba solo.
+    4. `strategy=None` ya no salta la lista de elegibilidad por defecto --
+       solo una entrada `is_manual=True` la salta. `sl_margin_loss_pct` es
+       obligatorio (`ValueError`) para toda entrada no manual. `app/config.py`
+       documenta junto a cada campo "_pct" si es fraccion [0,1] o
+       porcentaje [0,100], y valida al arrancar los campos de riesgo en
+       vivo mas sensibles (`max_drawdown_pct`, `max_daily_loss_pct`,
+       `max_capital_pct_per_asset`, `maker_fee_pct`, `taker_fee_pct`,
+       `live_sl_margin_cap_pct`) -- deliberadamente NO valida los
+       parametros de investigacion del backtest, que varios tests usan a
+       proposito con valores fuera de escala para desactivar un tope.
+    5. `.env.example` actualizado con `MAX_SAME_DIRECTION_POSITIONS`,
+       `LIVE_SL_MARGIN_CAP_PCT`, `DRAWDOWN_STOP_MODE` y
+       `REAL_ACCOUNT_ELIGIBLE_STRATEGIES`.
 - 3.3 a 3.8: pendientes.

@@ -65,7 +65,7 @@ async def test_allowed_when_nothing_blocks(db):
     settings = make_settings()
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=100.0,
+        margin_usdt=10.0, current_equity=100.0, is_manual=True,
     )
     assert decision.allowed
     assert decision.approved_margin_usdt == pytest.approx(10.0)
@@ -77,7 +77,7 @@ async def test_kill_switch_blocks_new_entry(db):
     await risk_engine.activate_kill_switch(db)
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=100.0,
+        margin_usdt=10.0, current_equity=100.0, is_manual=True,
     )
     assert not decision.allowed
     assert decision.reason == "KILL_SWITCH_ACTIVE"
@@ -91,7 +91,7 @@ async def test_drawdown_stop_duro_blocks_new_entry(db):
     await risk_engine.update_equity_tracking(db, settings, 100.0)  # fija el pico en 100
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=78.0,  # 22% de drawdown > 20%
+        margin_usdt=10.0, current_equity=78.0, is_manual=True,  # 22% de drawdown > 20%
     )
     assert not decision.allowed
     assert decision.reason == "DRAWDOWN_STOP_ACTIVE"
@@ -108,7 +108,7 @@ async def test_drawdown_stop_alerta_mode_does_not_block_but_counts(db):
     await risk_engine.update_equity_tracking(db, settings, 100.0)
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=78.0,
+        margin_usdt=10.0, current_equity=78.0, is_manual=True,
     )
     assert decision.allowed  # "alerta" nunca bloquea
     assert await risk_engine.get_drawdown_stop_trigger_count(db) == 1  # pero SI cuenta
@@ -117,27 +117,77 @@ async def test_drawdown_stop_alerta_mode_does_not_block_but_counts(db):
 @pytest.mark.asyncio
 async def test_drawdown_stop_resume_is_manual_only(db):
     """En modo "duro" el stop NO se levanta solo aunque el equity se
-    recupere -- solo con `resume_drawdown_stop` explicito."""
-    settings = make_settings(DRAWDOWN_STOP_MODE="duro")
+    recupere -- solo con `resume_drawdown_stop` explicito.
+
+    `MAX_DAILY_LOSS_PCT` holgado a proposito: una caida al 78% tambien
+    cruzaria el 5% default de perdida diaria, y esta prueba quiere aislar
+    SOLO el comportamiento del stop por drawdown (ver el mismo patron en
+    `test_drawdown_stop_alerta_mode_does_not_block_but_counts`)."""
+    settings = make_settings(DRAWDOWN_STOP_MODE="duro", MAX_DAILY_LOSS_PCT=0.50)
     await risk_engine.update_equity_tracking(db, settings, 100.0)
     await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=78.0,
+        margin_usdt=10.0, current_equity=78.0, is_manual=True,
     )
     # El equity se "recupera" por completo -- el stop sigue activo.
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=100.0,
+        margin_usdt=10.0, current_equity=100.0, is_manual=True,
     )
     assert not decision.allowed
     assert decision.reason == "DRAWDOWN_STOP_ACTIVE"
 
-    await risk_engine.resume_drawdown_stop(db)
+    await risk_engine.resume_drawdown_stop(db, current_equity=100.0)
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=100.0,
+        margin_usdt=10.0, current_equity=100.0, is_manual=True,
     )
     assert decision.allowed
+
+
+@pytest.mark.asyncio
+async def test_resume_drawdown_stop_resets_peak_so_a_new_drop_retriggers_it(db):
+    """Corrige el bug real de `resume_drawdown_stop`: antes solo apagaba el
+    flag activo, pero el pico de equity seguia siendo el viejo -- una vez
+    reanudado, una caida nueva desde el equity de reanudacion NO volvia a
+    disparar el stop hasta recuperar el pico historico completo. Ahora el
+    pico se reinicia al equity de la reanudacion, asi que una caida de 20%
+    desde ESE punto (no desde el pico original) dispara el stop otra vez.
+
+    `MAX_DAILY_LOSS_PCT` holgado a proposito (ver el mismo patron en
+    `test_drawdown_stop_alerta_mode_does_not_block_but_counts`): esta
+    prueba aisla el drawdown, la perdida diaria tiene sus propios tests."""
+    settings = make_settings(
+        DRAWDOWN_STOP_MODE="duro", MAX_DRAWDOWN_PCT=0.20, MAX_DAILY_LOSS_PCT=0.90,
+    )
+    await risk_engine.update_equity_tracking(db, settings, 100.0)  # pico original: 100
+    decision = await risk_engine.check_new_entry(
+        db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
+        margin_usdt=10.0, current_equity=78.0, is_manual=True,  # 22% drawdown -> stop
+    )
+    assert not decision.allowed and decision.reason == "DRAWDOWN_STOP_ACTIVE"
+
+    # Reanuda con el equity actual (60 -- se recupero parcialmente del
+    # minimo pero sigue muy por debajo del pico original de 100).
+    await risk_engine.resume_drawdown_stop(db, current_equity=60.0)
+    decision = await risk_engine.check_new_entry(
+        db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
+        margin_usdt=10.0, current_equity=60.0, is_manual=True,
+    )
+    assert decision.allowed, "justo tras reanudar, sin nueva caida, debe permitir entradas"
+
+    # Nueva caida del 20% desde el punto de REANUDACION (60 -> 48), no
+    # desde el pico historico (100) -- el stop debe volver a activarse.
+    decision = await risk_engine.check_new_entry(
+        db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
+        margin_usdt=10.0, current_equity=48.0, is_manual=True,
+    )
+    assert not decision.allowed
+    assert decision.reason == "DRAWDOWN_STOP_ACTIVE"
+    # El contador de drawdown acumulado desde el pico HISTORICO (criterio
+    # de paso a dinero real) sube con cada episodio -- la reanudacion
+    # manual nunca lo reinicia, es deliberadamente una metrica aparte.
+    assert await risk_engine.get_drawdown_stop_trigger_count(db) == 2
 
 
 @pytest.mark.asyncio
@@ -147,7 +197,7 @@ async def test_circuit_breaker_active_blocks_new_entry(db):
     await system_state_repo.set_state(db, "circuit_breaker_until", until)
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=100.0,
+        margin_usdt=10.0, current_equity=100.0, is_manual=True,
     )
     assert not decision.allowed
     assert decision.reason == "CIRCUIT_BREAKER_ACTIVE"
@@ -160,10 +210,75 @@ async def test_daily_loss_limit_blocks_new_entry(db):
     await risk_engine.update_equity_tracking(db, settings, 100.0)
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=94.0,  # 6% de perdida > 5%
+        margin_usdt=10.0, current_equity=94.0, is_manual=True,  # 6% de perdida > 5%
     )
     assert not decision.allowed
     assert decision.reason == "DAILY_LOSS_LIMIT"
+
+
+@pytest.mark.asyncio
+async def test_daily_loss_lock_persists_until_next_day_even_if_equity_recovers(db):
+    """Corrige el bug real: antes `_daily_loss_breached` recalculaba el %
+    de perdida contra el equity ACTUAL en cada llamada, asi que una
+    recuperacion del PnL flotante dentro del MISMO dia desactivaba el
+    bloqueo solo. Ahora el bloqueo queda "enganchado" el resto del dia
+    local, y solo se libera con el cambio de dia (simulado aqui forzando
+    `daily_loss_day` a una fecha pasada, igual que ya se hace para simular
+    el fin del enfriamiento del circuit breaker)."""
+    settings = make_settings(MAX_DAILY_LOSS_PCT=0.05)
+    # Dia nuevo: la primera observacion fija la linea base en 100.
+    await risk_engine.update_equity_tracking(db, settings, 100.0)
+    # Una operacion cierra con perdida justo despues de medianoche local:
+    # -6% vs. la linea base del dia -- dispara el enganche.
+    await risk_engine.record_trade_closed(db, settings, pnl_net_usdt=-6.0, current_equity=94.0)
+    decision = await risk_engine.check_new_entry(
+        db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
+        margin_usdt=10.0, current_equity=94.0, is_manual=True,
+    )
+    assert not decision.allowed and decision.reason == "DAILY_LOSS_LIMIT"
+
+    # El PnL flotante se recupera por completo el MISMO dia -- el bloqueo
+    # NO se levanta (el bug corregido lo habria levantado aqui).
+    decision = await risk_engine.check_new_entry(
+        db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
+        margin_usdt=10.0, current_equity=100.0, is_manual=True,
+    )
+    assert not decision.allowed and decision.reason == "DAILY_LOSS_LIMIT"
+
+    # Al dia siguiente (simulado) se libera con la linea base nueva.
+    await system_state_repo.set_state(db, "daily_loss_day", "2000-01-01")
+    decision = await risk_engine.check_new_entry(
+        db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
+        margin_usdt=10.0, current_equity=100.0, is_manual=True,
+    )
+    assert decision.allowed
+
+
+@pytest.mark.asyncio
+async def test_daily_loss_baseline_resets_with_the_equity_at_day_change_not_a_stale_value(db):
+    """La linea base del dia nuevo se fija con el equity pasado en la
+    PRIMERA llamada que nota el cambio de dia -- nunca con un valor
+    cacheado de una consulta anterior. Dia 1: baseline=100. Dia 2
+    (simulado): la primera llamada pasa equity=70 -- la nueva baseline
+    debe ser 70 (no 100), asi que una caida del 6% se mide desde 70.
+
+    `MAX_DRAWDOWN_PCT` holgado a proposito: el pico (100) no se mueve
+    dentro de este escenario, asi que una caida a 65-70 tambien cruzaria
+    el 20% default de drawdown -- esta prueba aisla SOLO la linea base de
+    perdida diaria (ver el mismo patron en
+    `test_drawdown_stop_alerta_mode_does_not_block_but_counts`)."""
+    settings = make_settings(MAX_DAILY_LOSS_PCT=0.05, MAX_DRAWDOWN_PCT=0.90)
+    await risk_engine.update_equity_tracking(db, settings, 100.0)  # dia 1: baseline=100
+    await system_state_repo.set_state(db, "daily_loss_day", "2000-01-01")  # forzar cambio de dia
+    await risk_engine.update_equity_tracking(db, settings, 70.0)  # dia 2: baseline <- 70.0
+    # 65.0 es una caida de ~7.1% desde 70 (rompe el 5%) pero de 35% desde
+    # 100 -- si la baseline hubiera quedado en 100 esto tambien rompería,
+    # asi que se confirma con un valor que SOLO rompe relativo a 70.
+    decision = await risk_engine.check_new_entry(
+        db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
+        margin_usdt=10.0, current_equity=65.0, is_manual=True,
+    )
+    assert not decision.allowed and decision.reason == "DAILY_LOSS_LIMIT"
 
 
 @pytest.mark.asyncio
@@ -171,23 +286,55 @@ async def test_strategy_not_eligible_blocks_new_entry(db):
     settings = make_settings()  # eligibles: ema_cross_9_21, funding_contrarian_experimental
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy="donchian_breakout_20",
-        margin_usdt=10.0, current_equity=100.0,
+        margin_usdt=10.0, current_equity=100.0, sl_margin_loss_pct=10.0,
     )
     assert not decision.allowed
     assert decision.reason == "STRATEGY_NOT_ELIGIBLE"
 
 
 @pytest.mark.asyncio
-async def test_strategy_none_bypasses_eligibility_filter(db):
-    """Una entrada sin estrategia identificada (p.ej. manual) no se
-    bloquea por este filtro -- es sobre estrategias CONOCIDAS, no una
-    exigencia de que toda entrada declare una."""
+async def test_strategy_none_not_manual_is_subject_to_eligibility_filter(db):
+    """Corrige el bug real: antes `strategy=None` SIEMPRE saltaba la lista
+    de elegibilidad, lo que habria dejado pasar sin aviso una entrada
+    automatica que perdiera el nombre de su estrategia por un bug. Ahora
+    solo las entradas `is_manual=True` saltan este filtro -- una entrada
+    `strategy=None` no-manual se evalua igual que cualquier otra, y `None`
+    nunca pertenece a una lista de nombres de estrategia no vacia."""
+    settings = make_settings()  # lista no vacia por defecto
+    decision = await risk_engine.check_new_entry(
+        db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
+        margin_usdt=10.0, current_equity=100.0, sl_margin_loss_pct=10.0,
+    )
+    assert not decision.allowed
+    assert decision.reason == "STRATEGY_NOT_ELIGIBLE"
+
+
+@pytest.mark.asyncio
+async def test_strategy_none_manual_bypasses_eligibility_filter(db):
+    """Una entrada manual (`is_manual=True`) sin estrategia identificada SI
+    salta este filtro -- es la unica forma de que `strategy=None` se cuele,
+    y tambien puede omitir `sl_margin_loss_pct`."""
     settings = make_settings()
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=100.0,
+        margin_usdt=10.0, current_equity=100.0, is_manual=True,
     )
     assert decision.allowed
+
+
+@pytest.mark.asyncio
+async def test_sl_margin_loss_pct_is_mandatory_for_non_manual_entries(db):
+    """Corrige el bug real: antes `sl_margin_loss_pct=None` simplemente
+    omitia el chequeo del tope de SL sin aviso. Ahora es un `ValueError`
+    inmediato (error del llamador, no una decision de riesgo) para
+    cualquier entrada que no se marque `is_manual=True` -- el generador de
+    senales (subfase 3.3) SIEMPRE debe calcularlo y enviarlo."""
+    settings = make_settings()
+    with pytest.raises(ValueError, match="sl_margin_loss_pct"):
+        await risk_engine.check_new_entry(
+            db, settings, symbol="BTCUSDT", side=Side.LONG, strategy="ema_cross_9_21",
+            margin_usdt=10.0, current_equity=100.0, sl_margin_loss_pct=None,
+        )
 
 
 @pytest.mark.asyncio
@@ -198,7 +345,7 @@ async def test_max_simultaneous_positions_blocks_new_entry(db):
     await _open_trade(db, "SOLUSDT", Side.LONG)
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="XRPUSDT", side=Side.SHORT, strategy=None,
-        margin_usdt=10.0, current_equity=100.0,
+        margin_usdt=10.0, current_equity=100.0, is_manual=True,
     )
     assert not decision.allowed
     assert decision.reason == "MAX_SIMULTANEOUS_POSITIONS"
@@ -214,7 +361,7 @@ async def test_max_same_direction_positions_blocks_new_entry(db):
     await _open_trade(db, "ETHUSDT", Side.LONG)
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="SOLUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=100.0,
+        margin_usdt=10.0, current_equity=100.0, is_manual=True,
     )
     assert not decision.allowed
     assert decision.reason == "MAX_SAME_DIRECTION_POSITIONS"
@@ -225,22 +372,10 @@ async def test_sl_cap_exceeded_blocks_new_entry(db):
     settings = make_settings(LIVE_SL_MARGIN_CAP_PCT=50.0)
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=100.0, sl_margin_loss_pct=60.0,
+        margin_usdt=10.0, current_equity=100.0, sl_margin_loss_pct=60.0, is_manual=True,
     )
     assert not decision.allowed
     assert decision.reason == "SL_CAP_EXCEEDED"
-
-
-@pytest.mark.asyncio
-async def test_sl_cap_none_skips_the_check(db):
-    """`sl_margin_loss_pct=None` (todavia no hay generador de senales,
-    subfase 3.3) omite este chequeo por completo, no lo bloquea."""
-    settings = make_settings(LIVE_SL_MARGIN_CAP_PCT=50.0)
-    decision = await risk_engine.check_new_entry(
-        db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=100.0, sl_margin_loss_pct=None,
-    )
-    assert decision.allowed
 
 
 @pytest.mark.asyncio
@@ -255,7 +390,7 @@ async def test_margin_unavailable_blocks_new_entry(db):
     await _open_trade(db, "BTCUSDT", Side.LONG, margin_usdt=10.0)
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=100.0,
+        margin_usdt=10.0, current_equity=100.0, is_manual=True,
     )
     assert not decision.allowed
     assert decision.reason == "MARGIN_UNAVAILABLE"
@@ -274,14 +409,14 @@ async def test_circuit_breaker_triggers_at_nth_loss_and_auto_resumes_after_coold
     await risk_engine.record_trade_closed(db, settings, pnl_net_usdt=-1.0, current_equity=98.0)
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=98.0,
+        margin_usdt=10.0, current_equity=98.0, is_manual=True,
     )
     assert decision.allowed, "2 perdidas todavia no deben disparar el breaker (umbral=3)"
 
     await risk_engine.record_trade_closed(db, settings, pnl_net_usdt=-1.0, current_equity=97.0)
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=97.0,
+        margin_usdt=10.0, current_equity=97.0, is_manual=True,
     )
     assert not decision.allowed
     assert decision.reason == "CIRCUIT_BREAKER_ACTIVE"
@@ -291,7 +426,7 @@ async def test_circuit_breaker_triggers_at_nth_loss_and_auto_resumes_after_coold
     await system_state_repo.set_state(db, "circuit_breaker_until", past)
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=97.0,
+        margin_usdt=10.0, current_equity=97.0, is_manual=True,
     )
     assert decision.allowed, "debe auto-reanudarse tras el enfriamiento, sin accion manual"
 
@@ -307,7 +442,7 @@ async def test_winning_trade_resets_the_consecutive_losses_streak(db):
     await risk_engine.record_trade_closed(db, settings, pnl_net_usdt=-1.0, current_equity=101.0)
     decision = await risk_engine.check_new_entry(
         db, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-        margin_usdt=10.0, current_equity=101.0,
+        margin_usdt=10.0, current_equity=101.0, is_manual=True,
     )
     assert decision.allowed
 
@@ -334,7 +469,7 @@ async def test_kill_switch_state_persists_across_a_simulated_restart(tmp_path):
     try:
         decision = await risk_engine.check_new_entry(
             db2, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-            margin_usdt=10.0, current_equity=100.0,
+            margin_usdt=10.0, current_equity=100.0, is_manual=True,
         )
         assert not decision.allowed
         assert decision.reason == "KILL_SWITCH_ACTIVE"
@@ -353,7 +488,7 @@ async def test_drawdown_stop_state_persists_across_a_simulated_restart(tmp_path)
         await risk_engine.update_equity_tracking(db1, settings, 100.0)
         await risk_engine.check_new_entry(
             db1, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-            margin_usdt=10.0, current_equity=78.0,
+            margin_usdt=10.0, current_equity=78.0, is_manual=True,
         )
     finally:
         await db1.close()
@@ -363,7 +498,7 @@ async def test_drawdown_stop_state_persists_across_a_simulated_restart(tmp_path)
     try:
         decision = await risk_engine.check_new_entry(
             db2, settings, symbol="BTCUSDT", side=Side.LONG, strategy=None,
-            margin_usdt=10.0, current_equity=100.0,
+            margin_usdt=10.0, current_equity=100.0, is_manual=True,
         )
         assert not decision.allowed
         assert decision.reason == "DRAWDOWN_STOP_ACTIVE"
@@ -381,6 +516,7 @@ async def test_kill_switch_active_does_not_block_closing_an_open_position(db):
     backend = PaperBackend(db, rest_client, settings)
     trade = await backend.open_position(
         "BTCUSDT", Side.LONG, margin_usdt=10.0, leverage=10, strategy="ema_cross_9_21",
+        sl_margin_loss_pct=10.0,
     )
 
     await risk_engine.activate_kill_switch(db)
@@ -388,6 +524,7 @@ async def test_kill_switch_active_does_not_block_closing_an_open_position(db):
     with pytest.raises(risk_engine.RiskRejectedError):
         await backend.open_position(
             "ETHUSDT", Side.LONG, margin_usdt=10.0, leverage=10, strategy="ema_cross_9_21",
+            sl_margin_loss_pct=10.0,
         )
 
     rest_client.price = 110.0
@@ -451,6 +588,7 @@ async def test_smoke_end_to_end_risk_engine_lifecycle(tmp_path):
         # 1. Abrir una posicion (estrategia elegible).
         trade = await backend.open_position(
             "BTCUSDT", Side.LONG, margin_usdt=10.0, leverage=10, strategy="ema_cross_9_21",
+            sl_margin_loss_pct=10.0,
         )
         assert trade.status == TradeStatus.OPEN
 
@@ -459,6 +597,7 @@ async def test_smoke_end_to_end_risk_engine_lifecycle(tmp_path):
         with pytest.raises(risk_engine.RiskRejectedError) as exc_info:
             await backend.open_position(
                 "ETHUSDT", Side.LONG, margin_usdt=10.0, leverage=10, strategy="ema_cross_9_21",
+                sl_margin_loss_pct=10.0,
             )
         assert exc_info.value.reason == "MAX_SIMULTANEOUS_POSITIONS"
         rejections = await risk_rejections_repo.get_rejections(db)
@@ -472,6 +611,7 @@ async def test_smoke_end_to_end_risk_engine_lifecycle(tmp_path):
 
         trade2 = await backend.open_position(
             "BTCUSDT", Side.LONG, margin_usdt=10.0, leverage=10, strategy="ema_cross_9_21",
+            sl_margin_loss_pct=10.0,
         )
         rest_client.price = 90.0
         closed2 = await backend.close_position(trade2.id, reason="MANUAL")
@@ -480,6 +620,7 @@ async def test_smoke_end_to_end_risk_engine_lifecycle(tmp_path):
         with pytest.raises(risk_engine.RiskRejectedError) as exc_info:
             await backend.open_position(
                 "BTCUSDT", Side.LONG, margin_usdt=10.0, leverage=10, strategy="ema_cross_9_21",
+                sl_margin_loss_pct=10.0,
             )
         assert exc_info.value.reason == "CIRCUIT_BREAKER_ACTIVE"
 
@@ -498,6 +639,7 @@ async def test_smoke_end_to_end_risk_engine_lifecycle(tmp_path):
         with pytest.raises(risk_engine.RiskRejectedError) as exc_info:
             await backend.open_position(
                 "BTCUSDT", Side.LONG, margin_usdt=10.0, leverage=10, strategy="ema_cross_9_21",
+                sl_margin_loss_pct=10.0,
             )
         assert exc_info.value.reason == "KILL_SWITCH_ACTIVE"
 
