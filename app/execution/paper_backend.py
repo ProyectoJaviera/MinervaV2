@@ -9,6 +9,14 @@ Usa el precio de mercado real de Bitunix (`markPrice` de `/market/tickers`)
 para abrir/cerrar, y aplica la comision taker configurada (ordenes a
 mercado). Nunca envia ninguna orden real -- solo lee datos publicos y
 escribe en la base de datos local.
+
+Desde la subfase 3.2 de Fase 3, `open_position` pasa primero por
+`app.trading.risk_engine.check_new_entry` -- el motor de riesgo en vivo
+que puede BLOQUEAR una entrada nueva (posiciones, misma direccion,
+estrategia no elegible, tope de SL, perdida diaria, drawdown, circuit
+breaker, kill switch) o ajustar el margen hacia abajo. `close_position`
+nunca pasa por ahi -- el motor de riesgo solo bloquea entradas, nunca
+cierres (ver el docstring de `risk_engine.py`).
 """
 
 from __future__ import annotations
@@ -23,13 +31,15 @@ from app.market.bitunix_rest import BitunixRestClient
 from app.persistence.database import Database
 from app.persistence.models import Side, Trade, TradeStatus
 from app.persistence.repositories import specs_repo, trades_repo
+from app.trading import risk_engine
 
 logger = get_logger(__name__)
 
 
 class InsufficientRiskBudgetError(RuntimeError):
-    """La operacion no cumple el minimo operable del contrato o los limites
-    de riesgo configurados (ver `Settings.max_margin_for_new_trade`)."""
+    """La operacion no cumple el minimo operable del contrato de Bitunix
+    (`spec.min_trade_volume`) una vez aplicado el margen que aprobo el
+    motor de riesgo."""
 
 
 class PaperBackend(ExecutionBackend):
@@ -45,6 +55,26 @@ class PaperBackend(ExecutionBackend):
             raise ValueError(f"Sin ticker para {symbol}")
         return float(ticker.get("markPrice") or ticker["lastPrice"])
 
+    async def get_equity(self) -> float:
+        """Capital realizado MAS PnL flotante de las posiciones abiertas
+        (a precio de mercado actual) -- la base correcta para el motor de
+        riesgo (perdida diaria, drawdown), nunca solo lo realizado."""
+        balance = await self.get_balance()
+        positions = await trades_repo.get_open_positions(self.db)
+        if not positions:
+            return balance
+        price_cache: dict[str, float] = {}
+        unrealized = 0.0
+        for p in positions:
+            if p.symbol not in price_cache:
+                price_cache[p.symbol] = await self._get_mark_price(p.symbol)
+            result = compute_close_result(
+                p.side, p.qty, p.entry_price, price_cache[p.symbol],
+                p.fee_entry_usdt, self.settings.taker_fee_pct,
+            )
+            unrealized += result.pnl_net_usdt
+        return balance + unrealized
+
     async def open_position(
         self,
         symbol: str,
@@ -52,20 +82,27 @@ class PaperBackend(ExecutionBackend):
         margin_usdt: float,
         leverage: int,
         strategy: str | None = None,
+        sl_margin_loss_pct: float | None = None,
     ) -> Trade:
-        committed_symbol = await trades_repo.committed_margin(self.db, symbol)
-        committed_total = await trades_repo.committed_margin(self.db)
-        max_allowed = self.settings.max_margin_for_new_trade(
-            current_capital=await self.get_balance(),
-            margin_committed_on_symbol=committed_symbol,
-            margin_committed_total=committed_total,
+        equity = await self.get_equity()
+        decision = await risk_engine.check_new_entry(
+            self.db, self.settings, symbol=symbol, side=side, strategy=strategy,
+            margin_usdt=margin_usdt, current_equity=equity,
+            sl_margin_loss_pct=sl_margin_loss_pct,
         )
-        if margin_usdt > max_allowed + 1e-9:
+        if not decision.allowed:
+            logger.info(
+                "Entrada rechazada por el motor de riesgo: %s %s %s -- %s %s",
+                symbol, side.value, strategy, decision.reason, decision.details,
+            )
+            raise risk_engine.RiskRejectedError(decision.reason, decision.details)
+        assert decision.approved_margin_usdt is not None
+        if decision.approved_margin_usdt < margin_usdt:
             logger.info(
                 "Margen solicitado %.4f excede el maximo permitido %.4f para %s; se ajusta.",
-                margin_usdt, max_allowed, symbol,
+                margin_usdt, decision.approved_margin_usdt, symbol,
             )
-            margin_usdt = max_allowed
+        margin_usdt = decision.approved_margin_usdt
 
         spec = await specs_repo.get_spec(self.db, symbol)
         price = await self._get_mark_price(symbol)
@@ -115,6 +152,13 @@ class PaperBackend(ExecutionBackend):
         logger.info(
             "Posicion cerrada (paper): trade=%d %s pnl_neto=%.4f motivo=%s",
             trade_id, trade.symbol, result.pnl_net_usdt, reason,
+        )
+        # Actualiza racha de perdidas/circuit breaker y trackers de equity
+        # DESPUES de cerrar -- nunca bloquea el cierre en si (ya ocurrio).
+        equity_after_close = await self.get_equity()
+        await risk_engine.record_trade_closed(
+            self.db, self.settings, pnl_net_usdt=result.pnl_net_usdt,
+            current_equity=equity_after_close,
         )
         updated = await trades_repo.get_trade(self.db, trade_id)
         assert updated is not None

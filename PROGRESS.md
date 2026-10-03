@@ -324,6 +324,38 @@ una:
   observado en el tick, nunca un umbral nominal). 22 tests nuevos en
   `tests/unit/test_stop_engine.py`. No toca persistencia ni red -- no
   requeria smoke test contra copia de la base real.
-- 3.2 -- Motor de riesgo en vivo: pendiente (siguiente, a la espera de
-  aprobacion de 3.1).
+- **3.2 -- Motor de riesgo en vivo: HECHA.** Nuevo `app/trading/
+  risk_engine.py`: `check_new_entry` evalua, en orden, kill switch, stop
+  por drawdown (solo modo `"duro"`), circuit breaker, perdida diaria,
+  elegibilidad de estrategia, `MAX_SIMULTANEOUS_POSITIONS`,
+  `MAX_SAME_DIRECTION_POSITIONS` (nuevo), tope de SL (`sl_margin_loss_pct`
+  opcional) y margen disponible -- **solo bloquea entradas nuevas, nunca
+  cierres** (verificado con un test explicito: posicion abierta se sigue
+  cerrando con el kill switch activo). Cada rechazo se audita en la tabla
+  nueva `risk_rejections` (motivo + valores exactos). Perdida diaria y
+  drawdown se calculan sobre `PaperBackend.get_equity()` (realizado MAS
+  PnL flotante de posiciones abiertas, nunca solo lo realizado); el "dia"
+  usa `REPORT_TIMEZONE` (America/Santiago por defecto). Todo el estado
+  (kill switch, stop por drawdown, circuit breaker, racha de perdidas,
+  pico de equity, linea base del dia) vive en `system_state` -- persiste
+  solo, sin codigo extra, a traves de un reinicio (verificado con 2 tests
+  que cierran y reabren la conexion a un archivo real). Circuit breaker:
+  auto-reanuda tras el enfriamiento; stop por drawdown en modo `"duro"`:
+  reanudacion MANUAL unicamente (nunca se levanta solo), con un contador
+  `drawdown_stop_would_have_triggered_count` que sube en cualquier modo.
+  Nuevos settings: `MAX_SAME_DIRECTION_POSITIONS`, `LIVE_SL_MARGIN_CAP_PCT`,
+  `DRAWDOWN_STOP_MODE`, `REAL_ACCOUNT_ELIGIBLE_STRATEGIES` (no se pudo
+  agregar a `.env.example` -- acceso a ese archivo bloqueado por permisos
+  de la herramienta en esta sesion; son opcionales, ya tienen default en
+  `app/config.py`). 22 tests nuevos en `tests/unit/test_risk_engine.py`
+  (uno por limite, racha de perdidas con auto-resume, 2 de persistencia
+  tras reinicio simulado, kill-switch-no-bloquea-cierre, zona horaria
+  configurable, y un smoke test de punta a punta). Verificado ademas
+  contra una copia temporal de la base real (`risk_rejections` se crea
+  limpio, `check_new_entry` corre sin errores con los datos reales).
+  Bug real encontrado y corregido durante esta subfase: un smoke test con
+  una excepcion sin capturar dejaba una conexion de archivo sin cerrar, lo
+  que colgaba el proceso entero al salir (hilo de aiosqlite nunca se unia)
+  -- corregido con `try/finally` alrededor de todo ciclo de vida de una
+  `Database` sobre archivo en los tests nuevos.
 - 3.3 a 3.8: pendientes.

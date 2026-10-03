@@ -22,8 +22,12 @@ class ExecutionBackend(ABC):
         margin_usdt: float,
         leverage: int,
         strategy: str | None = None,
+        sl_margin_loss_pct: float | None = None,
     ) -> Trade:
-        """Abre una posicion LONG o SHORT (capacidad 1 de SPEC.md)."""
+        """Abre una posicion LONG o SHORT (capacidad 1 de SPEC.md).
+        `sl_margin_loss_pct` (opcional, Fase 3 subfase 3.2) es el riesgo
+        planeado al abrir -- si se provee, el motor de riesgo lo compara
+        contra `Settings.live_sl_margin_cap_pct`."""
         raise NotImplementedError
 
     @abstractmethod

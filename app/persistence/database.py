@@ -47,6 +47,22 @@ CREATE TABLE IF NOT EXISTS system_state (
     updated_at TEXT NOT NULL
 );
 
+-- Cada rechazo del motor de riesgo en vivo (Fase 3, subfase 3.2) a una
+-- entrada nueva, con el motivo y los valores exactos involucrados, para
+-- poder auditarlo despues. Nunca se usa para cierres (SL/TP/liquidacion
+-- ni cierre manual) -- el motor de riesgo solo bloquea entradas nuevas.
+CREATE TABLE IF NOT EXISTS risk_rejections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    strategy TEXT,
+    reason TEXT NOT NULL,
+    details_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_risk_rejections_reason ON risk_rejections (reason);
+
 CREATE TABLE IF NOT EXISTS ohlcv_cache (
     symbol TEXT NOT NULL,
     interval TEXT NOT NULL,

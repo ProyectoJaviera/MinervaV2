@@ -41,6 +41,21 @@ class Trade(BaseModel):
     decision_json: str | None = None
 
 
+class RiskRejection(BaseModel):
+    """Una entrada nueva bloqueada por el motor de riesgo en vivo (Fase 3,
+    subfase 3.2) -- nunca un cierre, el motor de riesgo solo bloquea
+    entradas. `details` trae los valores exactos que motivaron el
+    rechazo (p.ej. `{"open": 3, "limit": 3}`), para poder auditarlo."""
+
+    id: int | None = None
+    created_at: datetime
+    symbol: str
+    side: Side
+    strategy: str | None = None
+    reason: str
+    details: dict
+
+
 class OHLCVBar(BaseModel):
     symbol: str
     interval: str

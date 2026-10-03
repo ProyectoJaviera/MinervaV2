@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     leverage: int = Field(default=10, alias="LEVERAGE")
     margin_mode: str = Field(default="ISOLATED", alias="MARGIN_MODE")
 
-    # --- Gestion de riesgo (motor completo en Fase 3; valores ya fijados) ---
+    # --- Gestion de riesgo (motor en vivo desde Fase 3 subfase 3.2) ---
     max_drawdown_pct: float = Field(default=0.20, alias="MAX_DRAWDOWN_PCT")
     max_daily_loss_pct: float = Field(default=0.05, alias="MAX_DAILY_LOSS_PCT")
     max_simultaneous_positions: int = Field(default=3, alias="MAX_SIMULTANEOUS_POSITIONS")
@@ -56,6 +56,29 @@ class Settings(BaseSettings):
     )
     circuit_breaker_cooldown_hours: float = Field(
         default=8.0, alias="CIRCUIT_BREAKER_COOLDOWN_HOURS"
+    )
+    # Maximo de posiciones abiertas en la MISMA direccion (LONG o SHORT) a
+    # la vez, sin importar en que simbolos -- acota el riesgo de
+    # correlacion entre altcoins que `docs/FASE2_RIESGO.md` no puede medir
+    # (ver docs/FASE3_PLAN.md seccion 4, tercera ronda de ajustes).
+    max_same_direction_positions: int = Field(default=2, alias="MAX_SAME_DIRECTION_POSITIONS")
+    # Tope de perdida del SL sobre el margen para operaciones EN VIVO --
+    # analogo a MAX_SL_MARGIN_LOSS_PCT del backtest, pero configurable por
+    # separado porque la evidencia que lo informa (docs/FASE2_RIESGO.md) es
+    # distinta de los criterios de descarte del backtest.
+    live_sl_margin_cap_pct: float = Field(default=50.0, alias="LIVE_SL_MARGIN_CAP_PCT")
+    # Modo del stop por drawdown: "duro" detiene nuevas entradas de verdad
+    # (reanudacion manual); "alerta" solo notifica y sigue operando. En
+    # AMBOS modos se incrementa un contador persistente de cuantas veces se
+    # habria activado, para no perder esa senal si se corrio en "alerta".
+    drawdown_stop_mode: str = Field(default="duro", alias="DRAWDOWN_STOP_MODE")
+    # Estrategias habilitadas para ejecutarse en la cuenta REAL (paper, no
+    # dinero real) -- las demas solo generan senales/operaciones sombra
+    # (Fase 3 punto 2). Vacio = sin restriccion (todas elegibles).
+    real_account_eligible_strategies: str = Field(
+        default="ema_cross_9_21,funding_contrarian_experimental,"
+        "funding_contrarian_percentile_experimental",
+        alias="REAL_ACCOUNT_ELIGIBLE_STRATEGIES",
     )
 
     # --- Criterios de paso a dinero real (informativos) ---
@@ -172,6 +195,13 @@ class Settings(BaseSettings):
     @property
     def backtest_control_symbols_list(self) -> list[str]:
         return [s.strip().upper() for s in self.backtest_control_symbols.split(",") if s.strip()]
+
+    @property
+    def real_account_eligible_strategies_list(self) -> list[str]:
+        """Vacio = sin restriccion (todas las estrategias son elegibles)."""
+        return [
+            s.strip() for s in self.real_account_eligible_strategies.split(",") if s.strip()
+        ]
 
     @property
     def backtest_official_end_ms(self) -> int:
