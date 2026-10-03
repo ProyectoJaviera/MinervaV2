@@ -31,6 +31,11 @@ def margin_loss_pct(entry_price: float, sl_price: float, leverage: int) -> float
     `(distancia_precio / precio_entrada) * leverage * 100`. Misma formula
     que compara `Settings.max_sl_margin_loss_pct` (backtest) y
     `Settings.live_sl_margin_cap_pct` (motor de riesgo en vivo): PORCENTAJE
-    0-100, no fraccion."""
+    0-100, no fraccion.
+
+    El redondeo a 9 decimales es necesario: el SL de respaldo (5% a 10x)
+    cae EXACTAMENTE en el tope de 50%, y sin redondear la aritmetica de
+    coma flotante da 50.00000000000001 en ~77% de los precios, lo que la
+    comparacion `>` descartaba de forma aleatoria segun el precio."""
     price_distance = abs(entry_price - sl_price)
-    return (price_distance / entry_price) * leverage * 100
+    return round((price_distance / entry_price) * leverage * 100, 9)

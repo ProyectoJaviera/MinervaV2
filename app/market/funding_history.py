@@ -93,10 +93,14 @@ async def _download_funding_range(
 
 async def download_missing_funding(
     client: BitunixRestClient, db: Database, symbol: str, start_time_ms: int, end_time_ms: int,
+    freshness_tolerance_ms: int = FRESHNESS_TOLERANCE_MS,
 ) -> None:
     """Descarga por red SOLO la cola/cabeza de `funding_rate_history` que
-    falte -- misma logica que `ohlcv_history.download_missing`. Usada
-    exclusivamente por `scripts/download_history.py`."""
+    falte -- misma logica que `ohlcv_history.download_missing`. La cola se
+    repone si el ultimo evento cacheado tiene mas de `freshness_tolerance_ms`
+    de antiguedad: el generador en vivo pasa el intervalo de funding del
+    contrato mas un margen (ver `signal_generator`); el script de descarga
+    historica usa la tolerancia por defecto de 2 dias."""
     floor = await ohlcv_repo.get_floor(db, symbol, _FLOOR_INTERVAL, _FLOOR_PRICE_TYPE)
     covered = await funding_repo.get_covered_range(db, symbol)
 
@@ -106,7 +110,7 @@ async def download_missing_funding(
 
     min_cached, max_cached = covered
 
-    if max_cached < end_time_ms - FRESHNESS_TOLERANCE_MS:
+    if max_cached < end_time_ms - freshness_tolerance_ms:
         await _download_funding_range(client, db, symbol, max_cached + 1, end_time_ms, floor)
         floor = await ohlcv_repo.get_floor(db, symbol, _FLOOR_INTERVAL, _FLOOR_PRICE_TYPE)
 

@@ -30,6 +30,16 @@ def _row_to_trade(row) -> Trade:
         opened_at=datetime.fromisoformat(row["opened_at"]),
         closed_at=datetime.fromisoformat(row["closed_at"]) if row["closed_at"] else None,
         decision_json=row["decision_json"],
+        sl_price=row["sl_price"],
+        tp_price=row["tp_price"],
+        trailing_distance=row["trailing_distance"],
+        effective_stop=row["effective_stop"],
+        best_price=row["best_price"],
+        liq_price=row["liq_price"],
+        sl_margin_loss_pct=row["sl_margin_loss_pct"],
+        funding_is_approximated=bool(row["funding_is_approximated"]),
+        funding_last_applied_ms=row["funding_last_applied_ms"],
+        decision_source=row["decision_source"],
     )
 
 
@@ -38,8 +48,11 @@ async def create_trade(db: Database, trade: Trade) -> Trade:
         """
         INSERT INTO trades (
             symbol, side, strategy, status, leverage, margin_usdt, notional_usdt,
-            qty, entry_price, fee_entry_usdt, funding_paid_usdt, opened_at, decision_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            qty, entry_price, fee_entry_usdt, funding_paid_usdt, opened_at, decision_json,
+            sl_price, tp_price, trailing_distance, effective_stop, best_price, liq_price,
+            sl_margin_loss_pct, funding_is_approximated, funding_last_applied_ms,
+            decision_source
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             trade.symbol,
@@ -55,6 +68,16 @@ async def create_trade(db: Database, trade: Trade) -> Trade:
             trade.funding_paid_usdt,
             trade.opened_at.isoformat(),
             trade.decision_json,
+            trade.sl_price,
+            trade.tp_price,
+            trade.trailing_distance,
+            trade.effective_stop,
+            trade.best_price,
+            trade.liq_price,
+            trade.sl_margin_loss_pct,
+            int(trade.funding_is_approximated),
+            trade.funding_last_applied_ms,
+            trade.decision_source,
         ),
     )
     trade.id = cursor.lastrowid
@@ -81,6 +104,34 @@ async def close_trade(
         """,
         (exit_price, fee_exit_usdt, pnl_gross_usdt, pnl_net_usdt, close_reason,
          closed_at.isoformat(), trade_id),
+    )
+
+
+async def update_risk_state(
+    db: Database, trade_id: int, effective_stop: float | None, best_price: float | None
+) -> None:
+    """Trailing: el mejor precio alcanzado y el stop efectivo que se mueve con
+    el. Solo se llama cuando cambian (ver el monitor de posiciones)."""
+    await db.execute(
+        "UPDATE trades SET effective_stop = ?, best_price = ? WHERE id = ?",
+        (effective_stop, best_price, trade_id),
+    )
+
+
+async def update_funding(
+    db: Database,
+    trade_id: int,
+    funding_paid_usdt: float,
+    funding_last_applied_ms: int,
+    funding_is_approximated: bool,
+) -> None:
+    await db.execute(
+        """
+        UPDATE trades
+        SET funding_paid_usdt = ?, funding_last_applied_ms = ?, funding_is_approximated = ?
+        WHERE id = ?
+        """,
+        (funding_paid_usdt, funding_last_applied_ms, int(funding_is_approximated), trade_id),
     )
 
 

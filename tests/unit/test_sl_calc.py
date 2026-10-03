@@ -48,3 +48,14 @@ def test_margin_loss_pct_is_symmetric_for_long_and_short_sl():
 
 def test_margin_loss_pct_zero_distance_is_zero():
     assert margin_loss_pct(entry_price=100.0, sl_price=100.0, leverage=10) == 0.0
+
+
+@pytest.mark.parametrize("entry", [83738.6, 0.1234567, 12345.678, 3.0, 99999.99])
+def test_fallback_sl_at_cap_is_exactly_50_percent_for_any_price(entry):
+    """El SL de respaldo (5% a 10x) cae EXACTAMENTE en el tope de 50%. Sin
+    redondeo, la coma flotante daba 50.00000000000001 en ~77% de los precios y
+    la comparacion `>` descartaba la senal al azar."""
+    sl_long = entry * (1 - 0.05)
+    sl_short = entry * (1 + 0.05)
+    assert margin_loss_pct(entry, sl_long, 10) == 50.0
+    assert margin_loss_pct(entry, sl_short, 10) == 50.0

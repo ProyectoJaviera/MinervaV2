@@ -81,16 +81,15 @@ class Scheduler:
         return candidates
 
     async def _process_candidate(self, candidate: SignalCandidate) -> None:
-        open_positions = await trades_repo.get_open_positions(self.db, candidate.symbol)
-        opposite_open = [p for p in open_positions if p.side != candidate.side]
-        for pos in opposite_open:
-            assert pos.id is not None
-            await self.paper_backend.close_position(pos.id, reason="SIGNAL_REVERSAL")
+        """Abre una posicion si el simbolo esta libre. Una senal contraria con
+        posicion abierta se IGNORA (igual que el backtest, ver
+        docs/FASE2_CRITERIOS.md punto 6): nunca cierra ni invierte. Las
+        posiciones se cierran solo por SL/TP/trailing/liquidacion/manual."""
+        if not self.settings.auto_open_without_llm:
+            return  # sin LLM (subfase 3.6) la apertura automatica esta desactivada
 
-        if opposite_open:
-            open_positions = await trades_repo.get_open_positions(self.db, candidate.symbol)
-        if any(p.side == candidate.side for p in open_positions):
-            return  # ya hay una posicion abierta en la direccion deseada
+        if await trades_repo.get_open_positions(self.db, candidate.symbol):
+            return
 
         representative = pick_representative_strategy(
             candidate.contributing_strategies, self.settings

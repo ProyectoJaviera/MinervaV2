@@ -36,6 +36,7 @@ def make_settings(**overrides) -> Settings:
         MAX_SIMULTANEOUS_POSITIONS=3, MAX_SAME_DIRECTION_POSITIONS=3,
         LIVE_SL_MARGIN_CAP_PCT=50.0,
         REAL_ACCOUNT_ELIGIBLE_STRATEGIES="ema_cross_9_21,donchian_breakout_20",
+        AUTO_OPEN_WITHOUT_LLM=True,
     )
     defaults.update(overrides)
     return Settings(_env_file=None, **defaults)  # type: ignore[call-arg]
@@ -99,23 +100,62 @@ async def test_process_candidate_skips_when_same_direction_already_open(db):
 
 
 @pytest.mark.asyncio
-async def test_process_candidate_closes_opposite_position_on_reversal(db):
+async def test_opposite_signal_with_open_position_is_ignored_not_reversed(db):
+    """Igual que el backtest: una senal contraria NO cierra ni invierte la
+    posicion abierta. Solo SL/TP/trailing/liquidacion/manual la cierran."""
     scheduler, backend, rest_client = _scheduler(db)
     existing = await backend.open_position(
         "BTCUSDT", Side.SHORT, margin_usdt=10.0, leverage=10, strategy="ema_cross_9_21",
         sl_margin_loss_pct=10.0,
     )
 
-    rest_client.price = 90.0  # SHORT a favor, se cierra con ganancia
+    rest_client.price = 90.0
     await scheduler._process_candidate(make_candidate(side=Side.LONG))
 
-    closed = await trades_repo.get_trade(db, existing.id)
-    assert closed.status == TradeStatus.CLOSED
-    assert closed.close_reason == "SIGNAL_REVERSAL"
-
+    still_open = await trades_repo.get_trade(db, existing.id)
+    assert still_open.status == TradeStatus.OPEN
     open_positions = await trades_repo.get_open_positions(db, "BTCUSDT")
     assert len(open_positions) == 1
-    assert open_positions[0].side == Side.LONG
+    assert open_positions[0].side == Side.SHORT
+
+
+@pytest.mark.asyncio
+async def test_opposite_signal_from_ineligible_strategy_does_not_close_position(db):
+    """Una senal contraria de una estrategia NO elegible no debe cerrar una
+    posicion abierta (antes lo hacia, y luego el motor de riesgo rechazaba la
+    apertura: la posicion se perdia sin motivo)."""
+    scheduler, backend, rest_client = _scheduler(db)
+    existing = await backend.open_position(
+        "BTCUSDT", Side.LONG, margin_usdt=10.0, leverage=10, strategy="ema_cross_9_21",
+        sl_margin_loss_pct=10.0,
+    )
+
+    rest_client.price = 110.0
+    candidate = make_candidate(
+        side=Side.SHORT, contributing_strategies=["trend_atr_stop_9_21_50"]
+    )
+    await scheduler._process_candidate(candidate)
+
+    still_open = await trades_repo.get_trade(db, existing.id)
+    assert still_open.status == TradeStatus.OPEN
+
+
+@pytest.mark.asyncio
+async def test_auto_open_disabled_without_llm_opens_nothing(db):
+    scheduler, _backend, _rest = _scheduler(db, AUTO_OPEN_WITHOUT_LLM=False)
+    await scheduler._process_candidate(make_candidate())
+
+    assert await trades_repo.get_open_positions(db, "BTCUSDT") == []
+
+
+@pytest.mark.asyncio
+async def test_automatic_open_is_tagged_sin_llm(db):
+    scheduler, _backend, _rest = _scheduler(db)
+    await scheduler._process_candidate(make_candidate())
+
+    positions = await trades_repo.get_open_positions(db, "BTCUSDT")
+    assert len(positions) == 1
+    assert positions[0].decision_source == "SIN_LLM"
 
 
 @pytest.mark.asyncio

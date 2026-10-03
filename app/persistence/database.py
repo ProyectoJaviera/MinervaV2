@@ -244,6 +244,7 @@ CREATE TABLE IF NOT EXISTS signals (
     sl_margin_loss_pct REAL,
     indicators_json TEXT,
     status TEXT,
+    reason TEXT,
     UNIQUE (symbol, strategy, timeframe, candle_close_time)
 );
 
@@ -369,6 +370,29 @@ _BACKTEST_VERDICTS_MIGRATED_COLUMNS = {
 }
 
 
+# Columnas agregadas a `trades` en las subfases 3.3-3.4 (ver `_migrate_columns`):
+# niveles de riesgo planeados al abrir (SL/TP/trailing/liquidacion, lo que el
+# monitor de posiciones evalua en vivo), estado de trailing, funding ya
+# aplicado (marca de tiempo para no contarlo dos veces) y la fuente de la
+# decision que abrio la posicion (SIN_LLM hasta la subfase 3.6).
+_TRADES_MIGRATED_COLUMNS = {
+    "sl_price": "REAL",
+    "tp_price": "REAL",
+    "trailing_distance": "REAL",
+    "effective_stop": "REAL",
+    "best_price": "REAL",
+    "liq_price": "REAL",
+    "sl_margin_loss_pct": "REAL",
+    "funding_is_approximated": "INTEGER NOT NULL DEFAULT 0",
+    "funding_last_applied_ms": "INTEGER",
+    "decision_source": "TEXT",
+}
+
+_SIGNALS_MIGRATED_COLUMNS = {
+    "reason": "TEXT",
+}
+
+
 class Database:
     """Wrapper fino sobre una conexion aiosqlite compartida.
 
@@ -409,17 +433,21 @@ class Database:
         async with self._write_lock:
             await self.conn.executescript(SCHEMA)
             await self.conn.commit()
-            await self._migrate_backtest_verdicts_columns()
+            await self._migrate_columns("backtest_verdicts", _BACKTEST_VERDICTS_MIGRATED_COLUMNS)
+            await self._migrate_columns("trades", _TRADES_MIGRATED_COLUMNS)
+            await self._migrate_columns("signals", _SIGNALS_MIGRATED_COLUMNS)
 
-    async def _migrate_backtest_verdicts_columns(self) -> None:
-        cursor = await self.conn.execute("PRAGMA table_info(backtest_verdicts)")
+    async def _migrate_columns(self, table: str, columns: dict[str, str]) -> None:
+        """`CREATE TABLE IF NOT EXISTS` no agrega columnas a una tabla que ya
+        existe (p.ej. `minerva.db` de una corrida anterior) -- se agregan
+        aqui con `ALTER TABLE` (idempotente: se saltan las que ya estan).
+        Debe correr despues de `executescript(SCHEMA)`, dentro del mismo lock."""
+        cursor = await self.conn.execute(f"PRAGMA table_info({table})")
         existing = {row[1] for row in await cursor.fetchall()}
         await cursor.close()
-        for name, sql_type in _BACKTEST_VERDICTS_MIGRATED_COLUMNS.items():
+        for name, sql_type in columns.items():
             if name not in existing:
-                await self.conn.execute(
-                    f"ALTER TABLE backtest_verdicts ADD COLUMN {name} {sql_type}"
-                )
+                await self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
         await self.conn.commit()
 
     async def execute(self, query: str, params: tuple = ()) -> aiosqlite.Cursor:

@@ -39,6 +39,19 @@ class Trade(BaseModel):
     opened_at: datetime
     closed_at: datetime | None = None
     decision_json: str | None = None
+    # Niveles planeados al abrir, evaluados en vivo por el monitor (subfase 3.4).
+    # None = la posicion no tiene ese nivel (p.ej. manual sin SL): el monitor
+    # solo evalua lo que existe.
+    sl_price: float | None = None
+    tp_price: float | None = None
+    trailing_distance: float | None = None
+    effective_stop: float | None = None
+    best_price: float | None = None
+    liq_price: float | None = None
+    sl_margin_loss_pct: float | None = None
+    funding_is_approximated: bool = False
+    funding_last_applied_ms: int | None = None
+    decision_source: str | None = None
 
 
 class RiskRejection(BaseModel):
@@ -81,6 +94,9 @@ class SignalRecord(BaseModel):
     sl_margin_loss_pct: float | None = None
     indicators_json: str | None = None
     status: str | None = None
+    # Motivo por el que la estrategia no pudo emitir una senal real (HOLD
+    # forzado): "FUNDING_STALE" o "CANDLE_STALE". None en el resto de casos.
+    reason: str | None = None
 
 
 class SignalDiscardedBySLCap(BaseModel):

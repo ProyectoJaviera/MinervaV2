@@ -17,14 +17,21 @@ generador de senales en vivo. Cubre, en este orden:
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 
 import pytest
 
 from app.config import Settings
 from app.market.ohlcv_history import interval_to_ms
-from app.persistence.models import AssetUniverseEntry, OHLCVBar, Side
-from app.persistence.repositories import ohlcv_repo, signals_repo, universe_repo
+from app.persistence.models import AssetUniverseEntry, ContractSpec, OHLCVBar, Side
+from app.persistence.repositories import (
+    funding_repo,
+    ohlcv_repo,
+    signals_repo,
+    specs_repo,
+    universe_repo,
+)
 from app.strategies.base import BaseStrategy, Signal
 from app.trading import signal_generator as sg
 
@@ -301,3 +308,115 @@ async def test_run_signal_generation_cycle_empty_universe_is_a_noop(db):
 
     candidates = await sg.run_signal_generation_cycle(db, ExplodingRestClient(), settings)
     assert candidates == []
+
+
+# --- vigencia de funding y de velas (fix de la revision de 3.3) ----------
+
+
+def _funding_events(now_ms: int, last_event_offset_hours: float, rate: float, span_hours: float):
+    """Eventos cada 8h, terminando `last_event_offset_hours` antes de ahora."""
+    last = now_ms - int(last_event_offset_hours * 3_600_000)
+    count = int(span_hours // 8)
+    return [(last - k * 8 * 3_600_000, rate) for k in range(count)][::-1]
+
+
+async def _seed_universe_and_bars(db, now_ms: int, last_bar_offset_steps: int = 0):
+    await universe_repo.insert_snapshot(db, [
+        AssetUniverseEntry(
+            refreshed_at=datetime.now(UTC), coingecko_id="bitcoin", symbol="BTCUSDT",
+            included=True,
+        ),
+    ])
+    for timeframe, strategy_names in sg._timeframe_groups().items():
+        bars_needed = max(sg._history_bars_for(name) for name in strategy_names)
+        step_ms = interval_to_ms(timeframe)
+        bars, _ = _seed_bars(
+            "BTCUSDT", timeframe, bars_needed, now_ms - last_bar_offset_steps * step_ms
+        )
+        await ohlcv_repo.upsert_bars(db, bars)
+
+
+class ExplodingRestClient:
+    """Simula la red caida: cada llamada falla y queda registrada en `calls`."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __getattr__(self, name):
+        async def _fail(*args, **kwargs):
+            self.calls.append(name)
+            raise ConnectionError(f"red caida (simulada): {name}")
+
+        return _fail
+
+
+@pytest.mark.asyncio
+async def test_stale_funding_cache_yields_no_funding_signal(db):
+    now_ms = int(time.time() * 1000)
+    settings = make_settings()
+    await _seed_universe_and_bars(db, now_ms)
+    # Ultimo evento hace 30h: mas que 8h de intervalo + 1h de margen -> obsoleto.
+    await funding_repo.upsert_funding(
+        db, "BTCUSDT", _funding_events(now_ms, 30, 0.001, span_hours=800 * 4)
+    )
+
+    await sg.run_signal_generation_cycle(db, ExplodingRestClient(), settings)
+
+    rows = await signals_repo.get_signals(db, symbol="BTCUSDT", limit=10000)
+    funding_rows = [r for r in rows if r.strategy in sg._FUNDING_STRATEGIES]
+    assert funding_rows, "las estrategias de funding deben registrarse aunque esten bloqueadas"
+    assert all(r.signal == "HOLD" for r in funding_rows)
+    assert all(r.reason == "FUNDING_STALE" for r in funding_rows)
+
+
+@pytest.mark.asyncio
+async def test_fresh_funding_cache_lets_funding_strategy_operate(db):
+    now_ms = int(time.time() * 1000)
+    settings = make_settings()
+    await _seed_universe_and_bars(db, now_ms)
+    # Ultimo evento hace 1h (dentro de 8h + 1h): fresco. Tasa alta sostenida ->
+    # funding_contrarian_experimental busca SHORT, y el ultimo cierre cae
+    # respecto al anterior (momentum negativo) -> SHORT.
+    await funding_repo.upsert_funding(
+        db, "BTCUSDT", _funding_events(now_ms, 1, 0.001, span_hours=800 * 4)
+    )
+
+    # Contrato ya cacheado y reciente: ni el contrato ni el funding deben pedirse a la red.
+    await specs_repo.upsert_spec(db, ContractSpec(
+        symbol="BTCUSDT", funding_interval_hours=8, fetched_at=datetime.now(UTC),
+    ))
+    rest = ExplodingRestClient()
+
+    candidates = await sg.run_signal_generation_cycle(db, rest, settings)
+
+    assert rest.calls == [], "con cache fresca el ciclo no debe tocar la red"
+    rows = await signals_repo.get_signals(db, symbol="BTCUSDT", limit=10000)
+    contrarian = [
+        r for r in rows if r.strategy == "funding_contrarian_experimental" and r.timeframe == "4h"
+    ]
+    assert len(contrarian) == 1
+    assert contrarian[0].signal == "SHORT"
+    assert contrarian[0].reason is None
+    assert contrarian[0].status == "PENDING"
+    assert any(
+        c.symbol == "BTCUSDT" and c.side == Side.SHORT
+        and "funding_contrarian_experimental" in c.contributing_strategies
+        for c in candidates
+    )
+
+
+@pytest.mark.asyncio
+async def test_lagging_candle_cache_is_marked_stale_and_not_executed(db):
+    now_ms = int(time.time() * 1000)
+    settings = make_settings()
+    # Cache atrasada 10 velas (la red no responde para actualizarla).
+    await _seed_universe_and_bars(db, now_ms, last_bar_offset_steps=10)
+
+    candidates = await sg.run_signal_generation_cycle(db, ExplodingRestClient(), settings)
+
+    rows = await signals_repo.get_signals(db, symbol="BTCUSDT", limit=10000)
+    assert rows, "la evaluacion debe quedar registrada aunque la vela este obsoleta"
+    assert all(r.reason == "CANDLE_STALE" for r in rows)
+    assert all(r.status in (None, "STALE_DATA") for r in rows)
+    assert candidates == []
+    assert await sg.get_stale_data_count(db) == len(rows)

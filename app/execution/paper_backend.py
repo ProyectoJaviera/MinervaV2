@@ -99,6 +99,7 @@ class PaperBackend(ExecutionBackend):
         strategy: str | None = None,
         sl_margin_loss_pct: float | None = None,
         is_manual: bool = False,
+        decision_source: str | None = None,
     ) -> Trade:
         # Todo el ciclo comprobacion-de-cupo + escritura es atomico a nivel
         # de proceso (ver el comentario en __init__) -- el motor de riesgo
@@ -147,6 +148,8 @@ class PaperBackend(ExecutionBackend):
                 entry_price=price,
                 fee_entry_usdt=fill.fee_entry_usdt,
                 opened_at=datetime.now(UTC),
+                sl_margin_loss_pct=sl_margin_loss_pct,
+                decision_source=decision_source or ("MANUAL" if is_manual else "SIN_LLM"),
             )
             trade = await trades_repo.create_trade(self.db, trade)
             logger.info("Posicion abierta (paper): %s %s margen=%.2f qty=%.6f @ %.4f",

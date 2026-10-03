@@ -20,8 +20,8 @@ async def insert_signal(db: Database, signal: SignalRecord) -> int | None:
             symbol, strategy, is_experimental, timeframe, candle_close_time,
             evaluated_at, signal, price_at_eval, stop_price, take_profit_price,
             trailing_distance, funding_rate_pct, funding_is_approximated,
-            sl_margin_loss_pct, indicators_json, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            sl_margin_loss_pct, indicators_json, status, reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             signal.symbol, signal.strategy, int(signal.is_experimental), signal.timeframe,
@@ -29,7 +29,7 @@ async def insert_signal(db: Database, signal: SignalRecord) -> int | None:
             signal.price_at_eval, signal.stop_price, signal.take_profit_price,
             signal.trailing_distance, signal.funding_rate_pct,
             int(signal.funding_is_approximated), signal.sl_margin_loss_pct,
-            signal.indicators_json, signal.status,
+            signal.indicators_json, signal.status, signal.reason,
         ),
     )
     if cursor.rowcount == 0:
@@ -60,6 +60,7 @@ def _row_to_signal(row) -> SignalRecord:
         sl_margin_loss_pct=row["sl_margin_loss_pct"],
         indicators_json=row["indicators_json"],
         status=row["status"],
+        reason=row["reason"],
     )
 
 

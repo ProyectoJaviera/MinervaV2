@@ -111,6 +111,19 @@ class Settings(BaseSettings):
         alias="REAL_ACCOUNT_ELIGIBLE_STRATEGIES",
     )
 
+    # --- Vigencia de datos y apertura sin LLM (Fase 3, subfase 3.3) ---
+    # Funding obsoleto: el ultimo evento cacheado tiene mas antiguedad que el
+    # intervalo de funding del contrato mas este margen (horas).
+    funding_stale_margin_hours: float = Field(default=1.0, alias="FUNDING_STALE_MARGIN_HOURS")
+    # Vela obsoleta: la ultima vela cerrada cerro hace mas de un intervalo mas
+    # esta tolerancia (segundos) respecto a ahora.
+    candle_stale_tolerance_seconds: float = Field(
+        default=300.0, alias="CANDLE_STALE_TOLERANCE_SECONDS"
+    )
+    # Sin LLM (subfase 3.6 aun no existe) la apertura automatica en la cuenta
+    # real esta desactivada; las senales se registran igual en `signals`.
+    auto_open_without_llm: bool = Field(default=False, alias="AUTO_OPEN_WITHOUT_LLM")
+
     # --- Criterios de paso a dinero real (informativos) ---
     min_paper_trading_days: int = Field(default=30, alias="MIN_PAPER_TRADING_DAYS")
     min_closed_trades: int = Field(default=100, alias="MIN_CLOSED_TRADES")
