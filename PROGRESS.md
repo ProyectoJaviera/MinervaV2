@@ -275,16 +275,14 @@ secciones "Correcciones..." de `docs/FASE2_CRITERIOS.md` y en
 
 ### Pendientes explicitos para fases siguientes
 
-- **Fase 3**: plan propuesto en `docs/FASE3_PLAN.md`, **pendiente de tu
-  aprobacion del contenido** (distinto de la aprobacion del proceso de
-  planificacion en Plan Mode, ya obtenida). Fusiona deliberadamente lo que
-  `docs/FASE0.md` separaba en "Fase 3" (motor de riesgo, simulador
-  realista con SL/TP/trailing/liquidacion por tiers, funding periodico,
-  slippage, reconciliacion tras downtime) y "Fase 4" (LLM como motor de
-  decision) -- medir el valor del LLM (brazo B vs. C vs. A, ver el plan)
-  exige que el LLM ya este tomando decisiones reales, asi que no puede
-  quedar en una fase posterior separada. 8 subfases con criterios de
-  aceptacion propios (3.1 a 3.8), ver el plan para el detalle completo.
+- **Fase 3**: plan aprobado (`docs/FASE3_PLAN.md`), en implementacion
+  subfase por subfase -- ver seccion "Fase 3" mas abajo para el estado
+  detallado. Fusiona deliberadamente lo que `docs/FASE0.md` separaba en
+  "Fase 3" (motor de riesgo, simulador realista con SL/TP/trailing/
+  liquidacion por tiers, funding periodico, slippage, reconciliacion tras
+  downtime) y "Fase 4" (LLM como motor de decision) -- medir el valor del
+  LLM exige que el LLM ya este tomando decisiones reales, asi que no puede
+  quedar en una fase posterior separada.
 - Fase 4 (lo que queda tras la fusion anterior): noticias (RSS CoinDesk/
   Cointelegraph, sentimiento), memoria/lecciones entre operaciones,
   recalibracion automatica del umbral de confianza del LLM -- mejoras
@@ -294,3 +292,38 @@ secciones "Correcciones..." de `docs/FASE2_CRITERIOS.md` y en
   real via WS, graficos, controles), API completa, Telegram.
 - Fase 6: Docker final multi-stage, pruebas E2E, informe de metricas de
   paper trading con la nota sobre backtest-vs-paper-trading del LLM.
+
+## Fase 3 -- Gestion de riesgo, ejecucion realista y medicion del valor del LLM
+
+**Estado: APROBADA (plan), EN IMPLEMENTACION (subfase por subfase).**
+
+Plan: `docs/FASE3_PLAN.md` (3 rondas de revision antes de la aprobacion;
+ver el encabezado del documento para el detalle de cada ronda). Ajustes de
+la tercera ronda ya incorporados al plan: la columna "posiciones
+simultaneas" de `docs/FASE2_RIESGO.md` no es fiable para justificar
+`MAX_SIMULTANEOUS_POSITIONS` (sesgo documentado, nuevo limite
+`MAX_SAME_DIRECTION_POSITIONS` agregado); ritmo de operaciones reales
+recalculado con cifras OOS reales (antes mezclaba IS+OOS); criterio de
+valor de la IA elevado a N=100 por lado con intervalo de confianza
+bootstrap; stop por drawdown configurable (`DRAWDOWN_STOP_MODE`) con
+contador que alimenta el criterio de paso a dinero real igual en ambos
+modos; precio de Sonnet marcado explicitamente como no verificado.
+
+Se avanza subfase por subfase (8 en total, ver la tabla en
+`docs/FASE3_PLAN.md`), deteniendose a esperar aprobacion al terminar cada
+una:
+
+- **3.1 -- Extraer `stop_engine.py` + modo tick: HECHA.** Nuevo paquete
+  `app/trading/`, modulo `stop_engine.py`: `order_adverse_thresholds`,
+  `check_adverse_bar`, `check_favorable_tp_bar` son una extraccion PURA de
+  `app/backtesting/engine.py` (antes privadas con guion bajo) -- mismo
+  comportamiento exacto, verificado porque los 196 tests existentes del
+  backtest pasan sin haberlos tocado. Nuevas `check_adverse_tick` y
+  `check_favorable_tp_tick` (modo tick, sin la nocion de gap/apertura de
+  vela que tiene el modo vela -- devuelven siempre el precio real
+  observado en el tick, nunca un umbral nominal). 22 tests nuevos en
+  `tests/unit/test_stop_engine.py`. No toca persistencia ni red -- no
+  requeria smoke test contra copia de la base real.
+- 3.2 -- Motor de riesgo en vivo: pendiente (siguiente, a la espera de
+  aprobacion de 3.1).
+- 3.3 a 3.8: pendientes.

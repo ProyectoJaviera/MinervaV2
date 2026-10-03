@@ -56,6 +56,7 @@ from app.persistence.database import Database
 from app.persistence.models import Side
 from app.persistence.repositories import funding_repo, specs_repo
 from app.strategies.base import BaseStrategy, Signal
+from app.trading.stop_engine import check_adverse_bar, check_favorable_tp_bar
 
 logger = get_logger(__name__)
 
@@ -133,59 +134,6 @@ def _fallback_sl_tp(side: Signal, entry_price: float, settings: Settings) -> tup
     if side == Signal.LONG:
         return entry_price * (1 - sl_pct), entry_price * (1 + tp_pct)
     return entry_price * (1 + sl_pct), entry_price * (1 - tp_pct)
-
-
-def _order_adverse_thresholds(
-    is_long: bool, sl_threshold: float, liq_threshold: float
-) -> list[tuple[str, float]]:
-    """[(nombre, precio), ...] de los umbrales adversos (SL, liquidacion),
-    el MAS CERCANO al precio de entrada primero -- ese es el que se
-    alcanzaria primero si el precio se mueve en contra de forma monotona
-    (tarea 4b). Para LONG, "mas cerca" = precio mas ALTO; para SHORT, mas
-    BAJO."""
-    pairs = [("SL", sl_threshold), ("LIQUIDATION", liq_threshold)]
-    pairs.sort(key=lambda p: p[1], reverse=is_long)
-    return pairs
-
-
-def _check_adverse(
-    is_long: bool,
-    bar_open: float,
-    last_low: float,
-    last_high: float,
-    mark_low: float,
-    mark_high: float,
-    sl_threshold: float,
-    liq_threshold: float,
-) -> tuple[str, float] | None:
-    """Revisa SL y liquidacion en orden de cercania (tarea 4b), con
-    ejecucion al OPEN si la vela ya abrio mas alla del umbral (gap, tarea
-    4c). Devuelve (razon, precio_de_cierre) o `None` si ninguno se activo."""
-    adverse_extreme = {"SL": last_low if is_long else last_high,
-                        "LIQUIDATION": mark_low if is_long else mark_high}
-    for name, threshold in _order_adverse_thresholds(is_long, sl_threshold, liq_threshold):
-        gapped = bar_open <= threshold if is_long else bar_open >= threshold
-        if gapped:
-            return name, bar_open
-        extreme = adverse_extreme[name]
-        hit = extreme <= threshold if is_long else extreme >= threshold
-        if hit:
-            return name, threshold
-    return None
-
-
-def _check_favorable_tp(
-    is_long: bool, bar_open: float, last_high: float, last_low: float, tp_threshold: float
-) -> float | None:
-    """Revisa el TP con la misma logica de gap que `_check_adverse`: si la
-    vela ya abrio mas alla del TP, se ejecuta a ese OPEN (mejor para la
-    posicion que el precio nominal del TP, nunca peor)."""
-    gapped = bar_open >= tp_threshold if is_long else bar_open <= tp_threshold
-    if gapped:
-        return bar_open
-    extreme = last_high if is_long else last_low
-    hit = extreme >= tp_threshold if is_long else extreme <= tp_threshold
-    return tp_threshold if hit else None
 
 
 async def run_backtest(
@@ -314,7 +262,7 @@ async def run_backtest(
         if funding_approx[i]:
             position.funding_is_approximated = True
 
-        adverse = _check_adverse(
+        adverse = check_adverse_bar(
             is_long, opens[i], lows[i], highs[i], mark_lows[i], mark_highs[i],
             position.effective_stop, position.liq_price,
         )
@@ -328,7 +276,9 @@ async def run_backtest(
             return
 
         if position.tp_price is not None:
-            tp_exit = _check_favorable_tp(is_long, opens[i], highs[i], lows[i], position.tp_price)
+            tp_exit = check_favorable_tp_bar(
+                is_long, opens[i], highs[i], lows[i], position.tp_price
+            )
             if tp_exit is not None:
                 finalize(tp_exit, i, "TP")
                 return
