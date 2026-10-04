@@ -1,6 +1,7 @@
 # Fase 2 — Análisis de riesgo de ruina (bootstrap)
 
 > Generado por `scripts/analyze_risk.py`. Ver `app/backtesting/risk_analysis.py`
+> Corrida **v2** (tope de SL con redondeo corregido y ventana oficial fija). La version v1, con el error, queda en `docs/FASE2_RIESGO_v1.md`. Ver `docs/FASE2_REEJECUCION.md`.
 > para el método completo y las simplificaciones documentadas (exclusión —no
 > truncamiento— por tope de SL, concurrencia por lotes, reescalado
 > proporcional por margen, bootstrap i.i.d. por defecto con una variante por
@@ -16,99 +17,99 @@
 
 ### `ema_cross_9_21`
 
-**ema_cross_9_21** -- 243 operaciones OOS, PF 1.12, esperanza por operación +0.40 USDT.
+**ema_cross_9_21** -- 556 operaciones OOS, PF 0.97, esperanza por operación -0.10 USDT.
 
 | Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
 |---|---|---|---|---|---|---|---|
-| 5 | 1 | 40% | 1 | 243 | 0 | n/a (0 de 243 elegibles) | n/a |
-| 5 | 1 | 50% | 1 | 0 | 243 | 0.1% | 34.0% |
-| 5 | 1 | sin tope | 1 | 0 | 243 | 0.1% | 37.1% |
-| 5 | 2 | 40% | 1 | 243 | 0 | n/a (0 de 243 elegibles) | n/a |
-| 5 | 2 | 50% | 1 | 0 | 243 | 0.1% | 32.6% |
-| 5 | 2 | sin tope | 1 | 0 | 243 | 0.2% | 31.9% |
-| 5 | 3 | 40% | 1 | 243 | 0 | n/a (0 de 243 elegibles) | n/a |
-| 5 | 3 | 50% | 1 | 0 | 243 | 0.1% | 29.2% |
-| 5 | 3 | sin tope | 1 | 0 | 243 | 0.1% | 28.9% |
-| 10 | 1 | 40% | 1 | 243 | 0 | n/a (0 de 243 elegibles) | n/a |
-| 10 | 1 | 50% | 1 | 0 | 243 | 8.6% | 77.0% |
-| 10 | 1 | sin tope | 1 | 0 | 243 | 8.0% | 77.3% |
-| 10 | 2 | 40% | 1 | 243 | 0 | n/a (0 de 243 elegibles) | n/a |
-| 10 | 2 | 50% | 1 | 0 | 243 | 7.8% | 71.7% |
-| 10 | 2 | sin tope | 1 | 0 | 243 | 7.1% | 73.5% |
-| 10 | 3 | 40% | 1 | 243 | 0 | n/a (0 de 243 elegibles) | n/a |
-| 10 | 3 | 50% | 1 | 0 | 243 | 6.0% | 66.6% |
-| 10 | 3 | sin tope | 1 | 0 | 243 | 6.5% | 67.2% |
+| 5 | 1 | 40% | 1 | 556 | 0 | n/a (0 de 556 elegibles) | n/a |
+| 5 | 1 | 50% | 1 | 0 | 556 | 0.4% | 59.4% |
+| 5 | 1 | sin tope | 1 | 0 | 556 | 0.9% | 58.3% |
+| 5 | 2 | 40% | 1 | 556 | 0 | n/a (0 de 556 elegibles) | n/a |
+| 5 | 2 | 50% | 1 | 0 | 556 | 0.4% | 55.5% |
+| 5 | 2 | sin tope | 1 | 0 | 556 | 0.8% | 56.9% |
+| 5 | 3 | 40% | 1 | 556 | 0 | n/a (0 de 556 elegibles) | n/a |
+| 5 | 3 | 50% | 1 | 0 | 556 | 0.9% | 52.5% |
+| 5 | 3 | sin tope | 1 | 0 | 556 | 0.7% | 53.8% |
+| 10 | 1 | 40% | 1 | 556 | 0 | n/a (0 de 556 elegibles) | n/a |
+| 10 | 1 | 50% | 1 | 0 | 556 | 22.8% | 90.6% |
+| 10 | 1 | sin tope | 1 | 0 | 556 | 22.9% | 90.4% |
+| 10 | 2 | 40% | 1 | 556 | 0 | n/a (0 de 556 elegibles) | n/a |
+| 10 | 2 | 50% | 1 | 0 | 556 | 20.9% | 85.5% |
+| 10 | 2 | sin tope | 1 | 0 | 556 | 22.7% | 88.8% |
+| 10 | 3 | 40% | 1 | 556 | 0 | n/a (0 de 556 elegibles) | n/a |
+| 10 | 3 | 50% | 1 | 0 | 556 | 20.6% | 84.0% |
+| 10 | 3 | sin tope | 1 | 0 | 556 | 21.3% | 84.2% |
 
 **i.i.d. vs. bootstrap por bloques** (mismo punto de la grilla: margen 5 USDT, 3 posiciones, tope SL 50% -- bloque de 5 operaciones consecutivas vs. i.i.d.; ver limitación 4 del docstring de `app/backtesting/risk_analysis.py`):
 
 | Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
 |---|---|---|---|---|---|---|---|
-| 5 | 3 | 50% | 1 | 0 | 243 | 0.1% | 29.3% |
-| 5 | 3 | 50% | 5 | 0 | 243 | 0.2% | 37.6% |
+| 5 | 3 | 50% | 1 | 0 | 556 | 0.5% | 54.6% |
+| 5 | 3 | 50% | 5 | 0 | 556 | 1.5% | 60.4% |
 
 ### `trend_atr_stop_9_21_50`
 
-**trend_atr_stop_9_21_50** -- 496 operaciones OOS, PF 1.02, esperanza por operación +0.03 USDT.
+**trend_atr_stop_9_21_50** -- 493 operaciones OOS, PF 1.03, esperanza por operación +0.03 USDT.
 
 | Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
 |---|---|---|---|---|---|---|---|
-| 5 | 1 | 40% | 1 | 164 | 332 | 0.0% | 1.9% |
-| 5 | 1 | 50% | 1 | 0 | 496 | 0.0% | 8.6% |
-| 5 | 1 | sin tope | 1 | 0 | 496 | 0.0% | 8.0% |
-| 5 | 2 | 40% | 1 | 164 | 332 | 0.0% | 2.1% |
-| 5 | 2 | 50% | 1 | 0 | 496 | 0.0% | 7.8% |
-| 5 | 2 | sin tope | 1 | 0 | 496 | 0.0% | 8.1% |
-| 5 | 3 | 40% | 1 | 164 | 332 | 0.0% | 2.2% |
-| 5 | 3 | 50% | 1 | 0 | 496 | 0.0% | 7.5% |
-| 5 | 3 | sin tope | 1 | 0 | 496 | 0.0% | 6.3% |
-| 10 | 1 | 40% | 1 | 164 | 332 | 0.0% | 28.3% |
-| 10 | 1 | 50% | 1 | 0 | 496 | 0.4% | 50.4% |
-| 10 | 1 | sin tope | 1 | 0 | 496 | 0.4% | 50.2% |
-| 10 | 2 | 40% | 1 | 164 | 332 | 0.1% | 26.9% |
-| 10 | 2 | 50% | 1 | 0 | 496 | 0.2% | 47.4% |
-| 10 | 2 | sin tope | 1 | 0 | 496 | 0.4% | 45.8% |
-| 10 | 3 | 40% | 1 | 164 | 332 | 0.0% | 26.8% |
-| 10 | 3 | 50% | 1 | 0 | 496 | 0.4% | 45.8% |
-| 10 | 3 | sin tope | 1 | 0 | 496 | 0.4% | 44.9% |
+| 5 | 1 | 40% | 1 | 164 | 329 | 0.0% | 1.5% |
+| 5 | 1 | 50% | 1 | 0 | 493 | 0.0% | 8.2% |
+| 5 | 1 | sin tope | 1 | 0 | 493 | 0.0% | 7.8% |
+| 5 | 2 | 40% | 1 | 164 | 329 | 0.0% | 1.8% |
+| 5 | 2 | 50% | 1 | 0 | 493 | 0.0% | 7.6% |
+| 5 | 2 | sin tope | 1 | 0 | 493 | 0.0% | 7.5% |
+| 5 | 3 | 40% | 1 | 164 | 329 | 0.0% | 2.1% |
+| 5 | 3 | 50% | 1 | 0 | 493 | 0.0% | 7.8% |
+| 5 | 3 | sin tope | 1 | 0 | 493 | 0.0% | 6.5% |
+| 10 | 1 | 40% | 1 | 164 | 329 | 0.0% | 29.2% |
+| 10 | 1 | 50% | 1 | 0 | 493 | 0.2% | 50.0% |
+| 10 | 1 | sin tope | 1 | 0 | 493 | 0.2% | 47.8% |
+| 10 | 2 | 40% | 1 | 164 | 329 | 0.0% | 27.6% |
+| 10 | 2 | 50% | 1 | 0 | 493 | 0.2% | 48.0% |
+| 10 | 2 | sin tope | 1 | 0 | 493 | 0.4% | 46.5% |
+| 10 | 3 | 40% | 1 | 164 | 329 | 0.1% | 25.7% |
+| 10 | 3 | 50% | 1 | 0 | 493 | 0.4% | 45.9% |
+| 10 | 3 | sin tope | 1 | 0 | 493 | 0.4% | 44.2% |
 
 **i.i.d. vs. bootstrap por bloques** (mismo punto de la grilla: margen 5 USDT, 3 posiciones, tope SL 50% -- bloque de 5 operaciones consecutivas vs. i.i.d.; ver limitación 4 del docstring de `app/backtesting/risk_analysis.py`):
 
 | Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
 |---|---|---|---|---|---|---|---|
-| 5 | 3 | 50% | 1 | 0 | 496 | 0.0% | 7.6% |
-| 5 | 3 | 50% | 5 | 0 | 496 | 0.0% | 15.9% |
+| 5 | 3 | 50% | 1 | 0 | 493 | 0.0% | 7.5% |
+| 5 | 3 | 50% | 5 | 0 | 493 | 0.0% | 17.0% |
 
 ### `mean_reversion_rsi14_bb20`
 
-**mean_reversion_rsi14_bb20** -- 2738 operaciones OOS, PF 0.74, esperanza por operación -0.38 USDT.
+**mean_reversion_rsi14_bb20** -- 2737 operaciones OOS, PF 0.74, esperanza por operación -0.38 USDT.
 
 | Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
 |---|---|---|---|---|---|---|---|
-| 5 | 1 | 40% | 1 | 129 | 2609 | 0.0% | 28.2% |
-| 5 | 1 | 50% | 1 | 0 | 2738 | 0.0% | 35.4% |
-| 5 | 1 | sin tope | 1 | 0 | 2738 | 0.0% | 36.2% |
-| 5 | 2 | 40% | 1 | 129 | 2609 | 0.0% | 27.0% |
-| 5 | 2 | 50% | 1 | 0 | 2738 | 0.0% | 32.0% |
-| 5 | 2 | sin tope | 1 | 0 | 2738 | 0.0% | 32.6% |
-| 5 | 3 | 40% | 1 | 129 | 2609 | 0.0% | 27.3% |
-| 5 | 3 | 50% | 1 | 0 | 2738 | 0.0% | 31.8% |
-| 5 | 3 | sin tope | 1 | 0 | 2738 | 0.0% | 33.6% |
-| 10 | 1 | 40% | 1 | 129 | 2609 | 2.4% | 80.7% |
-| 10 | 1 | 50% | 1 | 0 | 2738 | 4.0% | 82.8% |
-| 10 | 1 | sin tope | 1 | 0 | 2738 | 3.3% | 83.0% |
-| 10 | 2 | 40% | 1 | 129 | 2609 | 2.5% | 80.4% |
-| 10 | 2 | 50% | 1 | 0 | 2738 | 4.5% | 83.0% |
-| 10 | 2 | sin tope | 1 | 0 | 2738 | 4.9% | 82.8% |
-| 10 | 3 | 40% | 1 | 129 | 2609 | 2.4% | 78.5% |
-| 10 | 3 | 50% | 1 | 0 | 2738 | 4.0% | 79.5% |
-| 10 | 3 | sin tope | 1 | 0 | 2738 | 3.9% | 80.7% |
+| 5 | 1 | 40% | 1 | 129 | 2608 | 0.0% | 28.3% |
+| 5 | 1 | 50% | 1 | 0 | 2737 | 0.0% | 34.0% |
+| 5 | 1 | sin tope | 1 | 0 | 2737 | 0.0% | 34.9% |
+| 5 | 2 | 40% | 1 | 129 | 2608 | 0.0% | 28.1% |
+| 5 | 2 | 50% | 1 | 0 | 2737 | 0.0% | 30.0% |
+| 5 | 2 | sin tope | 1 | 0 | 2737 | 0.0% | 32.6% |
+| 5 | 3 | 40% | 1 | 129 | 2608 | 0.0% | 27.5% |
+| 5 | 3 | 50% | 1 | 0 | 2737 | 0.0% | 31.1% |
+| 5 | 3 | sin tope | 1 | 0 | 2737 | 0.0% | 32.5% |
+| 10 | 1 | 40% | 1 | 129 | 2608 | 1.9% | 80.4% |
+| 10 | 1 | 50% | 1 | 0 | 2737 | 4.5% | 82.0% |
+| 10 | 1 | sin tope | 1 | 0 | 2737 | 3.9% | 83.3% |
+| 10 | 2 | 40% | 1 | 129 | 2608 | 2.9% | 81.1% |
+| 10 | 2 | 50% | 1 | 0 | 2737 | 3.5% | 80.2% |
+| 10 | 2 | sin tope | 1 | 0 | 2737 | 4.5% | 81.5% |
+| 10 | 3 | 40% | 1 | 129 | 2608 | 2.9% | 77.6% |
+| 10 | 3 | 50% | 1 | 0 | 2737 | 4.1% | 80.7% |
+| 10 | 3 | sin tope | 1 | 0 | 2737 | 4.1% | 80.8% |
 
 **i.i.d. vs. bootstrap por bloques** (mismo punto de la grilla: margen 5 USDT, 3 posiciones, tope SL 50% -- bloque de 5 operaciones consecutivas vs. i.i.d.; ver limitación 4 del docstring de `app/backtesting/risk_analysis.py`):
 
 | Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
 |---|---|---|---|---|---|---|---|
-| 5 | 3 | 50% | 1 | 0 | 2738 | 0.0% | 30.9% |
-| 5 | 3 | 50% | 5 | 0 | 2738 | 0.0% | 45.2% |
+| 5 | 3 | 50% | 1 | 0 | 2737 | 0.0% | 30.9% |
+| 5 | 3 | 50% | 5 | 0 | 2737 | 0.0% | 43.5% |
 
 ### `donchian_breakout_20`
 
@@ -116,100 +117,100 @@
 
 | Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
 |---|---|---|---|---|---|---|---|
-| 5 | 1 | 40% | 1 | 226 | 523 | 0.0% | 34.1% |
-| 5 | 1 | 50% | 1 | 0 | 749 | 0.3% | 56.8% |
-| 5 | 1 | sin tope | 1 | 0 | 749 | 0.0% | 57.2% |
-| 5 | 2 | 40% | 1 | 226 | 523 | 0.0% | 33.7% |
-| 5 | 2 | 50% | 1 | 0 | 749 | 0.1% | 51.7% |
-| 5 | 2 | sin tope | 1 | 0 | 749 | 0.1% | 55.2% |
-| 5 | 3 | 40% | 1 | 226 | 523 | 0.0% | 30.9% |
-| 5 | 3 | 50% | 1 | 0 | 749 | 0.2% | 52.0% |
+| 5 | 1 | 40% | 1 | 226 | 523 | 0.0% | 34.2% |
+| 5 | 1 | 50% | 1 | 0 | 749 | 0.3% | 57.0% |
+| 5 | 1 | sin tope | 1 | 0 | 749 | 0.0% | 57.1% |
+| 5 | 2 | 40% | 1 | 226 | 523 | 0.0% | 33.8% |
+| 5 | 2 | 50% | 1 | 0 | 749 | 0.1% | 52.0% |
+| 5 | 2 | sin tope | 1 | 0 | 749 | 0.1% | 55.4% |
+| 5 | 3 | 40% | 1 | 226 | 523 | 0.0% | 31.1% |
+| 5 | 3 | 50% | 1 | 0 | 749 | 0.2% | 52.1% |
 | 5 | 3 | sin tope | 1 | 0 | 749 | 0.2% | 52.2% |
-| 10 | 1 | 40% | 1 | 226 | 523 | 6.5% | 76.8% |
+| 10 | 1 | 40% | 1 | 226 | 523 | 6.6% | 76.8% |
 | 10 | 1 | 50% | 1 | 0 | 749 | 18.4% | 89.3% |
-| 10 | 1 | sin tope | 1 | 0 | 749 | 19.7% | 90.0% |
+| 10 | 1 | sin tope | 1 | 0 | 749 | 19.7% | 90.1% |
 | 10 | 2 | 40% | 1 | 226 | 523 | 7.0% | 74.0% |
-| 10 | 2 | 50% | 1 | 0 | 749 | 19.1% | 88.5% |
+| 10 | 2 | 50% | 1 | 0 | 749 | 19.1% | 88.4% |
 | 10 | 2 | sin tope | 1 | 0 | 749 | 18.7% | 88.9% |
-| 10 | 3 | 40% | 1 | 226 | 523 | 6.8% | 73.4% |
-| 10 | 3 | 50% | 1 | 0 | 749 | 17.3% | 85.8% |
-| 10 | 3 | sin tope | 1 | 0 | 749 | 19.4% | 85.7% |
+| 10 | 3 | 40% | 1 | 226 | 523 | 6.9% | 73.5% |
+| 10 | 3 | 50% | 1 | 0 | 749 | 17.4% | 86.0% |
+| 10 | 3 | sin tope | 1 | 0 | 749 | 19.5% | 85.7% |
 
 **i.i.d. vs. bootstrap por bloques** (mismo punto de la grilla: margen 5 USDT, 3 posiciones, tope SL 50% -- bloque de 5 operaciones consecutivas vs. i.i.d.; ver limitación 4 del docstring de `app/backtesting/risk_analysis.py`):
 
 | Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
 |---|---|---|---|---|---|---|---|
 | 5 | 3 | 50% | 1 | 0 | 749 | 0.2% | 51.0% |
-| 5 | 3 | 50% | 5 | 0 | 749 | 1.1% | 65.7% |
-
-### `funding_contrarian_percentile_experimental`
-
-**funding_contrarian_percentile_experimental (experimental)** -- 184 operaciones OOS, PF 1.17, esperanza por operación +0.55 USDT.
-
-| Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
-|---|---|---|---|---|---|---|---|
-| 5 | 1 | 40% | 1 | 184 | 0 | n/a (0 de 184 elegibles) | n/a |
-| 5 | 1 | 50% | 1 | 0 | 184 | 0.0% | 29.8% |
-| 5 | 1 | sin tope | 1 | 0 | 184 | 0.1% | 29.8% |
-| 5 | 2 | 40% | 1 | 184 | 0 | n/a (0 de 184 elegibles) | n/a |
-| 5 | 2 | 50% | 1 | 0 | 184 | 0.1% | 24.6% |
-| 5 | 2 | sin tope | 1 | 0 | 184 | 0.1% | 26.1% |
-| 5 | 3 | 40% | 1 | 184 | 0 | n/a (0 de 184 elegibles) | n/a |
-| 5 | 3 | 50% | 1 | 0 | 184 | 0.1% | 24.9% |
-| 5 | 3 | sin tope | 1 | 0 | 184 | 0.1% | 24.1% |
-| 10 | 1 | 40% | 1 | 184 | 0 | n/a (0 de 184 elegibles) | n/a |
-| 10 | 1 | 50% | 1 | 0 | 184 | 5.1% | 70.8% |
-| 10 | 1 | sin tope | 1 | 0 | 184 | 4.8% | 71.4% |
-| 10 | 2 | 40% | 1 | 184 | 0 | n/a (0 de 184 elegibles) | n/a |
-| 10 | 2 | 50% | 1 | 0 | 184 | 6.3% | 65.5% |
-| 10 | 2 | sin tope | 1 | 0 | 184 | 5.7% | 65.2% |
-| 10 | 3 | 40% | 1 | 184 | 0 | n/a (0 de 184 elegibles) | n/a |
-| 10 | 3 | 50% | 1 | 0 | 184 | 4.8% | 60.1% |
-| 10 | 3 | sin tope | 1 | 0 | 184 | 4.5% | 61.4% |
-
-**i.i.d. vs. bootstrap por bloques** (mismo punto de la grilla: margen 5 USDT, 3 posiciones, tope SL 50% -- bloque de 5 operaciones consecutivas vs. i.i.d.; ver limitación 4 del docstring de `app/backtesting/risk_analysis.py`):
-
-| Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
-|---|---|---|---|---|---|---|---|
-| 5 | 3 | 50% | 1 | 0 | 184 | 0.0% | 23.9% |
-| 5 | 3 | 50% | 5 | 0 | 184 | 0.1% | 25.6% |
+| 5 | 3 | 50% | 5 | 0 | 749 | 1.1% | 65.6% |
 
 ### `funding_contrarian_experimental`
 
-**funding_contrarian_experimental (experimental)** -- 14 operaciones OOS, PF 1.43, esperanza por operación +1.24 USDT.
+**funding_contrarian_experimental (experimental)** -- 21 operaciones OOS, PF 1.80, esperanza por operación +2.08 USDT.
 
 | Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
 |---|---|---|---|---|---|---|---|
-| 5 | 1 | 40% | 1 | 14 | 0 | n/a (0 de 14 elegibles) | n/a |
-| 5 | 1 | 50% | 1 | 0 | 14 | 0.0% | 9.4% |
-| 5 | 1 | sin tope | 1 | 0 | 14 | 0.0% | 8.9% |
-| 5 | 2 | 40% | 1 | 14 | 0 | n/a (0 de 14 elegibles) | n/a |
-| 5 | 2 | 50% | 1 | 0 | 14 | 0.0% | 7.6% |
-| 5 | 2 | sin tope | 1 | 0 | 14 | 0.0% | 8.6% |
-| 5 | 3 | 40% | 1 | 14 | 0 | n/a (0 de 14 elegibles) | n/a |
-| 5 | 3 | 50% | 1 | 0 | 14 | 0.0% | 7.0% |
-| 5 | 3 | sin tope | 1 | 0 | 14 | 0.0% | 5.7% |
-| 10 | 1 | 40% | 1 | 14 | 0 | n/a (0 de 14 elegibles) | n/a |
-| 10 | 1 | 50% | 1 | 0 | 14 | 0.7% | 43.4% |
-| 10 | 1 | sin tope | 1 | 0 | 14 | 0.9% | 42.7% |
-| 10 | 2 | 40% | 1 | 14 | 0 | n/a (0 de 14 elegibles) | n/a |
-| 10 | 2 | 50% | 1 | 0 | 14 | 1.0% | 35.1% |
-| 10 | 2 | sin tope | 1 | 0 | 14 | 0.6% | 39.1% |
-| 10 | 3 | 40% | 1 | 14 | 0 | n/a (0 de 14 elegibles) | n/a |
-| 10 | 3 | 50% | 1 | 0 | 14 | 0.4% | 32.6% |
-| 10 | 3 | sin tope | 1 | 0 | 14 | 0.8% | 31.7% |
+| 5 | 1 | 40% | 1 | 21 | 0 | n/a (0 de 21 elegibles) | n/a |
+| 5 | 1 | 50% | 1 | 0 | 21 | 0.0% | 1.4% |
+| 5 | 1 | sin tope | 1 | 0 | 21 | 0.0% | 2.7% |
+| 5 | 2 | 40% | 1 | 21 | 0 | n/a (0 de 21 elegibles) | n/a |
+| 5 | 2 | 50% | 1 | 0 | 21 | 0.0% | 1.1% |
+| 5 | 2 | sin tope | 1 | 0 | 21 | 0.0% | 1.6% |
+| 5 | 3 | 40% | 1 | 21 | 0 | n/a (0 de 21 elegibles) | n/a |
+| 5 | 3 | 50% | 1 | 0 | 21 | 0.0% | 0.9% |
+| 5 | 3 | sin tope | 1 | 0 | 21 | 0.0% | 1.4% |
+| 10 | 1 | 40% | 1 | 21 | 0 | n/a (0 de 21 elegibles) | n/a |
+| 10 | 1 | 50% | 1 | 0 | 21 | 0.1% | 18.2% |
+| 10 | 1 | sin tope | 1 | 0 | 21 | 0.1% | 19.6% |
+| 10 | 2 | 40% | 1 | 21 | 0 | n/a (0 de 21 elegibles) | n/a |
+| 10 | 2 | 50% | 1 | 0 | 21 | 0.1% | 14.1% |
+| 10 | 2 | sin tope | 1 | 0 | 21 | 0.0% | 14.7% |
+| 10 | 3 | 40% | 1 | 21 | 0 | n/a (0 de 21 elegibles) | n/a |
+| 10 | 3 | 50% | 1 | 0 | 21 | 0.1% | 11.9% |
+| 10 | 3 | sin tope | 1 | 0 | 21 | 0.0% | 11.8% |
 
 **i.i.d. vs. bootstrap por bloques** (mismo punto de la grilla: margen 5 USDT, 3 posiciones, tope SL 50% -- bloque de 5 operaciones consecutivas vs. i.i.d.; ver limitación 4 del docstring de `app/backtesting/risk_analysis.py`):
 
 | Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
 |---|---|---|---|---|---|---|---|
-| 5 | 3 | 50% | 1 | 0 | 14 | 0.0% | 6.4% |
-| 5 | 3 | 50% | 5 | 0 | 14 | 0.0% | 0.0% |
+| 5 | 3 | 50% | 1 | 0 | 21 | 0.0% | 0.8% |
+| 5 | 3 | 50% | 5 | 0 | 21 | 0.0% | 0.5% |
+
+### `funding_contrarian_percentile_experimental`
+
+**funding_contrarian_percentile_experimental (experimental)** -- 290 operaciones OOS, PF 1.08, esperanza por operación +0.26 USDT.
+
+| Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
+|---|---|---|---|---|---|---|---|
+| 5 | 1 | 40% | 1 | 290 | 0 | n/a (0 de 290 elegibles) | n/a |
+| 5 | 1 | 50% | 1 | 0 | 290 | 0.1% | 41.9% |
+| 5 | 1 | sin tope | 1 | 0 | 290 | 0.1% | 40.9% |
+| 5 | 2 | 40% | 1 | 290 | 0 | n/a (0 de 290 elegibles) | n/a |
+| 5 | 2 | 50% | 1 | 0 | 290 | 0.2% | 39.5% |
+| 5 | 2 | sin tope | 1 | 0 | 290 | 0.1% | 38.6% |
+| 5 | 3 | 40% | 1 | 290 | 0 | n/a (0 de 290 elegibles) | n/a |
+| 5 | 3 | 50% | 1 | 0 | 290 | 0.1% | 36.2% |
+| 5 | 3 | sin tope | 1 | 0 | 290 | 0.1% | 35.3% |
+| 10 | 1 | 40% | 1 | 290 | 0 | n/a (0 de 290 elegibles) | n/a |
+| 10 | 1 | 50% | 1 | 0 | 290 | 10.7% | 81.7% |
+| 10 | 1 | sin tope | 1 | 0 | 290 | 9.8% | 82.0% |
+| 10 | 2 | 40% | 1 | 290 | 0 | n/a (0 de 290 elegibles) | n/a |
+| 10 | 2 | 50% | 1 | 0 | 290 | 10.3% | 76.9% |
+| 10 | 2 | sin tope | 1 | 0 | 290 | 9.2% | 77.1% |
+| 10 | 3 | 40% | 1 | 290 | 0 | n/a (0 de 290 elegibles) | n/a |
+| 10 | 3 | 50% | 1 | 0 | 290 | 9.2% | 72.4% |
+| 10 | 3 | sin tope | 1 | 0 | 290 | 9.2% | 73.2% |
+
+**i.i.d. vs. bootstrap por bloques** (mismo punto de la grilla: margen 5 USDT, 3 posiciones, tope SL 50% -- bloque de 5 operaciones consecutivas vs. i.i.d.; ver limitación 4 del docstring de `app/backtesting/risk_analysis.py`):
+
+| Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
+|---|---|---|---|---|---|---|---|
+| 5 | 3 | 50% | 1 | 0 | 290 | 0.1% | 36.1% |
+| 5 | 3 | 50% | 5 | 0 | 290 | 0.2% | 41.4% |
 
 
 ## Pool combinado (solo referencia — escenario con esperanza negativa)
 
-**pool combinado (ema_cross_9_21, trend_atr_stop_9_21_50, mean_reversion_rsi14_bb20, donchian_breakout_20)** -- 4226 operaciones OOS, PF 0.85, esperanza por operación -0.26 USDT.
+**pool combinado (ema_cross_9_21, trend_atr_stop_9_21_50, mean_reversion_rsi14_bb20, donchian_breakout_20)** -- 4535 operaciones OOS, PF 0.85, esperanza por operación -0.28 USDT.
 
 Combina las 4 estrategias no
 experimentales en una sola distribución empírica — **no** representa a
@@ -220,30 +221,30 @@ estrategia.
 
 | Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) | Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |
 |---|---|---|---|---|---|---|---|
-| 5 | 1 | 40% | 1 | 762 | 3464 | 0.0% | 26.8% |
-| 5 | 1 | 50% | 1 | 0 | 4226 | 0.0% | 38.6% |
-| 5 | 1 | sin tope | 1 | 0 | 4226 | 0.0% | 35.1% |
-| 5 | 2 | 40% | 1 | 762 | 3464 | 0.0% | 24.3% |
-| 5 | 2 | 50% | 1 | 0 | 4226 | 0.0% | 34.9% |
-| 5 | 2 | sin tope | 1 | 0 | 4226 | 0.0% | 36.0% |
-| 5 | 3 | 40% | 1 | 762 | 3464 | 0.0% | 25.8% |
-| 5 | 3 | 50% | 1 | 0 | 4226 | 0.0% | 32.8% |
-| 5 | 3 | sin tope | 1 | 0 | 4226 | 0.0% | 34.4% |
-| 10 | 1 | 40% | 1 | 762 | 3464 | 2.5% | 77.0% |
-| 10 | 1 | 50% | 1 | 0 | 4226 | 8.3% | 81.7% |
-| 10 | 1 | sin tope | 1 | 0 | 4226 | 7.2% | 82.3% |
-| 10 | 2 | 40% | 1 | 762 | 3464 | 2.4% | 73.6% |
-| 10 | 2 | 50% | 1 | 0 | 4226 | 6.5% | 78.2% |
-| 10 | 2 | sin tope | 1 | 0 | 4226 | 6.7% | 78.0% |
-| 10 | 3 | 40% | 1 | 762 | 3464 | 2.6% | 71.2% |
-| 10 | 3 | 50% | 1 | 0 | 4226 | 6.8% | 76.5% |
-| 10 | 3 | sin tope | 1 | 0 | 4226 | 6.8% | 77.7% |
+| 5 | 1 | 40% | 1 | 1075 | 3460 | 0.0% | 26.7% |
+| 5 | 1 | 50% | 1 | 0 | 4535 | 0.0% | 40.6% |
+| 5 | 1 | sin tope | 1 | 0 | 4535 | 0.0% | 41.6% |
+| 5 | 2 | 40% | 1 | 1075 | 3460 | 0.0% | 24.6% |
+| 5 | 2 | 50% | 1 | 0 | 4535 | 0.0% | 40.1% |
+| 5 | 2 | sin tope | 1 | 0 | 4535 | 0.0% | 38.5% |
+| 5 | 3 | 40% | 1 | 1075 | 3460 | 0.0% | 24.9% |
+| 5 | 3 | 50% | 1 | 0 | 4535 | 0.0% | 37.8% |
+| 5 | 3 | sin tope | 1 | 0 | 4535 | 0.0% | 38.8% |
+| 10 | 1 | 40% | 1 | 1075 | 3460 | 3.5% | 77.5% |
+| 10 | 1 | 50% | 1 | 0 | 4535 | 9.7% | 84.0% |
+| 10 | 1 | sin tope | 1 | 0 | 4535 | 10.3% | 85.0% |
+| 10 | 2 | 40% | 1 | 1075 | 3460 | 4.2% | 75.0% |
+| 10 | 2 | 50% | 1 | 0 | 4535 | 9.9% | 82.0% |
+| 10 | 2 | sin tope | 1 | 0 | 4535 | 9.3% | 81.2% |
+| 10 | 3 | 40% | 1 | 1075 | 3460 | 2.7% | 73.2% |
+| 10 | 3 | 50% | 1 | 0 | 4535 | 8.9% | 81.7% |
+| 10 | 3 | sin tope | 1 | 0 | 4535 | 8.4% | 80.8% |
 
 ## Sensibilidad: aislando la deriva del efecto de margen/posiciones
 
 Mismo pool combinado, filtrado primero al tope de SL del
 50% (0
-operaciones excluidas de 4226), con las pérdidas
+operaciones excluidas de 4535), con las pérdidas
 reescaladas para alcanzar exactamente el profit factor objetivo de cada
 fila (las ganancias no se tocan) — separa cuánto del riesgo de ruina viene
 de la deriva negativa de las estrategias evaluadas de cuánto viene,
@@ -252,18 +253,18 @@ cualquier estrategia con un perfil de resultados parecido:
 
 | PF objetivo | Margen (USDT) | Máx. posiciones simultáneas | P(ruina) | P(drawdown > 30%) |
 |---|---|---|---|---|
-| 1.0 | 5 | 1 | 0.0% | 13.2% |
-| 1.0 | 5 | 2 | 0.0% | 11.5% |
-| 1.0 | 5 | 3 | 0.0% | 9.7% |
-| 1.0 | 10 | 1 | 1.3% | 58.1% |
-| 1.0 | 10 | 2 | 0.9% | 53.7% |
-| 1.0 | 10 | 3 | 1.0% | 53.1% |
-| 1.2 | 5 | 1 | 0.0% | 2.0% |
-| 1.2 | 5 | 2 | 0.0% | 1.7% |
-| 1.2 | 5 | 3 | 0.0% | 1.6% |
-| 1.2 | 10 | 1 | 0.1% | 28.8% |
-| 1.2 | 10 | 2 | 0.1% | 25.0% |
-| 1.2 | 10 | 3 | 0.1% | 23.0% |
+| 1.0 | 5 | 1 | 0.0% | 17.3% |
+| 1.0 | 5 | 2 | 0.0% | 15.0% |
+| 1.0 | 5 | 3 | 0.0% | 13.8% |
+| 1.0 | 10 | 1 | 1.4% | 61.4% |
+| 1.0 | 10 | 2 | 1.7% | 58.6% |
+| 1.0 | 10 | 3 | 1.5% | 52.7% |
+| 1.2 | 5 | 1 | 0.0% | 3.2% |
+| 1.2 | 5 | 2 | 0.0% | 2.6% |
+| 1.2 | 5 | 3 | 0.0% | 2.1% |
+| 1.2 | 10 | 1 | 0.1% | 32.8% |
+| 1.2 | 10 | 2 | 0.0% | 29.5% |
+| 1.2 | 10 | 3 | 0.1% | 27.6% |
 
 ## Lectura
 
