@@ -6,6 +6,17 @@ la comparacion de calidad no dependa de los limites de riesgo. Usa exactamente l
 mismas funciones que `PaperBackend` para llenado, niveles, slippage, funding y
 cierre (`compute_open_fill`, `resolve_trade_levels`, `settle_close`), de modo que
 una senal tenga el mismo PnL en ambas cuentas.
+
+Dos diferencias deliberadas con la cuenta real, documentadas en
+`app/trading/shadow_report.py`:
+- **Solapes permitidos**: una sombra nueva se abre aunque otra del mismo simbolo y
+  direccion siga abierta. El backtest no lo permite por celda (`FASE2_CRITERIOS.md`,
+  punto 6); la sombra si, para que una RECHAZADA no bloquee a la siguiente y sesgue la
+  comparacion APROBADA vs RECHAZADA. El valor estadistico se corrige con N efectivo
+  por conglomerados (`app/trading/ai_value.py`).
+- **Entrada al precio de cierre de la vela evaluada**, sin demora ni slippage de
+  llenado: la cuenta real entra al precio de mercado con slippage. Para comparar
+  APROBADA con RECHAZADA dentro de la sombra no afecta, porque todas entran igual.
 """
 
 from __future__ import annotations

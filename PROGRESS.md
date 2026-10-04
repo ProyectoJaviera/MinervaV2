@@ -572,4 +572,19 @@ una:
   - **Pendiente**: el reporte se verifica con datos reales cuando el monitor corra
     en vivo; hoy solo hay sombras abiertas de una corrida corta. Sin LLM no hay
     APROBADA/RECHAZADA todavia.
+- **Ajustes a la 3.5 (aprobada con dos cambios, mas una documentacion)**:
+  1. *Solapes en la sombra*: la sombra NO bloquea. Con el LLM, bloquear sesgaria la
+     comparacion APROBADA vs RECHAZADA (una rechazada impediria la siguiente). Se
+     corrige en el analisis: N efectivo por conglomerados (operaciones del mismo
+     simbolo y direccion con intervalos de vida solapados = una unidad) y bootstrap
+     por conglomerados (`app/trading/ai_value.py`). El reporte muestra N bruto y N
+     efectivo. El backtest no permite solapes por celda (`FASE2_CRITERIOS.md`, punto 6).
+  2. *Grupos mixtos*: el reporte separa grupos de una sola estrategia (comparables con
+     el backtest de esa estrategia) de grupos mixtos (no comparables, con aviso).
+  3. *Entrada de la sombra*: al precio de cierre de la vela evaluada, sin demora ni
+     slippage de llenado. No es comparable con la cuenta real; dentro de la sombra
+     APROBADA y RECHAZADA entran igual, asi que la comparacion no se afecta.
+  - Regla de decision sobre la IA implementada tal como se fijo: sin IC del 95 % que
+    excluya el cero con N efectivo >= 100 por lado, "LA_IA_NO_APORTA_VALOR". Sin
+    decisiones del LLM el veredicto es SIN_DATOS.
 - 3.6 a 3.8: pendientes.

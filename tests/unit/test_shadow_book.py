@@ -220,8 +220,10 @@ async def test_report_attributes_each_group_to_every_contributor_without_double_
 
     win_closed = await shadow_repo.get(db, win.id)
     loss_closed = await shadow_repo.get(db, loss.id)
-    rows = {r.strategy: r for r in await shadow_report.summarize_by_strategy(db)}
-    totals = await shadow_report.summarize_totals(db)
+    trades_open = await shadow_repo.get_open(db)
+    trades_closed = await shadow_repo.get_closed(db)
+    rows = {r.strategy: r for r in shadow_report.summarize_by_strategy(trades_open, trades_closed)}
+    totals = shadow_report.summarize_totals(trades_open, trades_closed)
 
     assert rows["ema_cross_9_21"].groups == 2 and rows["ema_cross_9_21"].closed == 2
     assert rows["donchian_breakout_20"].groups == 1 and rows["donchian_breakout_20"].closed == 1
@@ -231,4 +233,18 @@ async def test_report_attributes_each_group_to_every_contributor_without_double_
     assert rows["ema_cross_9_21"].pnl_net_total == pytest.approx(
         win_closed.pnl_net_usdt + loss_closed.pnl_net_usdt
     )
-    assert "no suman el total" in shadow_report.render_markdown(list(rows.values()), totals)
+    verdict = shadow_report.ai_value_verdict(trades_closed)
+    text = shadow_report.render_markdown(list(rows.values()), totals, verdict)
+    assert "no suman el total" in text
+    assert "Grupos mixtos (NO comparables" in text
+
+
+@pytest.mark.asyncio
+async def test_a_new_shadow_is_opened_while_another_of_the_same_symbol_and_side_is_open(db):
+    """La sombra no bloquea solapes: con el LLM, bloquear sesgaria la comparacion."""
+    settings = make_settings()
+    shadow = ShadowBook(db, settings)
+    first = await shadow.open_candidate(candidate(candle=CANDLE))
+    second = await shadow.open_candidate(candidate(candle=datetime(2026, 1, 1, 8, tzinfo=UTC)))
+    assert first is not None and second is not None
+    assert len(await shadow_repo.get_open(db)) == 2

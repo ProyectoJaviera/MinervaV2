@@ -16,20 +16,14 @@ from pathlib import Path
 sys.path.insert(0, ".")
 
 from app.persistence.database import Database  # noqa: E402
-from app.trading.shadow_report import (  # noqa: E402
-    render_markdown,
-    summarize_by_strategy,
-    summarize_totals,
-)
+from app.trading.shadow_report import build_report  # noqa: E402
 
 
 async def main(db_path: str) -> None:
     db = Database(db_path)
     await db.connect()
     try:
-        rows = await summarize_by_strategy(db)
-        totals = await summarize_totals(db)
-        print(render_markdown(rows, totals))
+        print(await build_report(db))
     finally:
         await db.close()
 
