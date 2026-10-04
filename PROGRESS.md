@@ -587,11 +587,33 @@ una:
   - Regla de decision sobre la IA implementada tal como se fijo: sin IC del 95 % que
     excluya el cero con N efectivo >= 100 por lado, "LA_IA_NO_APORTA_VALOR". Sin
     decisiones del LLM el veredicto es SIN_DATOS.
-- **3.6 -- LLM: DISEÑO entregado, pendiente de aprobacion** (`docs/FASE3_6_LLM.md`).
-  Sin codigo ni llamadas a la API. Pendientes de decision: aprobar el diseño, elegir el
-  modelo (propuesta `claude-sonnet-5-5`, verificado; `claude-sonnet-5` del config sin
-  verificar), autorizar la dependencia del SDK y confirmar precios en la consola.
-- **Observacion abierta**: el universo solo se refresca con `scripts/download_history.py`
-  y el generador no comprueba su antiguedad (`UNIVERSE_STALENESS_HOURS=48`). La copia
-  de la base tiene el universo del 2026-10-01 23:04.
+- **3.6 -- LLM: DISEÑO v2 con los cambios aprobados, sin implementar**
+  (`docs/FASE3_6_LLM.md`). Cambios: regla de tres veredictos (APORTA_VALOR,
+  NO_APORTA_VALOR con δ = +0,3 USDT propuesto, INCONCLUSO) con punto de analisis fijo
+  de 300 conglomerados efectivos por lado; seccion de potencia (σ = 4,49 USDT por
+  operacion OOS, MDE 1,03 USDT a N = 300); max_tokens 300 (coste maximo 0,0054 USD por
+  llamada con Sonnet 5.5); contexto solo con posiciones reales; piloto de 30 a 50
+  señales con prompt congelado y banda de aprobacion 15–85 %; semaforo 4, 20 s por
+  llamada y 60 s de retraso maximo para abrir en cuenta real; reporte de SIN_LLM por
+  causa, hora y volatilidad; placebo con IC de Wilson.
+  - Correccion de diseño: la sombra se abre al cierre de la vela con SIN_LLM y la
+    decision escribe la etiqueta una sola vez (las llamadas son asincronas).
+  - Pendientes de decision: δ, punto de 300, caso lo > 0 y hi < δ, tope de SIN_LLM del
+    10 %, precios en la consola antes de la primera llamada. El SDK y el modelo
+    `claude-sonnet-5-5` ya estan autorizados.
+- **Universo (arranque del bot, previo a la 3.6)**: commit `c5b432b`.
+  - Comprobacion de antiguedad: `is_universe_stale` con `UNIVERSE_STALENESS_HOURS=48`.
+    El generador de señales no consulta la red si el universo esta obsoleto.
+  - Refresco diario con `UniverseRefresher` (cada hora revisa si el snapshot supera
+    `UNIVERSE_REFRESH_HOURS=24`). Si CoinGecko o Bitunix fallan, se conserva el snapshot
+    anterior y el error queda en `system_state.universe_last_refresh_error`; un exito
+    posterior limpia ese error. Corre como tarea aparte: no bloquea cierres.
+  - Un snapshot sin ningun simbolo incluido se rechaza.
+  - Smoke test sobre una copia de la base (no la base de trabajo): antes, snapshot del
+    2026-10-01, obsoleto; despues, refrescado con 10 simbolos incluidos y no obsoleto.
+    Sin `COINGECKO_API_KEY` en el smoke (el asistente no lee `.env`); la clave del `.env`
+    del bot no se probo.
+  - Tests: `tests/unit/test_universe_refresh.py` (12). Suite completa: 363 passed,
+    2 skipped; `ruff check .` limpio.
+  - `httpx` queda en WARNING en `setup_logging`.
 - 3.6 a 3.8: pendientes.
