@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Side(StrEnum):
@@ -57,6 +57,21 @@ class Trade(BaseModel):
     # Como se lleno el cierre: TICK (monitor, precio observado o nominal),
     # CANDLE_RECON (reconciliacion con velas) o REST_MARK (cierre manual).
     fill_source: str | None = None
+
+
+class ShadowTrade(Trade):
+    """Operacion sombra (subfase 3.5): una senal agrupada, simulada con margen
+    ilimitado y con las mismas formulas de fees, slippage y funding que la cuenta
+    paper, pero sin cupos ni margen disponible. `contributing_strategies` lista
+    TODAS las estrategias que coincidieron en (simbolo, direccion, vela): el
+    resultado se atribuye a cada una en el reporte. `llm_decision` es SIN_LLM
+    hasta la subfase 3.6."""
+
+    contributing_strategies: list[str] = Field(default_factory=list)
+    signal_group_key: str = ""
+    candle_close_time: datetime | None = None
+    llm_decision: str = "SIN_LLM"
+    executed_in_real_account: bool = False
 
 
 class RiskRejection(BaseModel):

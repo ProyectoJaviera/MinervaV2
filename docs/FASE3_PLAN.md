@@ -464,7 +464,41 @@ por el resto del día (ver punto 2, status `SIN_LLM`).
 
 ## 8. Criterios de paso a dinero real (evaluados, no automáticos)
 
-**Estimación de ritmo real de operaciones -- corregida (tercera ronda)**:
+### Actualización con la reejecución v2 de Fase 2 (vigente)
+
+Fuente: `docs/FASE2_REEJECUCION.md`, secciones 5.3 a 5.5. La v2 usa el tope de SL
+corregido por redondeo y la ventana oficial fija (2026-10-01 00:00 UTC).
+
+- **Ventana OOS real de las elegibles**: 2025-04-28 a 2026-09-29, **520,17 días**.
+- **Operaciones OOS elegibles**: `ema_cross_9_21` **556**, funding original
+  (`funding_contrarian_experimental`) **21**, percentil
+  (`funding_contrarian_percentile_experimental`) **290**. Total **867**.
+- **Ritmo elegible: 1,667 operaciones/día** (antes 0,85; la v1 descartaba
+  2.042 entradas de ema por coma flotante).
+- **Días hasta 100 operaciones cerradas en cuenta real**, con el ritmo elegible:
+  - aprobacion del 100%: **60,0 días**;
+  - aprobacion del 50%: **120,0 días**.
+  Cotas optimistas: no descuentan rechazos del motor de riesgo (cupos,
+  circuit breaker, drawdown, tope de SL en vivo).
+- **Brazo sombra con las seis estrategias**: 4846 operaciones OOS en 520,17 días,
+  **9,32 operaciones simuladas/día** (no son señales: las que llegan con la misma
+  celda ocupada no se cuentan, y la agrupacion de la subfase 3.5 las reduce).
+
+**Regla de decision sobre la IA (fijada ahora)**: si la diferencia de esperanza
+por operacion entre APROBADA y RECHAZADA **no tiene un intervalo de confianza del
+95% que excluya el cero con N >= 100 por lado**, la conclusion es **"la IA no
+aporta valor"** y se detiene el gasto en la API. Con 9,32 sombras/dia y una tasa de
+aprobacion p del LLM, 100 aprobadas y 100 rechazadas requieren unos 21 dias si
+p = 0,5 y unos 43 si p = 0,25, antes de agrupar.
+
+**Constancia**: ninguna estrategia de reglas tiene una ventaja demostrable con la
+evidencia actual; la unica con PF OOS > 1,2 (funding original) tiene 21
+operaciones. No se justifica dinero real con la evidencia actual.
+
+### Historico (versión anterior, superada)
+
+
+**[SUPERADA por la reejecución v2 de Fase 2 -- ver la sección "Actualización con la v2" abajo.]** **Estimación de ritmo real de operaciones -- corregida (tercera ronda)**:
 la versión anterior usaba conteos IS+OOS combinados sobre todo el rango
 histórico, lo cual es incorrecto para estimar el ritmo EN VIVO -- lo
 correcto es usar solo las operaciones OOS (el segmento que realmente
@@ -578,7 +612,7 @@ ejecutado). Se agregan:
 | 3.5 | `shadow_trades` sin LLM todavía (punto 2 parcial): señales que sobreviven el filtro de SL se AGRUPAN primero por (símbolo, dirección, vela) entre estrategias (`contributing_strategies`) y luego se simulan con margen ilimitado, `llm_decision` queda `PENDIENTE` hasta 3.6 | Smoke test: shadow trades usan exactamente el mismo cálculo de fees/PnL que `PaperBackend` para la misma señal (fixture compartida); no dependen de margen/posiciones disponibles en la cuenta real; test de agrupación: 2 señales de estrategias distintas, mismo símbolo/dirección/vela, producen UN solo `shadow_trade` con ambas estrategias listadas, no dos |
 | 3.6 | LLM (punto 6): cliente Anthropic (Sonnet), `llm_logs`, validación con pydantic, cache de prompt, temperatura baja, tope de $1/día, etiquetado `APROBADA`/`RECHAZADA`/`SIN_LLM` | Tests unitarios con el cliente de Anthropic mockeado (nunca una llamada real en tests) para aprobar/rechazar/presupuesto agotado; UNA llamada real manual (modelo y precio a confirmar contra la documentación oficial en ese momento) la corre el usuario para validar credenciales, modelo y costo real vs. la estimación de la sección 6, nunca el asistente (`CLAUDE.md`: nunca leer `.env`/credenciales) |
 | 3.7 | Bot de Telegram (punto 5): 7 comandos, long-polling, allowlist por `TELEGRAM_CHAT_ID` | Test que confirma que un `chat_id` distinto del configurado no dispara ningún comando; smoke test manual del usuario contra una instancia de paper (requiere token real de Telegram) |
-| 3.8 | Reporte de paso a dinero real (punto 8), con el ritmo de operaciones revisado (≈0.85 señales/día elegibles, ≈118 días a 100 operaciones) | Tests contra fixtures sintéticas que cubren cada combinación de criterio pasa/falla, incluido el intervalo de confianza bootstrap de `APROBADA` vs. `RECHAZADA` en los tres regímenes de evidencia (<30, 30-100, ≥100 por lado) |
+| 3.8 | Reporte de paso a dinero real (punto 8), con el ritmo de operaciones revisado tras la v2 (1,667 operaciones OOS/día elegibles; 60 días a 100 con aprobacion del 100 %, 120 días con el 50 %) | Tests contra fixtures sintéticas que cubren cada combinación de criterio pasa/falla, incluido el intervalo de confianza bootstrap de `APROBADA` vs. `RECHAZADA` en los tres regímenes de evidencia (<30, 30-100, ≥100 por lado) |
 
 Orden deliberado: el motor de riesgo (3.2) va ANTES de que el generador de
 señales (3.3) multiplique de 1 símbolo/1 estrategia a 10 símbolos/6

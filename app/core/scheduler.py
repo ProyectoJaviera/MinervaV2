@@ -24,8 +24,9 @@ from app.execution.paper_backend import InsufficientRiskBudgetError, PaperBacken
 from app.market.bitunix_rest import BitunixRestClient
 from app.market.bitunix_ws import BitunixPublicWSClient
 from app.persistence.database import Database
-from app.persistence.repositories import trades_repo, universe_repo
+from app.persistence.repositories import shadow_repo, trades_repo, universe_repo
 from app.trading import risk_engine
+from app.trading.shadow_book import ShadowBook
 from app.trading.signal_generator import (
     SignalCandidate,
     pick_representative_strategy,
@@ -43,8 +44,10 @@ class Scheduler:
         paper_backend: PaperBackend,
         settings: Settings,
         ws_client: BitunixPublicWSClient | None = None,
+        shadow: ShadowBook | None = None,
     ) -> None:
         self.db = db
+        self.shadow = shadow
         self.rest_client = rest_client
         self.paper_backend = paper_backend
         self.settings = settings
@@ -70,10 +73,19 @@ class Scheduler:
     async def run_cycle(self) -> list[SignalCandidate]:
         candidates = await run_signal_generation_cycle(self.db, self.rest_client, self.settings)
         for candidate in candidates:
+            shadow_trade = None
+            if self.shadow is not None:
+                try:
+                    shadow_trade = await self.shadow.open_candidate(candidate)
+                except Exception:  # noqa: BLE001 - la sombra no debe tumbar el ciclo
+                    logger.exception("Error abriendo operacion sombra en %s", candidate.symbol)
             try:
-                await self._process_candidate(candidate)
+                real = await self._process_candidate(candidate)
             except Exception:  # noqa: BLE001 - un candidato no debe tumbar el resto del ciclo
                 logger.exception("Error procesando candidato de senal en %s", candidate.symbol)
+                real = None
+            if shadow_trade is not None and real is not None:
+                await shadow_repo.mark_executed(self.db, shadow_trade.id)
         await self.sync_ws_subscriptions()
         return candidates
 
@@ -84,21 +96,21 @@ class Scheduler:
         symbols.update(p.symbol for p in await trades_repo.get_open_positions(self.db))
         await self.ws_client.set_symbols(sorted(symbols))
 
-    async def _process_candidate(self, candidate: SignalCandidate) -> None:
+    async def _process_candidate(self, candidate: SignalCandidate):
         """Abre una posicion si el simbolo esta libre. Una senal contraria con
         posicion abierta se IGNORA (igual que el backtest): nunca cierra ni
         invierte. Un simbolo admite una sola posicion a la vez."""
         if not self.settings.auto_open_without_llm:
-            return  # sin LLM (subfase 3.6) la apertura automatica esta desactivada
+            return None  # sin LLM (subfase 3.6) la apertura automatica esta desactivada
 
         if await trades_repo.get_open_positions(self.db, candidate.symbol):
-            return
+            return None
 
         representative = pick_representative_strategy(
             candidate.contributing_strategies, self.settings
         )
         try:
-            await self.paper_backend.open_position(
+            return await self.paper_backend.open_position(
                 symbol=candidate.symbol,
                 side=candidate.side,
                 margin_usdt=self.settings.default_margin_usdt,
@@ -109,3 +121,4 @@ class Scheduler:
             )
         except (risk_engine.RiskRejectedError, InsufficientRiskBudgetError) as exc:
             logger.info("No se abrio posicion en %s: %s", candidate.symbol, exc)
+            return None

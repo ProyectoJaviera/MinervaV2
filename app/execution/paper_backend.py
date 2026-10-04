@@ -30,6 +30,7 @@ from app.persistence.database import Database
 from app.persistence.models import Side, Trade, TradeStatus
 from app.persistence.repositories import specs_repo, trades_repo
 from app.trading import risk_engine
+from app.trading.fills import settle_close
 from app.trading.funding_accrual import accrue_funding
 from app.trading.levels import StrategyLevels, resolve_trade_levels
 from app.trading.slippage import entry_slippage_usdt, exit_slippage_usdt
@@ -204,25 +205,23 @@ class PaperBackend(ExecutionBackend):
             trade = await accrue_funding(
                 self.db, trade, int(closed_at.timestamp() * 1000)
             )
-            result = compute_close_result(
+            settlement = settle_close(
                 trade.side, trade.qty, trade.entry_price, exit_price,
-                trade.fee_entry_usdt, self.settings.taker_fee_pct,
-                extra_costs_usdt=trade.funding_paid_usdt + trade.slippage_entry_usdt,
+                trade.fee_entry_usdt, trade.slippage_entry_usdt, trade.funding_paid_usdt,
+                self.settings.taker_fee_pct, self.settings.backtest_slippage_bps,
             )
-            slippage_exit = exit_slippage_usdt(
-                trade.qty, exit_price, self.settings.backtest_slippage_bps
-            )
-            pnl_net = result.pnl_net_usdt - slippage_exit
+            pnl_net = settlement.pnl_net_usdt
             await trades_repo.close_trade(
-                self.db, trade_id, exit_price, result.fee_exit_usdt,
-                result.pnl_gross_usdt, pnl_net, reason, closed_at=closed_at,
-                slippage_exit_usdt=slippage_exit, fill_source=fill_source,
+                self.db, trade_id, exit_price, settlement.fee_exit_usdt,
+                settlement.pnl_gross_usdt, pnl_net, reason, closed_at=closed_at,
+                slippage_exit_usdt=settlement.slippage_exit_usdt, fill_source=fill_source,
             )
             logger.info(
                 "Posicion cerrada (paper): trade=%d %s precio=%.4f pnl_neto=%.4f "
                 "funding=%.4f slippage=%.4f motivo=%s fuente=%s",
                 trade_id, trade.symbol, exit_price, pnl_net,
-                trade.funding_paid_usdt, trade.slippage_entry_usdt + slippage_exit,
+                trade.funding_paid_usdt,
+                trade.slippage_entry_usdt + settlement.slippage_exit_usdt,
                 reason, fill_source,
             )
             # Actualiza racha de perdidas/circuit breaker y trackers de equity

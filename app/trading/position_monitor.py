@@ -30,7 +30,7 @@ from app.market.bitunix_rest import BitunixRestClient
 from app.market.funding_history import download_missing_funding
 from app.market.ohlcv_history import download_missing
 from app.persistence.database import Database
-from app.persistence.models import Side, Trade
+from app.persistence.models import ShadowTrade, Side, Trade
 from app.persistence.repositories import (
     health_repo,
     ohlcv_repo,
@@ -40,6 +40,7 @@ from app.persistence.repositories import (
 )
 from app.trading import risk_engine
 from app.trading.funding_accrual import accrue_funding
+from app.trading.shadow_book import ShadowBook
 from app.trading.stop_engine import (
     advance_trailing_stop,
     check_adverse_bar,
@@ -55,6 +56,7 @@ logger = get_logger(__name__)
 FEED_PERSIST_SECONDS = 5.0
 FUNDING_REFRESH_SECONDS = 600.0
 LIQ_CONFIRM_THROTTLE_SECONDS = 5.0
+TICKER_CACHE_SECONDS = 2.0
 MONITOR_LAST_SEEN_KEY = "monitor_last_seen_ms"
 BAR_MS = 60_000
 RECONCILE_MIN_WINDOW_MS = BAR_MS
@@ -82,23 +84,27 @@ class PositionMonitor:
         rest_client: BitunixRestClient,
         paper_backend: PaperBackend,
         settings: Settings,
+        shadow: ShadowBook | None = None,
     ) -> None:
         self.db = db
         self.rest = rest_client
+        self.shadow = shadow
         self.paper = paper_backend
         self.settings = settings
         self.marks: dict[str, float] = {}
         self.ticks_received = 0
         self.liquidation_confirmations = 0
-        self._trades: dict[int, Trade] = {}
-        self._dirty: set[int] = set()
+        # Clave (es_sombra, id): las posiciones reales y las sombra tienen ids independientes.
+        self._trades: dict[tuple[bool, int], Trade] = {}
+        self._dirty: set[tuple[bool, int]] = set()
         self._last_tick_at: dict[str, float] = {}
         self._tick_alerted: set[str] = set()
         self._feed_last_at: float | None = None
         self._feed_persist_at = 0.0
         self._feed_stale = False
         self._funding_refresh_at: dict[str, float] = {}
-        self._liq_checked_at: dict[int, float] = {}
+        self._liq_checked_at: dict[tuple[bool, int], float] = {}
+        self._ticker_cache: dict[str, tuple[float, dict[str, float]]] = {}
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -194,7 +200,7 @@ class PositionMonitor:
             if best != trade.best_price or eff != trade.effective_stop:
                 trade.best_price = best
                 trade.effective_stop = eff
-                self._dirty.add(trade.id)
+                self._dirty.add(self._key(trade))
 
     @staticmethod
     def _adverse_reason(trade: Trade, name: str) -> str:
@@ -207,10 +213,10 @@ class PositionMonitor:
         Sin confirmacion (o si la consulta falla) no se liquida, y se reintenta como
         mucho cada `LIQ_CONFIRM_THROTTLE_SECONDS`."""
         now = time.monotonic()
-        last = self._liq_checked_at.get(trade.id)
+        last = self._liq_checked_at.get(self._key(trade))
         if last is not None and now - last < LIQ_CONFIRM_THROTTLE_SECONDS:
             return None
-        self._liq_checked_at[trade.id] = now
+        self._liq_checked_at[self._key(trade)] = now
         try:
             ticker = await self._fetch_rest_ticker(trade.symbol)
         except Exception as exc:  # noqa: BLE001 - sin confirmacion no se liquida
@@ -227,23 +233,38 @@ class PositionMonitor:
         self, trade: Trade, price: float, reason: str, fill_source: str,
         closed_at: datetime | None = None,
     ) -> None:
-        closed = await self.paper.close_if_open(
-            trade.id, price, reason, closed_at=closed_at, fill_source=fill_source
-        )
-        self._trades.pop(trade.id, None)
-        self._dirty.discard(trade.id)
-        self._liq_checked_at.pop(trade.id, None)
+        if isinstance(trade, ShadowTrade):
+            closed = await self.shadow.close(
+                trade, price, reason, closed_at=closed_at, fill_source=fill_source
+            )
+        else:
+            closed = await self.paper.close_if_open(
+                trade.id, price, reason, closed_at=closed_at, fill_source=fill_source
+            )
+        key = self._key(trade)
+        self._trades.pop(key, None)
+        self._dirty.discard(key)
+        self._liq_checked_at.pop(key, None)
         if closed is not None:
             logger.info("Monitor cerro trade=%d %s motivo=%s precio=%.4f fuente=%s",
                         trade.id, trade.symbol, reason, price, fill_source)
 
     async def _fetch_rest_ticker(self, symbol: str) -> dict[str, float]:
+        """Unica consulta REST de ticker del monitor (marcas, antiguedad de ticks y
+        confirmacion de liquidacion). Reutiliza la respuesta de los ultimos
+        `TICKER_CACHE_SECONDS` para no pedir el mismo simbolo dos veces en un mismo ciclo."""
+        now = time.monotonic()
+        cached = self._ticker_cache.get(symbol)
+        if cached is not None and now - cached[0] < TICKER_CACHE_SECONDS:
+            return cached[1]
         tickers = await self.rest.get_tickers(symbol)
         ticker = next((t for t in tickers if t.get("symbol") == symbol), None)
         if ticker is None:
             raise ValueError(f"Sin ticker REST para {symbol}")
         last = float(ticker["lastPrice"])
-        return {"last": last, "mark": float(ticker.get("markPrice") or last)}
+        result = {"last": last, "mark": float(ticker.get("markPrice") or last)}
+        self._ticker_cache[symbol] = (now, result)
+        return result
 
     # --- ciclo periodico ----------------------------------------------------
 
@@ -277,24 +298,44 @@ class PositionMonitor:
             self.db, MONITOR_LAST_SEEN_KEY, str(int(time.time() * 1000))
         )
 
+    @staticmethod
+    def _key(trade: Trade) -> tuple[bool, int]:
+        return (isinstance(trade, ShadowTrade), trade.id)
+
+    async def _persist_risk(self, trade: Trade) -> None:
+        if isinstance(trade, ShadowTrade):
+            await self.shadow.update_risk(trade)
+        else:
+            await trades_repo.update_risk_state(
+                self.db, trade.id, trade.effective_stop, trade.best_price
+            )
+
+    async def _accrue(self, trade: Trade, until_ms: int) -> Trade:
+        if isinstance(trade, ShadowTrade):
+            return await self.shadow.accrue_funding(trade, until_ms)
+        return await accrue_funding(self.db, trade, until_ms)
+
     async def _flush_dirty(self) -> None:
-        for trade_id in list(self._dirty):
-            trade = self._trades.get(trade_id)
+        for key in list(self._dirty):
+            trade = self._trades.get(key)
             if trade is not None:
-                await trades_repo.update_risk_state(
-                    self.db, trade_id, trade.effective_stop, trade.best_price
-                )
+                await self._persist_risk(trade)
         self._dirty.clear()
 
     async def _reload_trades(self) -> None:
-        fresh: dict[int, Trade] = {}
+        fresh: dict[tuple[bool, int], Trade] = {}
         for trade in await trades_repo.get_open_positions(self.db):
-            if trade.id in self._trades:
-                fresh[trade.id] = self._trades[trade.id]
+            key = (False, trade.id)
+            if key in self._trades:
+                fresh[key] = self._trades[key]
                 continue
             if trade.liq_price is None:
                 trade = await self._backfill_liq(trade)
-            fresh[trade.id] = trade
+            fresh[key] = trade
+        if self.shadow is not None:
+            for trade in await self.shadow.load_open():
+                key = (True, trade.id)
+                fresh[key] = self._trades.get(key, trade)
         self._trades = fresh
 
     async def _backfill_liq(self, trade: Trade) -> Trade:
@@ -339,9 +380,9 @@ class PositionMonitor:
             self.marks[symbol] = ticker["mark"]
 
     async def _accrue_funding_all(self, now_ms: int) -> None:
-        for trade in list(self._trades.values()):
+        for key, trade in list(self._trades.items()):
             await self._refresh_funding(trade.symbol)
-            self._trades[trade.id] = await accrue_funding(self.db, trade, now_ms)
+            self._trades[key] = await self._accrue(trade, now_ms)
 
     async def _refresh_funding(self, symbol: str) -> None:
         """Repone la cola de funding por la API publica, como mucho cada
@@ -425,7 +466,12 @@ class PositionMonitor:
             bar_end = bar.open_time + BAR_MS
             if bar_end <= start_ms:
                 continue
-            current = await accrue_funding(self.db, current, bar_end)
+            current = await self._accrue(current, bar_end)
+            if bar.open_time < opened_ms:
+                # Vela que contiene la apertura: su mecha puede ser anterior a la
+                # posicion. No se evalua para precio (riesgo de cierre espurio de
+                # como mucho un minuto); el funding ya se aplico arriba por tiempo.
+                continue
             mark_bar = marks_by_open.get(bar.open_time, bar)
             unbounded = _unbounded(is_long)
             sl_thr = current.effective_stop if current.effective_stop is not None else unbounded
@@ -462,11 +508,11 @@ class PositionMonitor:
                     is_long, best0, current.effective_stop, current.trailing_distance, extreme
                 )
                 if best != current.best_price or eff != current.effective_stop:
-                    await trades_repo.update_risk_state(self.db, current.id, eff, best)
                     current = current.model_copy(update={"best_price": best, "effective_stop": eff})
+                    await self._persist_risk(current)
 
-        current = await accrue_funding(self.db, current, now_ms)
-        self._trades[trade.id] = current
+        current = await self._accrue(current, now_ms)
+        self._trades[self._key(trade)] = current
         return "ABIERTA"
 
     async def _load_1m_bars(self, symbol: str, start_ms: int, now_ms: int):

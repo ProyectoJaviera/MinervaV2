@@ -243,6 +243,27 @@ una estrategia ganadora") contemplaba como posible. Detalle completo,
 incluida la simulacion de cartera por estrategia, en
 `docs/FASE2_RIESGO.md` y `docs/FASE2_RESULTADOS.md`.
 
+### Reejecucion v2 (vigente) -- ver `docs/FASE2_REEJECUCION.md`
+
+- **Error de redondeo en el tope de SL** (`50.000000000000014 > 50`): descarto por
+  azar segun el precio 2.042 entradas de `ema_cross_9_21`, 509 de
+  `funding_contrarian_experimental` y 1.037 de `funding_contrarian_percentile_experimental`.
+  Corregido en v2. La v1 queda archivada como corrida con el error.
+- **Control de validez**: las estrategias sin ese error cambian entre v1 y v2 por la
+  **ventana**, no por el redondeo ni por la cache. v1 uso la hora de ejecucion como
+  fin (no reproducible); el fin fijo llego 23 min despues (`1e15257`). Las 14 filas
+  distintas de los tres controles quedan explicadas, 0 sin explicar.
+- **Resultado**: ninguna estrategia de reglas supera los criterios congelados. Las
+  dos experimentales no se evaluan por diseño y fallarian el criterio de
+  concentracion (76 % y 78 %). El PF de ema pasa de 1,12 (v1) a 0,97 (v2, 556
+  operaciones OOS).
+- **Regla de decision sobre la IA (fijada)**: sin IC del 95 % que excluya cero para
+  la diferencia APROBADA vs RECHAZADA con N >= 100 por lado, "la IA no aporta valor"
+  y se detiene el gasto en la API.
+- **Ninguna estrategia de reglas tiene ventaja demostrable; no se justifica dinero
+  real con la evidencia actual.**
+- Benchmark de entradas aleatorias propuesto (no implementado, ver seccion 6 del doc).
+
 ### Problemas reales encontrados y corregidos durante esta fase
 
 Ver el detalle completo (con la justificacion de cada correccion) en las
@@ -473,8 +494,7 @@ una:
   base real descarto 2042 entradas de `ema_cross_9_21`, 509 de
   `funding_contrarian_experimental` y 1037 de `funding_contrarian_percentile_experimental`.
   Corregido en `app/trading/sl_calc.py` (compartido por backtest y vivo). La
-  reejecucion v2 esta **pendiente de ejecucion por el usuario**; los veredictos de
-  Fase 2 de esas tres estrategias no son fiables hasta entonces.
+  reejecucion v2 **ejecutada**: ver el estado de Fase 2 abajo.
 - **3.4 -- Monitor de posiciones, feed y reconciliacion: HECHA.**
   - `app/trading/position_monitor.py`: unico que cierra por SL, TP, trailing y
     liquidacion. Modo tick con `stop_engine`. SL/trailing al precio observado
@@ -512,6 +532,44 @@ una:
     al refresco del cache (la liquidacion usa mark REST, no el mark stream).
     `rest_kline` y `rest_mark` no tienen fila en `data_source_health`; la vigencia
     de velas se controla por senal (`STALE_DATA`).
-  - **Pendiente de ejecucion por el usuario**: reejecucion de Fase 2 (v2) y
-    recalculo del ritmo de senales de `FASE3_PLAN.md`, seccion 8.
-- 3.5 a 3.8: pendientes.
+  - **Ajustes de la revision de 3.4 (hechos)**:
+    - *Vela parcial en la reconciliacion*: una vela 1m que empieza antes de la
+      apertura no se evalua para precio (una mecha previa podia cerrar una posicion
+      que aun no existia; test de regresion que lo reproducia). El funding de esa
+      vela si se aplica por tiempo. Riesgo residual: como mucho un minuto.
+    - *Consultas REST de ticker unificadas*: una sola consulta por simbolo cada
+      2 s (`TICKER_CACHE_SECONDS`) para marcas, antiguedad de ticks y confirmacion
+      de liquidacion. Test: una sola llamada por ciclo.
+    - *Validacion del TP al abrir*: un TP del lado equivocado se rechaza (antes se
+      habria ejecutado en el primer tick; detectado en la corrida real).
+  - **RECORDATORIO**: revisar A MANO el primer cierre real por SL, TP y trailing
+    (precio de salida, `fill_source`, comisiones, slippage y funding, contra los
+    logs y la tabla `trades`) antes de confiar en el monitor sin supervision.
+- **3.5 -- Operaciones sombra y reporte por estrategia: HECHA.**
+  - `shadow_trades` (tabla nueva): una operacion por senal agrupada
+    (simbolo, direccion, vela), margen ilimitado, sin cupos de la cuenta real.
+    `signal_group_key` es UNICA: la misma senal nunca genera dos sombras.
+  - Mismas funciones que la cuenta paper para llenado, niveles, slippage, funding
+    y cierre: `compute_open_fill`, `resolve_trade_levels`, `entry_slippage_usdt`,
+    `compute_funding_accrual` y `settle_close` (`app/trading/fills.py`, extraido
+    ahora de `PaperBackend.close_if_open`, que lo usa igual). Test de paridad: mismo
+    PnL neto que la cuenta paper para la misma senal.
+  - `llm_decision`: **SIN_LLM** en todas las filas hasta la 3.6. El plan decia
+    "PENDIENTE"; se usa SIN_LLM por indicacion expresa, con la misma funcion (sin
+    decision del LLM todavia).
+  - Atribucion: una operacion agrupada cuenta en CADA estrategia contribuyente, con
+    su resultado completo (`app/trading/shadow_report.py`). El reporte muestra el
+    total aparte (sin doble conteo) y el desglose por estrategia.
+  - El monitor de posiciones evalua las sombras con las mismas reglas que las reales
+    (SL, TP, trailing, liquidacion, funding), con `fill_source` TICK o CANDLE_RECON.
+  - El scheduler abre la sombra de cada senal agrupada, tenga o no apertura
+    automatica. `executed_in_real_account` queda en 1 si la cuenta real tambien la abre.
+  - Verificado sobre una copia de la base real con REST real: 3 grupos, dos de ellos
+    con dos estrategias cada uno, cada uno como UNA operacion sombra.
+  - Tests: `tests/unit/test_shadow_book.py` (9 tests: paridad, agrupacion, dedup,
+    independencia de cupos y de la bandera AUTO, ejecucion marcada, niveles
+    invalidos, ciclo de vida con el monitor y atribucion del reporte).
+  - **Pendiente**: el reporte se verifica con datos reales cuando el monitor corra
+    en vivo; hoy solo hay sombras abiertas de una corrida corta. Sin LLM no hay
+    APROBADA/RECHAZADA todavia.
+- 3.6 a 3.8: pendientes.

@@ -52,7 +52,7 @@ def make_settings(**overrides) -> Settings:
 def _actionable(symbol, side, candle, strategy, sl_pct) -> sg._ActionableSignal:
     return sg._ActionableSignal(
         symbol=symbol, side=side, candle_close_time=candle, strategy=strategy,
-        sl_margin_loss_pct=sl_pct, levels=StrategyLevels(),
+        sl_margin_loss_pct=sl_pct, levels=StrategyLevels(), price_at_eval=100.0,
     )
 
 

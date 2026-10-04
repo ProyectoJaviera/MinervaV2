@@ -280,6 +280,52 @@ CREATE TABLE IF NOT EXISTS data_source_health (
     consecutive_failures INTEGER NOT NULL DEFAULT 0
 );
 
+-- Operaciones sombra (subfase 3.5, docs/FASE3_PLAN.md punto 2): una por senal
+-- agrupada (simbolo, direccion, vela), simuladas con margen ilimitado. `signal_group_key`
+-- es UNICA: la misma senal agrupada nunca genera dos operaciones sombra. `llm_decision`
+-- queda SIN_LLM hasta la subfase 3.6 (APROBADA/RECHAZADA cuando exista el LLM).
+CREATE TABLE IF NOT EXISTS shadow_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL CHECK (side IN ('LONG', 'SHORT')),
+    strategy TEXT NOT NULL,
+    contributing_strategies TEXT NOT NULL,
+    signal_group_key TEXT NOT NULL UNIQUE,
+    candle_close_time TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('OPEN', 'CLOSED')) DEFAULT 'OPEN',
+    leverage INTEGER NOT NULL,
+    margin_usdt REAL NOT NULL,
+    notional_usdt REAL NOT NULL,
+    qty REAL NOT NULL,
+    entry_price REAL NOT NULL,
+    exit_price REAL,
+    fee_entry_usdt REAL NOT NULL DEFAULT 0,
+    fee_exit_usdt REAL,
+    funding_paid_usdt REAL NOT NULL DEFAULT 0,
+    slippage_entry_usdt REAL NOT NULL DEFAULT 0,
+    slippage_exit_usdt REAL NOT NULL DEFAULT 0,
+    pnl_gross_usdt REAL,
+    pnl_net_usdt REAL,
+    close_reason TEXT,
+    fill_source TEXT,
+    opened_at TEXT NOT NULL,
+    closed_at TEXT,
+    sl_price REAL,
+    tp_price REAL,
+    trailing_distance REAL,
+    effective_stop REAL,
+    best_price REAL,
+    liq_price REAL,
+    sl_margin_loss_pct REAL,
+    funding_is_approximated INTEGER NOT NULL DEFAULT 0,
+    funding_last_applied_ms INTEGER,
+    llm_decision TEXT NOT NULL DEFAULT 'SIN_LLM'
+        CHECK (llm_decision IN ('APROBADA', 'RECHAZADA', 'SIN_LLM')),
+    executed_in_real_account INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_shadow_trades_status ON shadow_trades (status, symbol);
+
 CREATE TABLE IF NOT EXISTS backtest_verdicts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     strategy TEXT NOT NULL,

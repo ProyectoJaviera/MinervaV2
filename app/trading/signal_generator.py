@@ -141,6 +141,9 @@ class SignalCandidate:
     # scheduler elige los de la estrategia representante y los completa al precio
     # real de llenado (ver `app/trading/levels.py`).
     levels_by_strategy: dict[str, StrategyLevels] = field(default_factory=dict)
+    # Precio de cierre de la vela evaluada por cada contribuyente: precio de entrada
+    # de la operacion sombra (mismo instante que la senal).
+    price_by_strategy: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -151,6 +154,7 @@ class _ActionableSignal:
     strategy: str
     sl_margin_loss_pct: float
     levels: StrategyLevels
+    price_at_eval: float
 
 
 def pick_representative_strategy(contributing_strategies: list[str], settings: Settings) -> str:
@@ -177,9 +181,10 @@ def _group_actionable_signals(items: list[_ActionableSignal]) -> list[SignalCand
         contributing = sorted({i.strategy for i in group_items})
         worst_sl_pct = max(i.sl_margin_loss_pct for i in group_items)
         levels = {i.strategy: i.levels for i in group_items}
+        prices = {i.strategy: i.price_at_eval for i in group_items}
         candidates.append(
             SignalCandidate(
-                symbol, side, candle_close_time, contributing, worst_sl_pct, levels,
+                symbol, side, candle_close_time, contributing, worst_sl_pct, levels, prices,
             )
         )
     return candidates
@@ -381,6 +386,7 @@ async def _evaluate_one(
     return _ActionableSignal(
         symbol=symbol, side=Side(signal.value), candle_close_time=candle_close_time,
         strategy=strategy_name, sl_margin_loss_pct=sl_margin_pct, levels=raw_levels,
+        price_at_eval=price_at_eval,
     )
 
 

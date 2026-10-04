@@ -167,6 +167,7 @@ async def test_liquidation_needs_rest_mark_confirmation(db):
     assert (await trades_repo.get_trade(db, manual.id)).status == TradeStatus.OPEN
 
     monitor._liq_checked_at.clear()  # simula que pasa la ventana de reintento
+    monitor._ticker_cache.clear()
     await monitor.on_tick("BTCUSDT", 90.0)
     liquidated = await trades_repo.get_trade(db, manual.id)
     assert liquidated.close_reason == "LIQUIDATION"
@@ -236,6 +237,7 @@ async def test_periodic_tick_updates_equity_peak_and_daily_baseline(db):
     # un tick nuevo tenga que llegar por WS).
     rest.last = 110.0
     rest.mark = 110.0
+    monitor._ticker_cache.clear()  # el siguiente ciclo (15 s) ya no ve la respuesta cacheada
     await monitor.tick_periodic(now_ms=int(time.time() * 1000))
     peak = float(await system_state_repo.get_state(db, "equity_peak_usdt"))
     assert peak > 100.0
@@ -449,3 +451,38 @@ async def test_open_rejects_tp_on_the_wrong_side_of_the_fill(db):
             "BTCUSDT", Side.LONG, margin_usdt=10.0, leverage=10, strategy="ema_cross_9_21",
             sl_margin_loss_pct=50.0, levels=StrategyLevels(stop_price=95.0, take_profit_price=90.0),
         )
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_ignores_a_wick_in_the_candle_that_straddles_the_opening(db):
+    """La posicion se abrio a mitad de una vela 1m: una mecha de esa vela ANTERIOR a
+    la apertura no puede cerrarla (la posicion no existia). Sin la regla, esta
+    prueba cerraria la posicion por SL en el minuto previo a su apertura."""
+    rest, _s, backend, monitor = await _setup(db)
+    now = _now_ms()
+    manual_levels = StrategyLevels(95.0, 110.0)
+    trade = await _open_long(backend, levels=manual_levels)
+    first_open, last_closed = _window(now, 20)
+    opened_at_ms = first_open + 30_000  # abierta 30 s dentro del primer minuto
+    await db.execute("UPDATE trades SET opened_at = ? WHERE id = ?",
+                     (datetime.fromtimestamp(opened_at_ms / 1000, tz=UTC).isoformat(), trade.id))
+    await system_state_repo.set_state(db, MONITOR_LAST_SEEN_KEY, str(now - 25 * BAR_MS))
+    # Mecha que perfora el SL solo en el minuto que contiene la apertura, ANTES de abrir.
+    await _seed_1m(db, "BTCUSDT", first_open, last_closed,
+                   overrides={first_open: {"low": 94.0, "close": 94.5}})
+
+    assert await monitor.reconcile_on_startup(now_ms=now) == [(trade.id, "ABIERTA")]
+    assert (await trades_repo.get_trade(db, trade.id)).status == TradeStatus.OPEN
+
+
+@pytest.mark.asyncio
+async def test_one_ticker_request_per_symbol_per_cycle_is_shared_by_all_consumers(db):
+    """Marcas, antiguedad de ticks y confirmacion de liquidacion piden el mismo ticker:
+    dentro de la ventana de cache debe salir UNA sola consulta REST por simbolo."""
+    rest, _s, backend, monitor = await _setup(db)
+    await _open_long(backend)
+    await monitor._reload_trades()
+    rest.calls.clear()
+    await monitor._check_tick_ages()   # sin ticks WS -> consulta REST
+    await monitor._refresh_marks()     # mismo simbolo, dentro de la ventana
+    assert rest.calls.count("get_tickers") == 1
