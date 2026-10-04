@@ -42,13 +42,27 @@ class BitunixPublicWSClient:
         on_message: Callable[[dict], Awaitable[None]] | None = None,
     ) -> None:
         self.ws_url = ws_url
-        self.symbols = symbols
+        self.symbols = list(dict.fromkeys(symbols))
         self.channel = channel
         self.on_message = on_message
         self._stop = asyncio.Event()
+        self._ws = None
+        self._subscribed: set[str] = set()
 
     def stop(self) -> None:
         self._stop.set()
+
+    async def set_symbols(self, symbols: list[str]) -> None:
+        """Cambia el conjunto de simbolos suscritos. Si hay conexion viva, suscribe
+        en caliente solo los nuevos; si no, se suscribe al reconectar."""
+        self.symbols = list(dict.fromkeys(symbols))
+        new = [s for s in self.symbols if s not in self._subscribed]
+        if self._ws is not None and new:
+            await self._ws.send(json.dumps(self._subscribe_payload(new)))
+            self._subscribed.update(new)
+
+    def _subscribe_payload(self, symbols: list[str]) -> dict:
+        return {"op": "subscribe", "args": [{"symbol": s, "ch": self.channel} for s in symbols]}
 
     async def run_forever(self) -> None:
         """Mantiene la conexion viva; reconecta con backoff exponencial ante
@@ -70,22 +84,23 @@ class BitunixPublicWSClient:
 
     async def _run_once(self) -> None:
         async with websockets.connect(self.ws_url, ping_interval=None) as ws:
-            await ws.send(
-                json.dumps(
-                    {
-                        "op": "subscribe",
-                        "args": [{"symbol": s, "ch": self.channel} for s in self.symbols],
-                    }
-                )
-            )
-            heartbeat_task = asyncio.create_task(self._heartbeat(ws))
+            self._ws = ws
+            self._subscribed = set()
             try:
-                async for raw in ws:
-                    if self._stop.is_set():
-                        break
-                    await self._handle_message(raw)
+                if self.symbols:
+                    await ws.send(json.dumps(self._subscribe_payload(self.symbols)))
+                    self._subscribed.update(self.symbols)
+                heartbeat_task = asyncio.create_task(self._heartbeat(ws))
+                try:
+                    async for raw in ws:
+                        if self._stop.is_set():
+                            break
+                        await self._handle_message(raw)
+                finally:
+                    heartbeat_task.cancel()
             finally:
-                heartbeat_task.cancel()
+                self._ws = None
+                self._subscribed = set()
 
     async def _heartbeat(self, ws) -> None:
         while True:
@@ -93,12 +108,14 @@ class BitunixPublicWSClient:
             await ws.send(json.dumps({"op": "ping", "ping": int(time.time())}))
 
     async def _handle_message(self, raw: str | bytes) -> None:
+        """Entrega TODO mensaje JSON del servidor (pong incluido): el monitor usa
+        cualquier mensaje como latido del feed (subfase 3.4)."""
         try:
             message = json.loads(raw)
         except json.JSONDecodeError:
             logger.debug("Mensaje WS no-JSON ignorado: %r", raw)
             return
-        if message.get("op") == "pong" or "pong" in message:
+        if not isinstance(message, dict):
             return
         if self.on_message is not None:
             await self.on_message(message)

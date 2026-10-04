@@ -1,28 +1,19 @@
 """`PaperBackend`: unica implementacion ACTIVA de `ExecutionBackend` en v1.
 
-Limitaciones conocidas de esta fase (documentadas tambien en PROGRESS.md):
-sin SL/TP/trailing, sin liquidacion por tiers, sin funding, sin slippage,
-sin reconciliacion tras downtime. El cierre ocurre solo por senal contraria
-o llamada manual. Todo esto llega en Fase 3 (simulador realista).
-
 Usa el precio de mercado real de Bitunix (`markPrice` de `/market/tickers`)
-para abrir/cerrar, y aplica la comision taker configurada (ordenes a
-mercado). Nunca envia ninguna orden real -- solo lee datos publicos y
-escribe en la base de datos local.
+para abrir/cerrar cuando no hay un precio observado del monitor, y aplica la
+comision taker configurada. Nunca envia ninguna orden real -- solo lee datos
+publicos y escribe en la base de datos local.
 
-Desde la subfase 3.2 de Fase 3, `open_position` pasa primero por
-`app.trading.risk_engine.check_new_entry` -- el motor de riesgo en vivo
-que puede BLOQUEAR una entrada nueva (posiciones, misma direccion,
-estrategia no elegible, tope de SL, perdida diaria, drawdown, circuit
-breaker, kill switch) o ajustar el margen hacia abajo. `close_position`
-nunca pasa por ahi -- el motor de riesgo solo bloquea entradas, nunca
-cierres (ver el docstring de `risk_engine.py`). La comprobacion y la
-escritura son atomicas (`asyncio.Lock` en `__init__`): necesario desde que
-el generador de senales de la subfase 3.3 puede evaluar varios simbolos
-con llamadas concurrentes. `is_manual=True` (nuevo) es para una entrada
-tecleada por un humano -- salta la lista de elegibilidad por estrategia y
-permite omitir `sl_margin_loss_pct`; toda entrada generada por una
-estrategia automatica DEBE declarar ambos (ver `risk_engine.py`).
+Motor de riesgo (subfase 3.2): `open_position` pasa por
+`app.trading.risk_engine.check_new_entry`, que puede BLOQUEAR una entrada nueva
+(incluido feed obsoleto, subfase 3.4) o ajustar el margen hacia abajo. Los
+cierres nunca pasan por ahi.
+
+Subfase 3.4: cada posicion nace con sus niveles planeados (SL, TP, trailing,
+liquidacion) calculados al precio real de llenado (`app.trading.levels`). El
+monitor de posiciones cierra con `close_if_open` a un precio explicito (SL/TP/
+liquidacion/trailing), y el funding acumulado entra en el PnL neto.
 """
 
 from __future__ import annotations
@@ -39,6 +30,9 @@ from app.persistence.database import Database
 from app.persistence.models import Side, Trade, TradeStatus
 from app.persistence.repositories import specs_repo, trades_repo
 from app.trading import risk_engine
+from app.trading.funding_accrual import accrue_funding
+from app.trading.levels import StrategyLevels, resolve_trade_levels
+from app.trading.slippage import entry_slippage_usdt, exit_slippage_usdt
 
 logger = get_logger(__name__)
 
@@ -54,14 +48,12 @@ class PaperBackend(ExecutionBackend):
         self.db = db
         self.rest_client = rest_client
         self.settings = settings
-        # Serializa comprobacion+apertura (ver `open_position`): sin esto,
-        # dos llamadas concurrentes (p.ej. el generador de senales de la
-        # subfase 3.3 evaluando varios simbolos con asyncio.gather) podian
-        # leer ambas "0/3 posiciones abiertas" ANTES de que ninguna hubiera
-        # insertado su fila, y las dos pasaban el motor de riesgo -- la
-        # comprobacion de cupo y la escritura en `trades` deben ser una
-        # sola operacion atomica a nivel de proceso.
-        self._open_lock = asyncio.Lock()
+        # Serializa comprobacion+escritura de aperturas Y cierres (`close_if_open`):
+        # el motor de riesgo cuenta posiciones abiertas, y esa cuenta no puede
+        # cambiar entre que se aprueba una entrada y que se inserta su fila; y dos
+        # cierres concurrentes de la misma posicion (monitor + reconciliacion) no
+        # deben liquidarla dos veces.
+        self._state_lock = asyncio.Lock()
 
     async def _get_mark_price(self, symbol: str) -> float:
         tickers = await self.rest_client.get_tickers(symbol)
@@ -70,15 +62,15 @@ class PaperBackend(ExecutionBackend):
             raise ValueError(f"Sin ticker para {symbol}")
         return float(ticker.get("markPrice") or ticker["lastPrice"])
 
-    async def get_equity(self) -> float:
-        """Capital realizado MAS PnL flotante de las posiciones abiertas
-        (a precio de mercado actual) -- la base correcta para el motor de
-        riesgo (perdida diaria, drawdown), nunca solo lo realizado."""
+    async def get_equity(self, marks: dict[str, float] | None = None) -> float:
+        """Capital realizado MAS PnL flotante neto de las posiciones abiertas
+        (menos el funding ya acumulado). `marks` (precio por simbolo) evita pedir
+        cada precio por REST cuando el llamador ya lo tiene."""
         balance = await self.get_balance()
         positions = await trades_repo.get_open_positions(self.db)
         if not positions:
             return balance
-        price_cache: dict[str, float] = {}
+        price_cache: dict[str, float] = dict(marks or {})
         unrealized = 0.0
         for p in positions:
             if p.symbol not in price_cache:
@@ -87,7 +79,14 @@ class PaperBackend(ExecutionBackend):
                 p.side, p.qty, p.entry_price, price_cache[p.symbol],
                 p.fee_entry_usdt, self.settings.taker_fee_pct,
             )
-            unrealized += result.pnl_net_usdt
+            unrealized += (
+                result.pnl_net_usdt
+                - p.funding_paid_usdt
+                - p.slippage_entry_usdt
+                - exit_slippage_usdt(
+                    p.qty, price_cache[p.symbol], self.settings.backtest_slippage_bps
+                )
+            )
         return balance + unrealized
 
     async def open_position(
@@ -100,12 +99,9 @@ class PaperBackend(ExecutionBackend):
         sl_margin_loss_pct: float | None = None,
         is_manual: bool = False,
         decision_source: str | None = None,
+        levels: StrategyLevels | None = None,
     ) -> Trade:
-        # Todo el ciclo comprobacion-de-cupo + escritura es atomico a nivel
-        # de proceso (ver el comentario en __init__) -- el motor de riesgo
-        # cuenta posiciones abiertas, y esa cuenta no puede cambiar entre
-        # que se aprueba una entrada y que se inserta su fila.
-        async with self._open_lock:
+        async with self._state_lock:
             equity = await self.get_equity()
             decision = await risk_engine.check_new_entry(
                 self.db, self.settings, symbol=symbol, side=side, strategy=strategy,
@@ -136,6 +132,11 @@ class PaperBackend(ExecutionBackend):
                     f"({spec.min_trade_volume})"
                 )
 
+            trade_levels = resolve_trade_levels(
+                side, price, leverage, fill.notional_usdt,
+                spec.margin_tiers_json if spec else None,
+                levels, self.settings,
+            )
             trade = Trade(
                 symbol=symbol,
                 side=side,
@@ -150,10 +151,22 @@ class PaperBackend(ExecutionBackend):
                 opened_at=datetime.now(UTC),
                 sl_margin_loss_pct=sl_margin_loss_pct,
                 decision_source=decision_source or ("MANUAL" if is_manual else "SIN_LLM"),
+                sl_price=trade_levels.sl_price,
+                tp_price=trade_levels.tp_price,
+                trailing_distance=trade_levels.trailing_distance,
+                effective_stop=trade_levels.sl_price,
+                best_price=price,
+                liq_price=trade_levels.liq_price,
+                slippage_entry_usdt=entry_slippage_usdt(
+                    fill.notional_usdt, self.settings.backtest_slippage_bps
+                ),
             )
             trade = await trades_repo.create_trade(self.db, trade)
-            logger.info("Posicion abierta (paper): %s %s margen=%.2f qty=%.6f @ %.4f",
-                        symbol, side.value, margin_usdt, fill.qty, price)
+            logger.info(
+                "Posicion abierta (paper): %s %s margen=%.2f qty=%.6f @ %.4f sl=%s tp=%s liq=%.4f",
+                symbol, side.value, margin_usdt, fill.qty, price,
+                trade_levels.sl_price, trade_levels.tp_price, trade_levels.liq_price,
+            )
             return trade
 
     async def close_position(self, trade_id: int, reason: str = "MANUAL") -> Trade:
@@ -164,29 +177,62 @@ class PaperBackend(ExecutionBackend):
             raise ValueError(f"Trade {trade_id} ya esta cerrado")
 
         exit_price = await self._get_mark_price(trade.symbol)
-        result = compute_close_result(
-            trade.side, trade.qty, trade.entry_price, exit_price,
-            trade.fee_entry_usdt, self.settings.taker_fee_pct,
-        )
+        closed = await self.close_if_open(trade_id, exit_price, reason, fill_source="REST_MARK")
+        if closed is None:
+            raise ValueError(f"Trade {trade_id} ya esta cerrado")
+        return closed
 
-        await trades_repo.close_trade(
-            self.db, trade_id, exit_price, result.fee_exit_usdt,
-            result.pnl_gross_usdt, result.pnl_net_usdt, reason,
-        )
-        logger.info(
-            "Posicion cerrada (paper): trade=%d %s pnl_neto=%.4f motivo=%s",
-            trade_id, trade.symbol, result.pnl_net_usdt, reason,
-        )
-        # Actualiza racha de perdidas/circuit breaker y trackers de equity
-        # DESPUES de cerrar -- nunca bloquea el cierre en si (ya ocurrio).
-        equity_after_close = await self.get_equity()
-        await risk_engine.record_trade_closed(
-            self.db, self.settings, pnl_net_usdt=result.pnl_net_usdt,
-            current_equity=equity_after_close,
-        )
-        updated = await trades_repo.get_trade(self.db, trade_id)
-        assert updated is not None
-        return updated
+    async def close_if_open(
+        self,
+        trade_id: int,
+        exit_price: float,
+        reason: str,
+        closed_at: datetime | None = None,
+        fill_source: str = "TICK",
+    ) -> Trade | None:
+        """Cierra la posicion a `exit_price` (precio explicito: nominal del SL/TP o
+        el observado por el monitor). Devuelve `None` si ya estaba cerrada -- dos
+        disparadores concurrentes no pueden liquidar la misma posicion dos veces.
+        Aplica antes el funding pendiente hasta el instante del cierre. Nunca
+        pasa por el motor de riesgo: los cierres no se bloquean."""
+        async with self._state_lock:
+            trade = await trades_repo.get_trade(self.db, trade_id)
+            if trade is None or trade.status != TradeStatus.OPEN:
+                return None
+
+            closed_at = closed_at or datetime.now(UTC)
+            trade = await accrue_funding(
+                self.db, trade, int(closed_at.timestamp() * 1000)
+            )
+            result = compute_close_result(
+                trade.side, trade.qty, trade.entry_price, exit_price,
+                trade.fee_entry_usdt, self.settings.taker_fee_pct,
+                extra_costs_usdt=trade.funding_paid_usdt + trade.slippage_entry_usdt,
+            )
+            slippage_exit = exit_slippage_usdt(
+                trade.qty, exit_price, self.settings.backtest_slippage_bps
+            )
+            pnl_net = result.pnl_net_usdt - slippage_exit
+            await trades_repo.close_trade(
+                self.db, trade_id, exit_price, result.fee_exit_usdt,
+                result.pnl_gross_usdt, pnl_net, reason, closed_at=closed_at,
+                slippage_exit_usdt=slippage_exit, fill_source=fill_source,
+            )
+            logger.info(
+                "Posicion cerrada (paper): trade=%d %s precio=%.4f pnl_neto=%.4f "
+                "funding=%.4f slippage=%.4f motivo=%s fuente=%s",
+                trade_id, trade.symbol, exit_price, pnl_net,
+                trade.funding_paid_usdt, trade.slippage_entry_usdt + slippage_exit,
+                reason, fill_source,
+            )
+            # Actualiza racha de perdidas/circuit breaker y trackers de equity
+            # DESPUES de cerrar -- nunca bloquea el cierre en si (ya ocurrio).
+            equity_after_close = await self.get_equity()
+            await risk_engine.record_trade_closed(
+                self.db, self.settings, pnl_net_usdt=pnl_net,
+                current_equity=equity_after_close,
+            )
+            return await trades_repo.get_trade(self.db, trade_id)
 
     async def get_balance(self) -> float:
         closed_trades = [t for t in await trades_repo.get_trades(self.db, limit=100000)

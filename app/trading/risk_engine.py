@@ -43,6 +43,9 @@ exactos involucrados):
   (no un rechazo auditado, es un bug del llamador) si una entrada con
   `is_manual=False` no trae `sl_margin_loss_pct`. Solo las entradas
   `is_manual=True` pueden omitirlo.
+- `DATA_STALE` -- el latido del WebSocket publico (`ws_feed`) es mas viejo que
+  `WS_STALE_AFTER_SECONDS`. Solo bloquea entradas; un cierre por SL/TP/
+  liquidacion/manual nunca se bloquea por datos obsoletos (subfase 3.4).
 - `MARGIN_UNAVAILABLE` -- el margen maximo permitido para esta entrada
   (`Settings.max_margin_for_new_trade`) calcula a <= 0.
 
@@ -80,7 +83,12 @@ from zoneinfo import ZoneInfo
 from app.config import Settings
 from app.persistence.database import Database
 from app.persistence.models import Side
-from app.persistence.repositories import risk_rejections_repo, system_state_repo, trades_repo
+from app.persistence.repositories import (
+    health_repo,
+    risk_rejections_repo,
+    system_state_repo,
+    trades_repo,
+)
 
 # Claves de `system_state` usadas por este modulo.
 _KEY_KILL_SWITCH = "kill_switch_active"
@@ -205,6 +213,18 @@ async def update_equity_tracking(db: Database, settings: Settings, current_equit
                 # poner en False por una recuperacion del equity, solo por
                 # el cambio de dia de arriba.
                 await _set_bool(db, _KEY_DAILY_LOSS_LOCKED, True)
+
+
+async def _feed_is_stale(db: Database, settings: Settings) -> bool:
+    """Sin latido reciente del WebSocket publico no se abren entradas nuevas.
+    Si el feed nunca se registro (no hay fila en `data_source_health`, p.ej. en
+    tests o un proceso sin WebSocket), no se bloquea: el arranque de `main.py`
+    lo registra siempre. Nunca bloquea un cierre -- este modulo solo mira
+    entradas."""
+    last = await health_repo.get_last_success(db, health_repo.WS_FEED_SOURCE)
+    if last is None:
+        return False
+    return (datetime.now(UTC) - last).total_seconds() > settings.ws_stale_after_seconds
 
 
 async def _daily_loss_breached(db: Database) -> bool:
@@ -350,6 +370,12 @@ async def check_new_entry(
         return await _reject(
             db, symbol, side, strategy, "DAILY_LOSS_LIMIT",
             {"max_daily_loss_pct": settings.max_daily_loss_pct},
+        )
+
+    if await _feed_is_stale(db, settings):
+        return await _reject(
+            db, symbol, side, strategy, "DATA_STALE",
+            {"ws_stale_after_seconds": settings.ws_stale_after_seconds},
         )
 
     eligible = settings.real_account_eligible_strategies_list

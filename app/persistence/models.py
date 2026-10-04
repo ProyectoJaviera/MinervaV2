@@ -52,6 +52,11 @@ class Trade(BaseModel):
     funding_is_approximated: bool = False
     funding_last_applied_ms: int | None = None
     decision_source: str | None = None
+    slippage_entry_usdt: float = 0.0
+    slippage_exit_usdt: float = 0.0
+    # Como se lleno el cierre: TICK (monitor, precio observado o nominal),
+    # CANDLE_RECON (reconciliacion con velas) o REST_MARK (cierre manual).
+    fill_source: str | None = None
 
 
 class RiskRejection(BaseModel):

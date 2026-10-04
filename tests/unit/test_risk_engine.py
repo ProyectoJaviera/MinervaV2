@@ -652,3 +652,53 @@ async def test_smoke_end_to_end_risk_engine_lifecycle(tmp_path):
         assert closed_manual.status == TradeStatus.CLOSED
     finally:
         await db.close()
+
+
+# --- feed en vivo obsoleto (subfase 3.4): bloquea entradas, nunca cierres ---
+
+
+async def _set_ws_feed_last_success(db: Database, seconds_ago: float) -> None:
+    from app.persistence.repositories import health_repo
+
+    at = datetime.now(UTC) - timedelta(seconds=seconds_ago)
+    await health_repo.record_success(db, health_repo.WS_FEED_SOURCE, at)
+
+
+@pytest.mark.asyncio
+async def test_stale_ws_feed_blocks_new_entry_and_is_audited(db):
+    settings = make_settings(WS_STALE_AFTER_SECONDS=45.0)
+    await _set_ws_feed_last_success(db, seconds_ago=120)
+    decision = await risk_engine.check_new_entry(
+        db, settings, symbol="BTCUSDT", side=Side.LONG, strategy="ema_cross_9_21",
+        margin_usdt=10.0, current_equity=100.0, sl_margin_loss_pct=10.0,
+    )
+    assert not decision.allowed
+    assert decision.reason == "DATA_STALE"
+    assert len(await risk_rejections_repo.get_rejections(db, reason="DATA_STALE")) == 1
+
+
+@pytest.mark.asyncio
+async def test_fresh_ws_feed_allows_new_entry(db):
+    settings = make_settings(WS_STALE_AFTER_SECONDS=45.0)
+    await _set_ws_feed_last_success(db, seconds_ago=5)
+    decision = await risk_engine.check_new_entry(
+        db, settings, symbol="BTCUSDT", side=Side.LONG, strategy="ema_cross_9_21",
+        margin_usdt=10.0, current_equity=100.0, sl_margin_loss_pct=10.0,
+    )
+    assert decision.allowed
+
+
+@pytest.mark.asyncio
+async def test_stale_ws_feed_never_blocks_closing_an_open_position(db):
+    settings = make_settings(WS_STALE_AFTER_SECONDS=45.0)
+    rest_client = FakeRestClient(price=100.0)
+    backend = PaperBackend(db, rest_client, settings)
+    trade = await backend.open_position(
+        "BTCUSDT", Side.LONG, margin_usdt=10.0, leverage=10, strategy="ema_cross_9_21",
+        sl_margin_loss_pct=10.0,
+    )
+    await _set_ws_feed_last_success(db, seconds_ago=600)
+
+    rest_client.price = 110.0
+    closed = await backend.close_position(trade.id, reason="MANUAL")
+    assert closed.status == TradeStatus.CLOSED

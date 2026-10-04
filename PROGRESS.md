@@ -457,4 +457,61 @@ una:
     (confirma "sin duplicados"); 0 candidatos accionables y 0 descartes por
     tope de SL en el mercado real del momento de la corrida (sin señal
     vigente en ninguna estrategia/simbolo -- resultado valido, no un fallo).
-- 3.4 a 3.8: pendientes.
+- **Revision de 3.3 (commit `0f96935`, pusheado)**: funding en vivo con
+  refresco por API publica (`download_missing_funding` con tolerancia =
+  intervalo del contrato + `FUNDING_STALE_MARGIN_HOURS`); si el ultimo evento es
+  mas viejo, las estrategias `funding_contrarian_*` quedan en HOLD con
+  `reason="FUNDING_STALE"`; los bares posteriores al ultimo evento real se marcan
+  como aproximados en vivo. Vela obsoleta: `reason="CANDLE_STALE"` y senal
+  `STALE_DATA`, contada en `system_state.signals_stale_data_count`. Se elimino
+  `SIGNAL_REVERSAL`: una senal contraria con posicion abierta se ignora, igual que
+  el backtest. `DECISION_SOURCE` (SIN_LLM) y `AUTO_OPEN_WITHOUT_LLM=false`.
+  Migraciones idempotentes para `trades`/`signals` sobre bases existentes.
+- **Hallazgo de la revision: error de redondeo en el tope de SL** (ver
+  `docs/FASE2_REEJECUCION.md`): el SL de respaldo al 5% a 10x cae exactamente en
+  50% de margen; sin redondeo, `50.000000000000014 > 50` descartaba al azar. En la
+  base real descarto 2042 entradas de `ema_cross_9_21`, 509 de
+  `funding_contrarian_experimental` y 1037 de `funding_contrarian_percentile_experimental`.
+  Corregido en `app/trading/sl_calc.py` (compartido por backtest y vivo). La
+  reejecucion v2 esta **pendiente de ejecucion por el usuario**; los veredictos de
+  Fase 2 de esas tres estrategias no son fiables hasta entonces.
+- **3.4 -- Monitor de posiciones, feed y reconciliacion: HECHA.**
+  - `app/trading/position_monitor.py`: unico que cierra por SL, TP, trailing y
+    liquidacion. Modo tick con `stop_engine`. SL/trailing al precio observado
+    (peor caso); TP al nominal salvo hueco evidente (`TP_GAP_TOLERANCE_PCT`); la
+    liquidacion exige que el mark por REST confirme el cruce (si no confirma o la
+    consulta falla, no se liquida). Antiguedad de ticks por simbolo
+    (`TICK_STALE_SECONDS`): si se supera, alerta y consulta el precio por REST.
+    Equity (pico y linea base del dia) actualizado en cada periodo.
+  - Latido del feed: cualquier mensaje del servidor (incluido pong) refresca
+    `data_source_health` (`ws_feed`). Sin latido en `WS_STALE_AFTER_SECONDS`, el
+    motor de riesgo rechaza entradas con `DATA_STALE`; los cierres nunca se bloquean.
+  - **Reconciliacion al arrancar**: reproduce con velas 1m (LAST para SL/TP/
+    trailing, MARK para liquidacion) el periodo caido desde el ultimo latido
+    persistido, mas el funding de esa ventana. Si faltan mas de 2 velas, la
+    posicion queda abierta y se registra CRITICAL.
+  - **Slippage** (`app/trading/slippage.py`): misma formula y parametro que el
+    backtest (`BACKTEST_SLIPPAGE_BPS`), aplicada en entradas, cierres a mercado,
+    SL y TP. El backtest importa las mismas funciones.
+  - **Columna `fill_source`** en cada cierre: `TICK` (monitor), `CANDLE_RECON`
+    (reconciliacion, precio nominal) o `REST_MARK` (cierre manual).
+  - Validacion de niveles al abrir: SL o TP del lado equivocado respecto al
+    llenado se rechaza (antes un TP invertido se habria ejecutado en el primer tick).
+  - Tests nuevos: monitor (secuencia de ticks que cruza el SL, TP nominal vs hueco,
+    trailing, liquidacion con confirmacion REST, feed obsoleto sin bloquear cierres,
+    equity periodico), reconciliacion (SL, TP, liquidacion por MARK, funding,
+    ventana vacia, velas incompletas), slippage con paridad frente al backtest,
+    funding idempotente, trailing y relleno del TP.
+  - **Corrida real corta** (copia temporal de la base, WebSocket y REST reales,
+    90 s): 57 ticks recibidos, latido siempre por debajo de 8 s, marcas por REST,
+    niveles correctos (SL -1%, TP +1%, liquidacion ~76.592 a 10x), reconciliacion
+    con 10 minutos de velas 1m reales (sin hueco, `ABIERTA`), cierre manual con
+    slippage y `fill_source=REST_MARK`. La corrida no alcanzo SL ni TP en vivo: el
+    precio no se movio lo suficiente en 90 s.
+  - **Pendiente (no implementado en 3.4)**: funding por evento en vivo sin esperar
+    al refresco del cache (la liquidacion usa mark REST, no el mark stream).
+    `rest_kline` y `rest_mark` no tienen fila en `data_source_health`; la vigencia
+    de velas se controla por senal (`STALE_DATA`).
+  - **Pendiente de ejecucion por el usuario**: reejecucion de Fase 2 (v2) y
+    recalculo del ritmo de senales de `FASE3_PLAN.md`, seccion 8.
+- 3.5 a 3.8: pendientes.

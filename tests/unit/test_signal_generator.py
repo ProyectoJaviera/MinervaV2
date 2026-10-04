@@ -34,6 +34,7 @@ from app.persistence.repositories import (
 )
 from app.strategies.base import BaseStrategy, Signal
 from app.trading import signal_generator as sg
+from app.trading.levels import StrategyLevels
 
 
 def make_settings(**overrides) -> Settings:
@@ -51,7 +52,7 @@ def make_settings(**overrides) -> Settings:
 def _actionable(symbol, side, candle, strategy, sl_pct) -> sg._ActionableSignal:
     return sg._ActionableSignal(
         symbol=symbol, side=side, candle_close_time=candle, strategy=strategy,
-        sl_margin_loss_pct=sl_pct,
+        sl_margin_loss_pct=sl_pct, levels=StrategyLevels(),
     )
 
 

@@ -110,3 +110,38 @@ def check_favorable_tp_tick(is_long: bool, price: float, tp_threshold: float) ->
     TICK."""
     hit = price >= tp_threshold if is_long else price <= tp_threshold
     return price if hit else None
+
+
+def tp_tick_fill_price(
+    is_long: bool, observed_price: float, tp_threshold: float, gap_tolerance_frac: float
+) -> float:
+    """Precio de relleno de un TP en modo TICK (ya confirmado que el tick lo
+    cruzo). Nominal, el precio del TP, salvo un HUECO evidente: si el tick
+    observado supera el TP por mas de `gap_tolerance_frac` (FRACCION) se usa el
+    precio observado. Rellenar siempre al precio observado seria optimista: un
+    tick que cruza el TP casi nunca es el precio real de ejecucion."""
+    if is_long:
+        evident_gap = observed_price > tp_threshold * (1 + gap_tolerance_frac)
+    else:
+        evident_gap = observed_price < tp_threshold * (1 - gap_tolerance_frac)
+    return observed_price if evident_gap else tp_threshold
+
+
+def advance_trailing_stop(
+    is_long: bool,
+    best_price: float,
+    effective_stop: float,
+    trailing_distance: float,
+    favorable_extreme: float,
+) -> tuple[float, float]:
+    """Avanza el trailing con el extremo favorable de un tick o de una vela
+    (maximo para LONG, minimo para SHORT). El stop solo se mueve a favor. Devuelve
+    (mejor_precio, stop_efectivo). Debe llamarse DESPUES de revisar SL/TP con el
+    mismo dato, igual que el backtest."""
+    if is_long:
+        best = max(best_price, favorable_extreme)
+        effective = max(effective_stop, best - trailing_distance)
+    else:
+        best = min(best_price, favorable_extreme)
+        effective = min(effective_stop, best + trailing_distance)
+    return best, effective

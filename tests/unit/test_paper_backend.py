@@ -52,7 +52,14 @@ async def test_open_and_close_long_position_computes_pnl_and_fees(db):
 
     expected_gross = (110.0 - 100.0) * 1.0  # 10 USDT
     expected_fee_exit = 110.0 * 0.0006
-    expected_net = expected_gross - trade.fee_entry_usdt - expected_fee_exit
+    # Slippage plano igual que el backtest (BACKTEST_SLIPPAGE_BPS=5 por defecto):
+    # entrada = notional * 5bps, salida = qty * precio_salida * 5bps.
+    expected_slip_entry = 100.0 * 0.0005
+    expected_slip_exit = 1.0 * 110.0 * 0.0005
+    expected_net = (
+        expected_gross - trade.fee_entry_usdt - expected_fee_exit
+        - expected_slip_entry - expected_slip_exit
+    )
 
     assert closed.pnl_gross_usdt == pytest.approx(expected_gross)
     assert closed.pnl_net_usdt == pytest.approx(expected_net)

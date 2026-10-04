@@ -269,6 +269,17 @@ CREATE TABLE IF NOT EXISTS signals_discarded_by_sl_cap (
     created_at TEXT NOT NULL
 );
 
+-- Salud de las fuentes de datos en vivo (subfase 3.4, punto 7 de
+-- docs/FASE3_PLAN.md): ultimo exito, ultimo error y fallos seguidos. Hoy la
+-- fuente `ws_feed` es el latido del WebSocket publico (cualquier mensaje del
+-- servidor, incluido el pong) -- si se queda sin latido, no se abren entradas.
+CREATE TABLE IF NOT EXISTS data_source_health (
+    source TEXT PRIMARY KEY,
+    last_success_at TEXT,
+    last_error TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS backtest_verdicts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     strategy TEXT NOT NULL,
@@ -386,6 +397,9 @@ _TRADES_MIGRATED_COLUMNS = {
     "funding_is_approximated": "INTEGER NOT NULL DEFAULT 0",
     "funding_last_applied_ms": "INTEGER",
     "decision_source": "TEXT",
+    "slippage_entry_usdt": "REAL NOT NULL DEFAULT 0",
+    "slippage_exit_usdt": "REAL NOT NULL DEFAULT 0",
+    "fill_source": "TEXT",
 }
 
 _SIGNALS_MIGRATED_COLUMNS = {

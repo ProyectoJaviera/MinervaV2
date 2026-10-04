@@ -57,6 +57,7 @@ from app.persistence.models import Side
 from app.persistence.repositories import funding_repo, specs_repo
 from app.strategies.base import BaseStrategy, Signal
 from app.trading.sl_calc import fallback_sl_tp_prices, margin_loss_pct
+from app.trading.slippage import entry_slippage_usdt, exit_slippage_usdt
 from app.trading.stop_engine import check_adverse_bar, check_favorable_tp_bar
 
 logger = get_logger(__name__)
@@ -204,7 +205,6 @@ async def run_backtest(
     margin_usdt = settings.default_margin_usdt
     leverage = settings.leverage
     taker_fee_pct = settings.taker_fee_pct
-    slippage_frac = settings.backtest_slippage_bps / 10_000
 
     trades: list[RawTrade] = []
     skipped: list[RawSkip] = []
@@ -222,7 +222,9 @@ async def run_backtest(
             position.fee_entry_usdt, taker_fee_pct,
             extra_costs_usdt=position.slippage_entry_usdt + position.funding_paid_usdt,
         )
-        slippage_exit = (position.qty * exit_price) * slippage_frac
+        slippage_exit = exit_slippage_usdt(
+            position.qty, exit_price, settings.backtest_slippage_bps
+        )
         final_net = result.pnl_net_usdt - slippage_exit
         trades.append(RawTrade(
             strategy=strategy_name, symbol=symbol, timeframe=timeframe, side=position.side,
@@ -325,7 +327,9 @@ async def run_backtest(
                 liq_price = compute_liquidation_price(
                     side, fill_price, leverage, fill.notional_usdt, margin_tiers_json
                 )
-                slippage_entry = fill.notional_usdt * slippage_frac
+                slippage_entry = entry_slippage_usdt(
+                    fill.notional_usdt, settings.backtest_slippage_bps
+                )
                 position = _Position(
                     side=side, entry_time_ms=open_times[i], entry_price=fill_price,
                     qty=fill.qty, margin_usdt=margin_usdt, notional=fill.notional_usdt,

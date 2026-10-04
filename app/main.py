@@ -18,7 +18,9 @@ from app.core.logging import get_logger, setup_logging
 from app.core.scheduler import Scheduler
 from app.execution.paper_backend import PaperBackend
 from app.market.bitunix_rest import BitunixRestClient
+from app.market.bitunix_ws import BitunixPublicWSClient
 from app.persistence.database import Database
+from app.trading.position_monitor import PositionMonitor
 
 logger = get_logger(__name__)
 
@@ -36,23 +38,48 @@ async def lifespan(app: FastAPI):
         rate_limit_per_sec=settings.bitunix_rate_limit_per_sec,
     )
     paper_backend = PaperBackend(db, rest_client, settings)
-    scheduler = Scheduler(db, rest_client, paper_backend, settings)
+    monitor = PositionMonitor(db, rest_client, paper_backend, settings)
+    ws_client = BitunixPublicWSClient(
+        ws_url=settings.bitunix_ws_public_url, symbols=[], on_message=monitor.handle_ws_message,
+    )
+    scheduler = Scheduler(db, rest_client, paper_backend, settings, ws_client=ws_client)
+
+    # Reconciliacion ANTES de abrir el feed y el generador: el periodo caido se
+    # reproduce con velas 1m antes de que entren ticks nuevos.
+    try:
+        outcomes = await monitor.reconcile_on_startup()
+        logger.info("Reconciliacion al arrancar: %s", outcomes)
+    except Exception:  # noqa: BLE001 - un fallo aqui no debe impedir arrancar
+        logger.critical("Fallo la reconciliacion al arrancar", exc_info=True)
+
+    await monitor.start_feed()
+    await scheduler.sync_ws_subscriptions()
 
     app.state.db = db
     app.state.rest_client = rest_client
     app.state.paper_backend = paper_backend
+    app.state.monitor = monitor
     app.state.scheduler = scheduler
 
-    scheduler_task = asyncio.create_task(scheduler.run_forever())
+    tasks = [
+        asyncio.create_task(ws_client.run_forever()),
+        asyncio.create_task(monitor.run_forever()),
+        asyncio.create_task(scheduler.run_forever()),
+    ]
     try:
         yield
     finally:
         scheduler.stop()
-        scheduler_task.cancel()
-        try:
-            await scheduler_task
-        except asyncio.CancelledError:
-            pass
+        monitor.stop()
+        ws_client.stop()
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        await monitor.shutdown()
         await rest_client.aclose()
         await db.close()
 

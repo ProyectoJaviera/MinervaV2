@@ -40,6 +40,9 @@ def _row_to_trade(row) -> Trade:
         funding_is_approximated=bool(row["funding_is_approximated"]),
         funding_last_applied_ms=row["funding_last_applied_ms"],
         decision_source=row["decision_source"],
+        slippage_entry_usdt=row["slippage_entry_usdt"],
+        slippage_exit_usdt=row["slippage_exit_usdt"],
+        fill_source=row["fill_source"],
     )
 
 
@@ -51,8 +54,8 @@ async def create_trade(db: Database, trade: Trade) -> Trade:
             qty, entry_price, fee_entry_usdt, funding_paid_usdt, opened_at, decision_json,
             sl_price, tp_price, trailing_distance, effective_stop, best_price, liq_price,
             sl_margin_loss_pct, funding_is_approximated, funding_last_applied_ms,
-            decision_source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            decision_source, slippage_entry_usdt
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             trade.symbol,
@@ -78,6 +81,7 @@ async def create_trade(db: Database, trade: Trade) -> Trade:
             int(trade.funding_is_approximated),
             trade.funding_last_applied_ms,
             trade.decision_source,
+            trade.slippage_entry_usdt,
         ),
     )
     trade.id = cursor.lastrowid
@@ -93,17 +97,20 @@ async def close_trade(
     pnl_net_usdt: float,
     close_reason: str,
     closed_at: datetime | None = None,
+    slippage_exit_usdt: float = 0.0,
+    fill_source: str | None = None,
 ) -> None:
     closed_at = closed_at or datetime.now(UTC)
     await db.execute(
         """
         UPDATE trades
         SET status = 'CLOSED', exit_price = ?, fee_exit_usdt = ?, pnl_gross_usdt = ?,
-            pnl_net_usdt = ?, close_reason = ?, closed_at = ?
+            pnl_net_usdt = ?, close_reason = ?, closed_at = ?,
+            slippage_exit_usdt = ?, fill_source = ?
         WHERE id = ?
         """,
         (exit_price, fee_exit_usdt, pnl_gross_usdt, pnl_net_usdt, close_reason,
-         closed_at.isoformat(), trade_id),
+         closed_at.isoformat(), slippage_exit_usdt, fill_source, trade_id),
     )
 
 
@@ -176,3 +183,9 @@ async def committed_margin(db: Database, symbol: str | None = None) -> float:
             "SELECT COALESCE(SUM(margin_usdt), 0) AS total FROM trades WHERE status = 'OPEN'"
         )
     return float(row["total"]) if row else 0.0
+
+
+async def update_liq_price(db: Database, trade_id: int, liq_price: float) -> None:
+    """Completa la liquidacion de posiciones abiertas antes de la subfase 3.4
+    (sin este dato el monitor no podria vigilarlas)."""
+    await db.execute("UPDATE trades SET liq_price = ? WHERE id = ?", (liq_price, trade_id))

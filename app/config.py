@@ -35,7 +35,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # sin aportar seguridad real (nunca controlan dinero, ni siquiera de papel).
 _FRACTION_PCT_FIELDS = (
     "maker_fee_pct", "taker_fee_pct", "max_drawdown_pct", "max_daily_loss_pct",
-    "max_capital_pct_per_asset",
+    "max_capital_pct_per_asset", "tp_gap_tolerance_pct",
 )
 _PERCENT_PCT_FIELDS = ("live_sl_margin_cap_pct",)
 
@@ -123,6 +123,19 @@ class Settings(BaseSettings):
     # Sin LLM (subfase 3.6 aun no existe) la apertura automatica en la cuenta
     # real esta desactivada; las senales se registran igual en `signals`.
     auto_open_without_llm: bool = Field(default=False, alias="AUTO_OPEN_WITHOUT_LLM")
+
+    # --- Monitor de posiciones y feed en vivo (Fase 3, subfase 3.4) ---
+    # Sin latido del WebSocket publico durante estos segundos (3x el ping de
+    # 15s) no se abren entradas nuevas. Nunca bloquea cierres.
+    ws_stale_after_seconds: float = Field(default=45.0, alias="WS_STALE_AFTER_SECONDS")
+    # FRACCION 0-1: un TP solo se rellena al precio observado si el tick lo
+    # supera por mas de esta fraccion (hueco evidente); si no, al nominal.
+    tp_gap_tolerance_pct: float = Field(default=0.002, alias="TP_GAP_TOLERANCE_PCT")
+    # Sin tick de un simbolo con posicion abierta durante estos segundos: alerta y
+    # consulta el precio por REST. Nunca bloquea cierres.
+    tick_stale_seconds: float = Field(default=60.0, alias="TICK_STALE_SECONDS")
+    # Cada cuanto el monitor refresca marcas, funding, equity y estado (segundos).
+    monitor_tick_seconds: float = Field(default=15.0, alias="MONITOR_TICK_SECONDS")
 
     # --- Criterios de paso a dinero real (informativos) ---
     min_paper_trading_days: int = Field(default=30, alias="MIN_PAPER_TRADING_DAYS")

@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import pandas as pd
@@ -73,6 +73,7 @@ from app.persistence.repositories import (
 )
 from app.strategies.base import BaseStrategy, Signal
 from app.strategies.registry import EXPERIMENTAL_STRATEGIES, STRATEGIES, STRATEGY_TIMEFRAMES
+from app.trading.levels import StrategyLevels
 from app.trading.sl_calc import fallback_sl_tp_prices, margin_loss_pct
 
 logger = get_logger(__name__)
@@ -136,6 +137,10 @@ class SignalCandidate:
     candle_close_time: datetime
     contributing_strategies: list[str]
     sl_margin_loss_pct: float
+    # Niveles crudos (sin completar con el respaldo) de cada contribuyente: el
+    # scheduler elige los de la estrategia representante y los completa al precio
+    # real de llenado (ver `app/trading/levels.py`).
+    levels_by_strategy: dict[str, StrategyLevels] = field(default_factory=dict)
 
 
 @dataclass
@@ -145,6 +150,7 @@ class _ActionableSignal:
     candle_close_time: datetime
     strategy: str
     sl_margin_loss_pct: float
+    levels: StrategyLevels
 
 
 def pick_representative_strategy(contributing_strategies: list[str], settings: Settings) -> str:
@@ -170,8 +176,11 @@ def _group_actionable_signals(items: list[_ActionableSignal]) -> list[SignalCand
     for (symbol, side, candle_close_time), group_items in groups.items():
         contributing = sorted({i.strategy for i in group_items})
         worst_sl_pct = max(i.sl_margin_loss_pct for i in group_items)
+        levels = {i.strategy: i.levels for i in group_items}
         candidates.append(
-            SignalCandidate(symbol, side, candle_close_time, contributing, worst_sl_pct)
+            SignalCandidate(
+                symbol, side, candle_close_time, contributing, worst_sl_pct, levels,
+            )
         )
     return candidates
 
@@ -315,11 +324,13 @@ async def _evaluate_one(
     stop_price = take_profit_price = trailing_distance = None
     sl_margin_pct: float | None = None
     status: str | None = None
+    raw_levels = StrategyLevels()
 
     if signal != Signal.HOLD:
         stop_price = strategy.stop_price(df, signal, price_at_eval)
         take_profit_price = strategy.take_profit_price(df, signal, price_at_eval)
         trailing_distance = strategy.trailing_distance(df)
+        raw_levels = StrategyLevels(stop_price, take_profit_price, trailing_distance)
         fallback_sl, fallback_tp = fallback_sl_tp_prices(signal, price_at_eval, settings)
         if stop_price is None:
             stop_price = fallback_sl
@@ -369,7 +380,7 @@ async def _evaluate_one(
 
     return _ActionableSignal(
         symbol=symbol, side=Side(signal.value), candle_close_time=candle_close_time,
-        strategy=strategy_name, sl_margin_loss_pct=sl_margin_pct,
+        strategy=strategy_name, sl_margin_loss_pct=sl_margin_pct, levels=raw_levels,
     )
 
 
