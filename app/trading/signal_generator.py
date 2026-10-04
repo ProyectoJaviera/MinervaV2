@@ -61,6 +61,7 @@ from app.market.ohlcv_history import (
     drop_incomplete_last_bar,
     interval_to_ms,
 )
+from app.market.universe import is_universe_stale
 from app.persistence.database import Database
 from app.persistence.models import Side, SignalDiscardedBySLCap, SignalRecord
 from app.persistence.repositories import (
@@ -396,6 +397,11 @@ async def run_signal_generation_cycle(
     """Un ciclo completo: universo x estrategias x timeframes -> filas en `signals`
     -> filtros de vela y funding obsoletos y tope de SL -> candidatos agrupados.
     Cada (simbolo, timeframe) aisla sus propios errores."""
+    if await is_universe_stale(db, settings):
+        logger.warning("Universo obsoleto o ausente (> %dh): no se generan senales hasta el "
+                       "proximo refresco. Los cierres no se ven afectados.",
+                       settings.universe_staleness_hours)
+        return []
     symbols = await universe_repo.get_included_symbols(db)
     if not symbols:
         logger.debug("Universo vacio -- sin simbolos para generar senales todavia.")

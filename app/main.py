@@ -19,6 +19,8 @@ from app.core.scheduler import Scheduler
 from app.execution.paper_backend import PaperBackend
 from app.market.bitunix_rest import BitunixRestClient
 from app.market.bitunix_ws import BitunixPublicWSClient
+from app.market.coingecko_client import CoinGeckoClient
+from app.market.universe import UniverseRefresher
 from app.persistence.database import Database
 from app.trading.position_monitor import PositionMonitor
 from app.trading.shadow_book import ShadowBook
@@ -47,6 +49,10 @@ async def lifespan(app: FastAPI):
     scheduler = Scheduler(
         db, rest_client, paper_backend, settings, ws_client=ws_client, shadow=shadow_book,
     )
+    coingecko_client = CoinGeckoClient(
+        base_url=settings.coingecko_base_url, api_key=settings.coingecko_api_key,
+    )
+    universe_refresher = UniverseRefresher(coingecko_client, rest_client, db, settings)
 
     # Reconciliacion ANTES de abrir el feed y el generador: el periodo caido se
     # reproduce con velas 1m antes de que entren ticks nuevos.
@@ -69,6 +75,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(ws_client.run_forever()),
         asyncio.create_task(monitor.run_forever()),
         asyncio.create_task(scheduler.run_forever()),
+        asyncio.create_task(universe_refresher.run_forever()),
     ]
     try:
         yield
@@ -76,6 +83,7 @@ async def lifespan(app: FastAPI):
         scheduler.stop()
         monitor.stop()
         ws_client.stop()
+        universe_refresher.stop()
         for task in tasks:
             task.cancel()
         for task in tasks:
@@ -84,6 +92,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 pass
         await monitor.shutdown()
+        await coingecko_client.aclose()
         await rest_client.aclose()
         await db.close()
 

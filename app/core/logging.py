@@ -17,6 +17,9 @@ def setup_logging() -> None:
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     )
+    # httpx registra cada peticion a INFO: con LOG_LEVEL=INFO el log se llena de
+    # llamadas a la API sin valor operativo. Los avisos y errores siguen visibles.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def get_logger(name: str) -> logging.Logger:

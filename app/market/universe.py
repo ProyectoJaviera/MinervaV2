@@ -12,6 +12,7 @@ configurado.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 from app.config import Settings
@@ -20,9 +21,12 @@ from app.market.bitunix_rest import BitunixRestClient
 from app.market.coingecko_client import CoinGeckoApiError, CoinGeckoClient
 from app.persistence.database import Database
 from app.persistence.models import AssetUniverseEntry
-from app.persistence.repositories import universe_repo
+from app.persistence.repositories import system_state_repo, universe_repo
 
 logger = get_logger(__name__)
+
+LAST_REFRESH_ERROR_KEY = "universe_last_refresh_error"
+CHECK_INTERVAL_SECONDS = 3600
 
 
 async def _get_exclusion_map(client: CoinGeckoClient, categories: list[str]) -> dict[str, str]:
@@ -127,6 +131,8 @@ async def refresh_universe(
     except CoinGeckoApiError:
         logger.exception("Refresco de universo fallido; se conserva el ultimo snapshot valido.")
         raise
+    if not any(e.included for e in entries):
+        raise RuntimeError("el snapshot no incluye ningun simbolo; se conserva el anterior")
     await universe_repo.insert_snapshot(db, entries)
     return entries
 
@@ -137,3 +143,71 @@ async def is_universe_stale(db: Database, settings: Settings) -> bool:
         return True
     age_hours = (datetime.now(UTC) - latest).total_seconds() / 3600
     return age_hours > settings.universe_staleness_hours
+
+
+async def refresh_universe_safely(
+    coingecko: CoinGeckoClient,
+    bitunix: BitunixRestClient,
+    db: Database,
+    settings: Settings,
+) -> bool:
+    """Refresco que nunca lanza: si falla por cualquier motivo, conserva el snapshot
+    anterior, registra el error en `system_state` y devuelve False. No bloquea cierres."""
+    try:
+        entries = await refresh_universe(coingecko, bitunix, db, settings)
+    except Exception as exc:  # noqa: BLE001 - el refresco no debe tumbar el proceso
+        message = f"{datetime.now(UTC).isoformat()} {type(exc).__name__}: {exc}"[:500]
+        await system_state_repo.set_state(db, LAST_REFRESH_ERROR_KEY, message)
+        logger.warning("Refresco del universo fallido (%s); se conserva el snapshot anterior.",
+                       type(exc).__name__)
+        return False
+    await system_state_repo.set_state(db, LAST_REFRESH_ERROR_KEY, "")  # vacio = sin error
+    included = sum(1 for e in entries if e.included)
+    logger.info("Universo refrescado: %d simbolos incluidos.", included)
+    return True
+
+
+class UniverseRefresher:
+    """Refresco diario del universo. Revisa cada hora si el ultimo snapshot supera
+    `UNIVERSE_REFRESH_HOURS`. Corre como tarea aparte: un fallo nunca detiene el
+    monitor de posiciones ni los cierres."""
+
+    def __init__(
+        self,
+        coingecko: CoinGeckoClient,
+        bitunix: BitunixRestClient,
+        db: Database,
+        settings: Settings,
+    ) -> None:
+        self.coingecko = coingecko
+        self.bitunix = bitunix
+        self.db = db
+        self.settings = settings
+        self._stop = asyncio.Event()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    async def is_due(self, now: datetime | None = None) -> bool:
+        latest = await universe_repo.get_latest_refreshed_at(self.db)
+        if latest is None:
+            return True
+        now = now or datetime.now(UTC)
+        return (now - latest).total_seconds() / 3600 >= self.settings.universe_refresh_hours
+
+    async def run_once(self) -> str:
+        if not await self.is_due():
+            return "vigente"
+        ok = await refresh_universe_safely(self.coingecko, self.bitunix, self.db, self.settings)
+        return "refrescado" if ok else "fallido"
+
+    async def run_forever(self, check_seconds: float = CHECK_INTERVAL_SECONDS) -> None:
+        while not self._stop.is_set():
+            try:
+                await self.run_once()
+            except Exception:  # noqa: BLE001 - el bucle sobrevive a cualquier fallo
+                logger.exception("Error inesperado en el refresco del universo")
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=check_seconds)
+            except TimeoutError:
+                pass
