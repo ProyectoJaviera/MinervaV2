@@ -587,4 +587,11 @@ una:
   - Regla de decision sobre la IA implementada tal como se fijo: sin IC del 95 % que
     excluya el cero con N efectivo >= 100 por lado, "LA_IA_NO_APORTA_VALOR". Sin
     decisiones del LLM el veredicto es SIN_DATOS.
+- **3.6 -- LLM: DISEÑO entregado, pendiente de aprobacion** (`docs/FASE3_6_LLM.md`).
+  Sin codigo ni llamadas a la API. Pendientes de decision: aprobar el diseño, elegir el
+  modelo (propuesta `claude-sonnet-5-5`, verificado; `claude-sonnet-5` del config sin
+  verificar), autorizar la dependencia del SDK y confirmar precios en la consola.
+- **Observacion abierta**: el universo solo se refresca con `scripts/download_history.py`
+  y el generador no comprueba su antiguedad (`UNIVERSE_STALENESS_HOURS=48`). La copia
+  de la base tiene el universo del 2026-10-01 23:04.
 - 3.6 a 3.8: pendientes.
