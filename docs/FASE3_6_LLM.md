@@ -1,9 +1,11 @@
 # Subfase 3.6 -- Decisión del LLM sobre las señales (DISEÑO v2, APROBADO)
 
-Estado: **diseño v2 aprobado el 2026-10-09, en implementación**. Las ocho decisiones de
-la sección "Decisiones" quedaron cerradas. Lo único que sigue pendiente de ti, y no
-bloquea escribir código, es confirmar los precios de la sección 0 en tu consola antes de
-la primera llamada real (`scripts/llm_smoke.py` o el piloto).
+Estado: **fases (i), (ii) y (iii) implementadas (2026-10-09); nada conectado al bot
+todavía**. Lo único que sigue pendiente de ti, y no bloquea lo ya escrito, es confirmar
+los precios de la sección 0 en tu consola antes de la primera llamada real
+(`scripts/llm_smoke.py` o `scripts/llm_pilot.py`, ambos con `--real --confirm-real`).
+Conectar el LLM al ciclo real del bot (`AUTO_OPEN_WITHOUT_LLM=true`) es una decisión
+aparte, no tomada.
 
 Qué mide la 3.6: si la decisión del LLM sobre cada señal agrupada (APROBAR o RECHAZAR)
 aporta valor frente a no filtrar nada, comparando la esperanza por operación de las
@@ -428,14 +430,26 @@ No se añade `LLM_MODEL`: se reutiliza `ANTHROPIC_SONNET_MODEL`, que ya existe e
 `app/config.py` desde antes de la 3.6, para no duplicar la misma configuración con dos
 nombres. El `.env.example` mantiene la clave vacía.
 
-**Script de prueba de una sola llamada (lo ejecutas tú):** `scripts/llm_smoke.py`.
-Lee la configuración de `.env`, envía una única petición mínima (un par de frases,
-`max_tokens=50`), imprime el modelo, los tokens de entrada y salida, el coste y la
-latencia, y no escribe en la base de trabajo. Así verificas que la clave, el modelo y
-el precio son correctos, con un gasto de céntimos.
+**Implementado en la fase (iii) (2026-10-09).** Tres scripts, todos sobre una COPIA de
+la base (nunca `settings.database_path`, verificado con assert) y en `--dry-run` por
+defecto (cliente falso, sin red ni coste); una llamada real necesita `--real` y
+`--confirm-real` juntos:
 
-**Dependencia nueva:** el SDK oficial de Anthropic, asíncrono. Lo autorizaste; se añade
-a `pyproject.toml` en la implementación.
+- `scripts/llm_smoke.py`: una sola llamada mínima (`--max-calls`, por defecto 1, tope
+  duro 3) sobre un grupo de señal ya guardado. Imprime modelo, `prompt_version`,
+  tokens de entrada y salida reales, coste, latencia, la respuesta cruda y si pasó la
+  validación. Nunca imprime `ANTHROPIC_API_KEY`. Lo ejecutas tú con `--real
+  --confirm-real` para confirmar clave/modelo/precio con un gasto de céntimos.
+- `scripts/llm_pilot.py`: el piloto de la sección anterior (30 a 50 señales, tope
+  duro 50), con las mismas protecciones.
+- `scripts/placebo_check.py`: la calibración de la sección (f), aparte del reporte
+  normal (`ai_value_verdict` nunca llama a `placebo_calibration` por su cuenta).
+
+Los tres reutilizan `LlmDecisionService` (fase i): la reserva de presupuesto corre
+dentro, antes de cualquier llamada real.
+
+**Dependencia nueva:** el SDK oficial de Anthropic, asíncrono (`anthropic>=1.10,<2`,
+ya en `pyproject.toml`). Lo autorizaste.
 
 ---
 
@@ -544,6 +558,17 @@ anterior de este documento corresponde a una **potencia del 50 %** (el umbral ex
 minoritario tarda del orden de 1.250 días con `p = 0,3` o `p = 0,7` (cota inferior, ver
 la tabla de días más abajo, extrapolada).
 
+**Qué veredicto esperar en la práctica, con N = 300 por lado (ajuste de la fase ii).**
+El IC 95 % mide aproximadamente ±7 puntos del margen alrededor de `Δ` (1,96 × 3,67 %,
+de la tabla de arriba). Para que `hi < δ` (NO_APORTA_VALOR) con `δ = 3 %`, hace falta
+`Δ estimado < 3 % − 7 % ≈ −4 %`: la IA tiene que restar valor con claridad, no solo "no
+ayudar". Con σ = 44,9 % del margen, lo esperable en la práctica a N = 300 es
+**INCONCLUSO** (si el efecto real es chico o nulo) o **APORTA_VALOR** (si es claramente
+positivo, con o sin la marca `MAGNITUD_BAJA`); NO_APORTA_VALOR es el veredicto menos
+probable de los tres a este N, no por una falla de la regla, sino porque distinguir
+"sin efecto" de "efecto negativo claro" exige más potencia que distinguir "sin efecto"
+de "efecto positivo claro" cuando δ está tan cerca de cero.
+
 **Limitaciones de la estimación:**
 
 - Trata cada conglomerado como una observación con la σ por operación. Un conglomerado
@@ -578,12 +603,22 @@ aprobación antes de que empiece la medición.
 **Procedimiento:**
 
 1. Se fija `prompt_version` y la plantilla. Se registra su hash.
-2. Se procesan **30 a 50 señales** reales en vivo con `fase = 'PILOTO'`. Coste máximo del
-   piloto: 50 × 0,0054 = **0,27 USD**.
+2. Se procesan **30 a 50 señales** con `fase = 'PILOTO'`. Coste máximo del piloto:
+   50 × 0,0054 = **0,27 USD**.
 3. Se miden: validez del JSON (%), tokens de entrada y salida (media y p95), latencia
    (media y p95), tasa de APROBAR, y coste real.
 4. Los grupos `PILOTO` se excluyen de la medición: el análisis filtra por
    `llm_logs.fase = 'MEDICION'`. Sus etiquetas quedan en la sombra, pero no cuentan.
+
+**Implementado como "por repetición", no en vivo (fase iii-C, `scripts/llm_pilot.py`).**
+El piloto corre en lote sobre grupos de señal que YA estan guardados en una copia de
+la base (`shadow_trades` sin fila en `llm_logs`), no conectado al ciclo real del bot.
+Motivo: conectarlo en vivo necesitaria wirear `app/core/scheduler.py` a la decision
+del LLM -- exactamente lo que `AUTO_OPEN_WITHOUT_LLM=false` todavia impide, y que es
+una decision aparte, no tomada en la 3.6. Corriendo por repeticion se mide lo mismo
+(validez del JSON, tokens, latencia, tasa de aprobacion) sin esa conexion. El propio
+piloto mide el presupuesto de la misma forma que una llamada en vivo (reserva bajo
+lock, seccion e), asi que esa parte si es representativa.
 
 **Banda de aprobación 15 %–85 %:**
 
@@ -665,12 +700,15 @@ sesgada. Por eso el informe reporta:
 
 **Implementación (sección aparte, por fases, cada una con su commit):**
 
-- **(i)** Cliente del LLM como interfaz + cliente falso, `llm_logs`, etiqueta inmutable
-  con disparador, esquema pydantic, presupuesto con reserva, semáforo. Tests sin red.
-- **(ii)** `app/trading/ai_value.py` con los tres veredictos (sobre `r =
-  pnl_net_usdt/margin_usdt`), potencia y placebo. Tests.
-- **(iii)** `scripts/llm_smoke.py` (una sola llamada mínima, la ejecuta Renzo) y el modo
-  `PILOTO`.
+- **(i)** ✅ Cliente del LLM como interfaz + cliente falso, `llm_logs`, etiqueta
+  inmutable con disparador, esquema pydantic, presupuesto con reserva, semáforo,
+  `max_retries=0`. Tests sin red.
+- **(ii)** ✅ `app/trading/ai_value.py` con los tres veredictos (sobre `r =
+  pnl_net_usdt/margin_usdt`), `measurement_keys`, potencia y `placebo_calibration`.
+  Tests.
+- **(iii)** ✅ `app/llm/prompts.py`, `scripts/llm_smoke.py`, `scripts/llm_pilot.py`
+  (la ejecuta Renzo) y `scripts/placebo_check.py`.
 
 `AUTO_OPEN_WITHOUT_LLM` se mantiene en `false`: la 3.6 no activa el uso del LLM real en
-el bot hasta una decisión aparte.
+el bot hasta una decisión aparte. Nada de lo implementado toca
+`app/core/scheduler.py`.

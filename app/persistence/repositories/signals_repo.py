@@ -64,6 +64,23 @@ def _row_to_signal(row) -> SignalRecord:
     )
 
 
+async def get_by_symbol_strategy_candle(
+    db: Database, symbol: str, strategy: str, candle_close_time: datetime
+) -> SignalRecord | None:
+    """Busca la fila de `signals` de esa estrategia para esa vela (subfase 3.6,
+    fase iii): es la fuente de `indicators_json` para el prompt del LLM -- datos
+    ya calculados por `precompute`, no se recalculan aqui. La UNIQUE real es
+    `(symbol, strategy, timeframe, candle_close_time)`; sin `timeframe` (una
+    estrategia como `donchian_breakout_20` corre en mas de uno) se toma la mas
+    reciente -- una simplificacion aceptable para el piloto/smoke, documentada."""
+    row = await db.fetch_one(
+        "SELECT * FROM signals WHERE symbol = ? AND strategy = ? AND candle_close_time = ? "
+        "ORDER BY id DESC LIMIT 1",
+        (symbol, strategy, candle_close_time.isoformat()),
+    )
+    return _row_to_signal(row) if row else None
+
+
 async def get_signals(
     db: Database,
     symbol: str | None = None,

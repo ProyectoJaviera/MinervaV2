@@ -695,6 +695,66 @@ una:
     - `AUTO_OPEN_WITHOUT_LLM` sigue en `false`; nada de la fase (ii) toca
       `app/core/scheduler.py`. No se hicieron llamadas reales a la API.
     - Suite completa: 409 passed, 2 skipped; `ruff check .` limpio.
+  - **Fase (ii) APROBADA el 2026-10-09, con 4 ajustes:**
+    1. **`measurement_keys`** en `ai_value_verdict`: sin el, `shadow_trades` de antes
+       de la 3.6 (o de otra version del prompt) contaban como SIN_LLM para siempre,
+       inflando el tope del 10 % sin remedio. Nuevo
+       `llm_logs_repo.get_measurement_signal_group_keys(db, prompt_sha256=None)`
+       (usa la version mas reciente con `fase='MEDICION'` si no se fija una) --
+       usado en `shadow_report.build_report`. Un fallo (TIMEOUT/ERROR_HTTP/
+       BUDGET_EXCEEDED) SI deja fila en `llm_logs`, asi que su grupo entra en
+       `measurement_keys` y sigue contando como SIN_LLM (correcto: se intento
+       decidir). 7 tests nuevos (`test_ai_value.py`, `test_llm_logs_repo.py` nuevo).
+    2. Typo "adem{as" -> "además" en el docstring.
+    3. `placebo_calibration` confirmado que NUNCA corre dentro de `build_report`
+       (no lo hacia). Comando aparte: `scripts/placebo_check.py --db COPIA
+       [--n-repeats N]`, con el tiempo aproximado documentado en su docstring.
+       Probado en `--n-repeats` por defecto (1000) contra una copia de la base
+       real: termina sin errores (no hay filas de medicion todavia, lo dice y
+       sale).
+    4. Nota nueva en la seccion (j): a N=300/lado el IC mide ±7 puntos del margen,
+       asi que `NO_APORTA_VALOR` solo es alcanzable si la IA resta valor con
+       claridad (`Δ < -4 %` aprox.); lo esperable es `INCONCLUSO` o `APORTA_VALOR`.
+    - Suite completa tras los 4 ajustes: 416 passed, 2 skipped; `ruff check .` limpio.
+  - **Fase (iii) completada (2026-10-09), en dos partes:**
+    - **(A)** `app/llm/prompts.py`: `SYSTEM_PROMPT`/`PROMPT_VERSION`/`PROMPT_SHA256`
+      fijos; exige JSON crudo (prohibe backticks explicitamente); `build_user_message`
+      (JSON ordenado, nulos explicitos); `estimate_input_tokens` (caracteres/3,
+      conservador); `build_features_from_shadow_trade(db, trade)` junta lo YA
+      guardado (`signals.indicators_json` por estrategia contribuyente,
+      `sl_margin_loss_pct`, identidad) y deja en `null` EXPLICITO lo que este
+      proyecto todavia no calcula (funding, volatilidad, correlacion con BTC,
+      posiciones reales abiertas) -- no se inventa nada. Nueva
+      `signals_repo.get_by_symbol_strategy_candle`. 7 tests nuevos
+      (`test_llm_prompts.py`).
+    - **(B)** `scripts/llm_smoke.py`: una sola llamada (`--max-calls`, por defecto 1,
+      tope duro 3) sobre un grupo de señal ya guardado en una COPIA de la base
+      (`--db`, assert de ruta distinta de `settings.database_path`). `--dry-run`
+      por defecto (`FakeLlmClient`, sin red ni coste); real solo con `--real
+      --confirm-real` juntos. Reutiliza `LlmDecisionService` (fase i): la reserva
+      de presupuesto corre dentro, antes de llamar. Imprime modelo, `prompt_version`,
+      tokens reales, coste, latencia, respuesta cruda y si validó -- nunca la API key.
+    - **(C)** `scripts/llm_pilot.py`: igual que (B) pero en lote sobre hasta
+      `--max-calls` grupos (por defecto 30, tope duro 50) sin fila en `llm_logs`,
+      con `fase='PILOTO'`. Reporta validez del JSON, tokens y latencia (media y p95),
+      tasa de APROBAR, coste real total, y si cae en la banda 15 %-85 %. Documentado
+      en `docs/FASE3_6_LLM.md` seccion (k) que es **por repeticion, no en vivo**: no
+      esta conectado a `app/core/scheduler.py` (conectar eso es la decision aparte
+      que activaria `AUTO_OPEN_WITHOUT_LLM`, no tomada).
+    - **Probados ambos en `--dry-run` contra copias de la base real** (regla de
+      CLAUDE.md): `llm_smoke.py` con 1, luego con hasta 3 grupos (salta los que ya
+      tienen fila en `llm_logs`, probado al reusar la misma copia); `llm_pilot.py`
+      con los 3 grupos reales disponibles (avisa que pidio 30 y solo habia 3, no es
+      error) y de nuevo con 0 disponibles (tambien termina limpio). Las validaciones
+      de argumentos (`--max-calls` fuera de rango, `--real` sin `--confirm-real`,
+      `--confirm-real` sin `--real`) se probaron explicitamente. Ninguna llamada
+      real a la API.
+    - `AUTO_OPEN_WITHOUT_LLM` sigue en `false`; nada de la fase (iii) toca
+      `app/core/scheduler.py`.
+    - Suite completa: 423 passed, 2 skipped; `ruff check .` limpio.
+    - **Pendiente operativo de Renzo:** correr `scripts/llm_smoke.py --real
+      --confirm-real` sobre una copia, comparando el coste con su consola de
+      Anthropic, antes de confiar en el calculo de precios.
 - **Valores por defecto alineados con `docs/FASE3_PLAN.md` (previo a implementar 3.6)**:
   `DEFAULT_MARGIN_USDT` pasa de 10 a **5** (seccion 8 del plan; la cartera de Fase 2 se
   arruina a 10 USDT/3 posiciones en 3 de 4 estrategias por reglas) y
