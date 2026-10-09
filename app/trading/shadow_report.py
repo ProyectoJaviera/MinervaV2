@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 from app.persistence.database import Database
 from app.persistence.models import ShadowTrade
-from app.persistence.repositories import shadow_repo
+from app.persistence.repositories import llm_logs_repo, shadow_repo
 from app.trading.ai_value import AiValueVerdict, ai_value_verdict, assign_clusters
 
 
@@ -156,15 +156,18 @@ def _fmt(value: float | None, digits: int = 3) -> str:
 
 
 def _verdict_section(verdict: AiValueVerdict) -> list[str]:
-    ci = "n/d" if verdict.ci_low is None else f"[{verdict.ci_low:.4f}, {verdict.ci_high:.4f}]"
-    diff = "n/d" if verdict.diff is None else f"{verdict.diff:.4f}"
+    ci = "n/d" if verdict.ci_low is None else f"[{verdict.ci_low:.2%}, {verdict.ci_high:.2%}]"
+    diff = "n/d" if verdict.diff is None else f"{verdict.diff:.2%}"
+    sin_llm = "n/d" if verdict.sin_llm_share is None else f"{verdict.sin_llm_share:.1%}"
+    marca = " (MAGNITUD_BAJA)" if verdict.magnitud_baja else ""
     return [
-        "## Criterio de valor de la IA (bootstrap por conglomerados)",
+        "## Criterio de valor de la IA (bootstrap por conglomerados, tres veredictos)",
         "",
         f"- Aprobadas: N bruto {verdict.n_raw_approved}, N efectivo {verdict.n_eff_approved}",
         f"- Rechazadas: N bruto {verdict.n_raw_rejected}, N efectivo {verdict.n_eff_rejected}",
-        f"- Diferencia de esperanza APROBADA - RECHAZADA: {diff} USDT, IC 95 % {ci}",
-        f"- **Veredicto: {verdict.verdict}** ({verdict.reason})",
+        f"- Diferencia de esperanza APROBADA - RECHAZADA (% del margen): {diff}, IC 95 % {ci}",
+        f"- SIN_LLM: {verdict.sin_llm_count} de {verdict.total_groups} grupos ({sin_llm})",
+        f"- **Veredicto: {verdict.verdict}{marca}** ({verdict.reason})",
         "",
     ]
 
@@ -233,5 +236,8 @@ async def build_report(db: Database) -> str:
     trades_closed = await shadow_repo.get_closed(db)
     rows = summarize_by_strategy(trades_open, trades_closed)
     totals = summarize_totals(trades_open, trades_closed)
-    verdict = ai_value_verdict(trades_closed)
+    piloto_keys = await llm_logs_repo.get_piloto_signal_group_keys(db)
+    # El veredicto mira TODOS los grupos (abiertos y cerrados): el SIN_LLM se
+    # cuenta sobre el total del periodo, no solo sobre las cerradas (seccion i/m).
+    verdict = ai_value_verdict(trades_open + trades_closed, piloto_keys=piloto_keys)
     return render_markdown(rows, totals, verdict)

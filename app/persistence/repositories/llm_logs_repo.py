@@ -68,3 +68,11 @@ async def get_by_signal_group_key(db: Database, signal_group_key: str):
     return await db.fetch_one(
         "SELECT * FROM llm_logs WHERE signal_group_key = ?", (signal_group_key,)
     )
+
+
+async def get_piloto_signal_group_keys(db: Database) -> set[str]:
+    """Grupos del piloto (prompt congelado, `fase = 'PILOTO'`), excluidos de la
+    medicion (subfase 3.6, seccion k). `app.trading.ai_value.ai_value_verdict`
+    los filtra con esto antes de calcular el veredicto."""
+    rows = await db.fetch_all("SELECT signal_group_key FROM llm_logs WHERE fase = 'PILOTO'")
+    return {row["signal_group_key"] for row in rows}

@@ -658,6 +658,43 @@ una:
        texto fuera del objeto) -- se agregaron los dos casos explicitos a
        `test_llm_schemas.py` para dejarlo probado, no solo documentado.
     - Suite completa tras los 3 ajustes: 398 passed, 2 skipped; `ruff check .` limpio.
+  - **Fase (ii) completada** (`app/trading/ai_value.py`, reescrito): tres veredictos
+    `APORTA_VALOR`/`NO_APORTA_VALOR`/`INCONCLUSO` con marca `MAGNITUD_BAJA` (`lo > 0`
+    y `hi < δ`); `Δ` ahora sobre `r = pnl_net_usdt / margin_usdt` (fraccion del margen,
+    no USDT: comparable entre margen 5 y 10); `δ = 0.03` y `MIN_EFFECTIVE_N = 300`
+    (antes 100) como parametros de la funcion, igual que ya era `min_effective_n`;
+    tope de SIN_LLM del 10 % evaluado ANTES que el intervalo (si se supera,
+    INCONCLUSO sin mirar el IC); nueva `placebo_calibration` (relabelado por
+    conglomerado, 1.000 repeticiones por defecto, IC 95 % de Wilson de la
+    frecuencia, sin depender de scipy). Se elimina el veredicto `SIN_DATOS` y el
+    antiguo `LA_IA_NO_APORTA_VALOR`: quedan los tres de arriba, con el caso
+    "sin datos en ambos lados" dentro de `INCONCLUSO`.
+    - `app/persistence/repositories/llm_logs_repo.py`:
+      `get_piloto_signal_group_keys(db)` -- el filtro de `llm_logs.fase = 'PILOTO'`
+      lo hace el llamador (pasa `piloto_keys` a `ai_value_verdict`), no la funcion de
+      analisis, que sigue sin tocar la base.
+    - `app/trading/shadow_report.py`: `build_report` ahora pasa TODAS las
+      operaciones sombra (abiertas y cerradas, no solo cerradas) a
+      `ai_value_verdict`, porque el SIN_LLM se cuenta sobre el total de grupos del
+      periodo, no solo sobre los cerrados; y ya excluye el piloto. El markdown
+      muestra el SIN_LLM (N y %) y la marca `MAGNITUD_BAJA`.
+    - `tests/unit/test_ai_value.py` reescrito (24 tests): N efectivo bajo,
+      APORTA_VALOR con y sin `MAGNITUD_BAJA`, NO_APORTA_VALOR (sin diferencia y
+      cuando la IA resta valor), SIN_LLM > 10 % con una señal que de otro modo
+      seria clara, SIN_LLM por debajo del tope, todos APROBADA/todos RECHAZADA,
+      exclusion del piloto, y placebo (frecuencia baja sin efecto real,
+      determinismo). Los tests de placebo usan menos repeticiones y
+      `min_effective_n` mas chico que en produccion para que la suite corra
+      rapido (documentado en el docstring de `placebo_calibration`).
+    - **Smoke de punta a punta** con `scripts/shadow_report.py` sobre una copia de
+      la base real (ruta distinta de `settings.database_path`, verificada con
+      assert): corre sin errores. La base real a esta fecha solo tiene 3 grupos
+      sombra, todos abiertos y SIN_LLM (el LLM no esta conectado todavia), asi que
+      el veredicto es INCONCLUSO por el tope de SIN_LLM al 100 % -- resultado
+      correcto para el estado actual, no un fallo.
+    - `AUTO_OPEN_WITHOUT_LLM` sigue en `false`; nada de la fase (ii) toca
+      `app/core/scheduler.py`. No se hicieron llamadas reales a la API.
+    - Suite completa: 409 passed, 2 skipped; `ruff check .` limpio.
 - **Valores por defecto alineados con `docs/FASE3_PLAN.md` (previo a implementar 3.6)**:
   `DEFAULT_MARGIN_USDT` pasa de 10 a **5** (seccion 8 del plan; la cartera de Fase 2 se
   arruina a 10 USDT/3 posiciones en 3 de 4 estrategias por reglas) y

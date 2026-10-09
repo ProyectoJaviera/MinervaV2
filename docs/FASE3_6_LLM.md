@@ -481,11 +481,16 @@ comparan correctamente en la misma unidad.
 **APORTA_VALOR** con la marca `MAGNITUD_BAJA` en el informe: el efecto es real pero
 pequeño.
 
-**Cambio en la implementación:** `ai_value_verdict` pasa de dos veredictos a tres, opera
-sobre `r = pnl_net_usdt / margin_usdt` en vez de `pnl_net_usdt`, con `δ` configurable
-(`LLM_NO_VALUE_DELTA_PCT=0.03`), `MIN_EFFECTIVE_N` de 100 a 300, y un tope de SIN_LLM
-configurable (`LLM_MAX_SIN_LLM_SHARE=0.10`). Se actualizan `app/trading/ai_value.py` y
-`tests/unit/test_ai_value.py` en la fase (ii) de implementación.
+**Implementado en la fase (ii) (2026-10-09).** `ai_value_verdict` tiene los tres
+veredictos, opera sobre `r = pnl_net_usdt / margin_usdt` en vez de `pnl_net_usdt`, con
+`δ` (`delta=0.03` por defecto), `MIN_EFFECTIVE_N=300` y el tope de SIN_LLM
+(`max_sin_llm_share=0.10`) como parametros de la funcion -- igual que `min_effective_n`
+ya lo era desde la 3.5, no se añadieron a `app/config.py` ni a `.env` (no hay nada hoy
+que los lea de ahi; se agregan si una llamada real a la API llega a necesitarlo). El
+filtro de `llm_logs.fase = 'PILOTO'` lo hace el llamador (`piloto_keys`, resuelto con
+`llm_logs_repo.get_piloto_signal_group_keys`), no `ai_value_verdict` -- la funcion sigue
+sin tocar la base. `app/trading/ai_value.py` tambien agrega `placebo_calibration`
+(seccion f) con el intervalo de Wilson. Nada de esto esta conectado al ciclo del bot.
 
 ---
 
