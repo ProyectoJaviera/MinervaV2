@@ -25,7 +25,7 @@ seccion i).
 El veredicto se calcula una sola vez, con `MIN_EFFECTIVE_N` conglomerados efectivos
 por lado:
 
-- `APORTA_VALOR`: el IC 95 % de `Δ` esta por encima de cero (`lo > 0`). Si adem{as
+- `APORTA_VALOR`: el IC 95 % de `Δ` esta por encima de cero (`lo > 0`). Si además
   queda por debajo de `DELTA_PCT` (`hi < δ`), se marca `magnitud_baja=True`: el
   efecto es real pero chico.
 - `NO_APORTA_VALOR`: el IC 95 % esta por debajo de `δ` (`hi < δ`), sin que se haya
@@ -38,6 +38,16 @@ por lado:
 Solo se usan operaciones CERRADAS para `Δ`: un intervalo abierto no tiene final
 conocido. El SIN_LLM se cuenta sobre TODOS los grupos (abiertos o cerrados), porque
 mide la confiabilidad del propio proceso de decision, no el PnL.
+
+**Grupos de la medicion, no todo `shadow_trades` (ajuste de la fase ii, ver
+docs/FASE3_6_LLM.md seccion k).** Antes de la 3.6, o entre pilotos con un prompt
+distinto, `shadow_trades` acumula filas SIN_LLM que NUNCA pasaron por el LLM --
+incluirlas inflaria el SIN_LLM al 100 % para siempre. `measurement_keys` (los
+`signal_group_key` con fila en `llm_logs` con `fase='MEDICION'` y el
+`prompt_sha256` congelado vigente) descarta esas filas antes de cualquier calculo.
+Un fallo (TIMEOUT/ERROR_HTTP/BUDGET_EXCEEDED) SI deja fila en `llm_logs` -- por
+eso su grupo entra en `measurement_keys` y sigue contando como SIN_LLM, que es lo
+correcto: se intento decidir y no se pudo, no es que nunca se intento.
 """
 
 from __future__ import annotations
@@ -171,11 +181,22 @@ def ai_value_verdict(
     delta: float = DELTA_PCT,
     max_sin_llm_share: float = MAX_SIN_LLM_SHARE,
     piloto_keys: set[str] | None = None,
+    measurement_keys: set[str] | None = None,
 ) -> AiValueVerdict:
     """Regla de tres veredictos fijada en `docs/FASE3_6_LLM.md`, seccion (i).
-    `trades` son TODAS las operaciones sombra del periodo de medicion (abiertas y
-    cerradas); si se pasan `piloto_keys` (de `llm_logs.fase = 'PILOTO'`), esos
-    grupos se excluyen antes de cualquier calculo."""
+    `trades` son operaciones sombra candidatas (abiertas y cerradas).
+
+    - Si se pasa `measurement_keys` (de `llm_logs_repo.
+      get_measurement_signal_group_keys`: `fase='MEDICION'` con el
+      `prompt_sha256` congelado vigente), se descarta cualquier grupo que NO
+      este en ese conjunto -- sombras previas a la 3.6, u otras versiones del
+      prompt, nunca llegaron a pasar por el LLM de esta medicion y no deben
+      contarse como SIN_LLM de ella.
+    - Si se pasa `piloto_keys` (`fase='PILOTO'`), esos grupos se excluyen.
+
+    Ambos filtros son del llamador: esta funcion no toca la base."""
+    if measurement_keys is not None:
+        trades = [t for t in trades if t.signal_group_key in measurement_keys]
     if piloto_keys:
         trades = [t for t in trades if t.signal_group_key not in piloto_keys]
 

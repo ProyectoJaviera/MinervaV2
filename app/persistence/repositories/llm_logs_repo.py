@@ -76,3 +76,29 @@ async def get_piloto_signal_group_keys(db: Database) -> set[str]:
     los filtra con esto antes de calcular el veredicto."""
     rows = await db.fetch_all("SELECT signal_group_key FROM llm_logs WHERE fase = 'PILOTO'")
     return {row["signal_group_key"] for row in rows}
+
+
+async def get_measurement_signal_group_keys(
+    db: Database, prompt_sha256: str | None = None
+) -> set[str]:
+    """Grupos de la medicion (`fase = 'MEDICION'`), para que `ai_value_verdict`
+    (parametro `measurement_keys`) no cuente sombras que nunca pasaron por el
+    LLM de esta medicion (subfase 3.6, ajuste de la fase ii; seccion k).
+
+    Si se omite `prompt_sha256`, se usa el mas reciente que aparece con
+    `fase='MEDICION'` -- asi dos versiones del prompt (congelacion rota y
+    corregida) no se mezclan en el mismo veredicto; la version anterior queda
+    en `llm_logs` como historial, pero fuera de `measurement_keys`."""
+    if prompt_sha256 is None:
+        row = await db.fetch_one(
+            "SELECT prompt_sha256 FROM llm_logs WHERE fase = 'MEDICION' "
+            "ORDER BY created_at DESC LIMIT 1"
+        )
+        if row is None:
+            return set()
+        prompt_sha256 = row["prompt_sha256"]
+    rows = await db.fetch_all(
+        "SELECT signal_group_key FROM llm_logs WHERE fase = 'MEDICION' AND prompt_sha256 = ?",
+        (prompt_sha256,),
+    )
+    return {row["signal_group_key"] for row in rows}

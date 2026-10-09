@@ -237,6 +237,39 @@ def test_piloto_groups_are_excluded_before_any_calculation():
     assert verdict_excluding_piloto.total_groups == verdict_with_piloto.total_groups - 2
 
 
+# --- measurement_keys: sombras sin fila en llm_logs no cuentan ----------------
+
+
+def test_shadows_without_an_llm_logs_row_do_not_count_toward_the_measurement():
+    # Sombras de antes de la 3.6 (o de otra version del prompt): nunca pasaron
+    # por el LLM de esta medicion. Sin `measurement_keys` igual cuentan como
+    # SIN_LLM (comportamiento anterior); con el, se descartan del todo.
+    measured = independent_trades(5, 2.0, -1.0, margin=10.0)
+    pre_llm_shadows = sin_llm_trades(20, start_hour=500_000.0)
+    trades = measured + pre_llm_shadows
+    measurement_keys = {t.signal_group_key for t in measured}
+
+    without_filter = ai_value_verdict(trades, min_effective_n=1)
+    with_filter = ai_value_verdict(trades, min_effective_n=1, measurement_keys=measurement_keys)
+
+    assert without_filter.total_groups == 30 and without_filter.sin_llm_count == 20
+    assert with_filter.total_groups == 10 and with_filter.sin_llm_count == 0
+
+
+def test_a_failed_decision_still_counts_as_sin_llm_within_the_measurement():
+    # TIMEOUT/ERROR_HTTP/BUDGET_EXCEEDED SI dejan fila en llm_logs (status
+    # distinto de OK), asi que su grupo entra en measurement_keys y sigue
+    # contando como SIN_LLM: se intento decidir y no se pudo.
+    measured = independent_trades(5, 2.0, -1.0, margin=10.0)
+    failed_call = sin_llm_trades(1, start_hour=600_000.0)  # su grupo SI tiene fila en llm_logs
+    trades = measured + failed_call
+    measurement_keys = {t.signal_group_key for t in measured} | {failed_call[0].signal_group_key}
+
+    verdict = ai_value_verdict(trades, min_effective_n=1, measurement_keys=measurement_keys)
+
+    assert verdict.total_groups == 11 and verdict.sin_llm_count == 1
+
+
 # --- placebo: el metodo no debe inventar valor bajo una relabelacion al azar --
 
 
