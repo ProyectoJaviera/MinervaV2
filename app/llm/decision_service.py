@@ -133,24 +133,31 @@ class LlmDecisionService:
                     model=model, max_tokens=self._settings.llm_max_tokens,
                     system_prompt=system_prompt, user_message=user_message,
                     shadow_trade_id=shadow_trade_id, decision_delay_s=decision_delay_s,
-                    log=_log,
+                    estimated_input_tokens=estimated_input_tokens, log=_log,
                 )
             finally:
                 await self._budget.release(cost_max)
 
     async def _call_and_label(
         self, *, model, max_tokens, system_prompt, user_message, shadow_trade_id,
-        decision_delay_s, log,
+        decision_delay_s, estimated_input_tokens, log,
     ) -> LlmDecisionResult:
+        # Coste estimado (solo entrada, ver `estimate_cost_usd`) para TIMEOUT/ERROR_HTTP:
+        # un fallo en el cliente no garantiza que la llamada no se facturara del lado de
+        # Anthropic (p.ej. un timeout nuestro con la respuesta ya generada alla). Registrar
+        # 0 subestimaria el gasto real frente al tope diario (ajuste 2 a la fase i).
+        estimated_cost = estimate_cost_usd(estimated_input_tokens, 0, self._settings)
         try:
             raw = await self._get_client().complete(
                 system=system_prompt, user=user_message, model=model, max_tokens=max_tokens,
             )
         except LlmTimeoutError as exc:
-            log_id = await log(status=STATUS_TIMEOUT, error=str(exc)[:500])
+            error = f"{str(exc)[:470]} (coste estimado)"
+            log_id = await log(status=STATUS_TIMEOUT, error=error, cost_usd=estimated_cost)
             return LlmDecisionResult(STATUS_TIMEOUT, SIN_LLM, decision_delay_s, log_id, str(exc))
         except LlmHttpError as exc:
-            log_id = await log(status=STATUS_ERROR_HTTP, error=str(exc)[:500])
+            error = f"{str(exc)[:470]} (coste estimado)"
+            log_id = await log(status=STATUS_ERROR_HTTP, error=error, cost_usd=estimated_cost)
             return LlmDecisionResult(STATUS_ERROR_HTTP, SIN_LLM, decision_delay_s, log_id, str(exc))
 
         real_cost = estimate_cost_usd(raw.input_tokens, raw.output_tokens, self._settings)

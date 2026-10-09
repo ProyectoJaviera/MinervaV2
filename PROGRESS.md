@@ -641,6 +641,23 @@ una:
     modulo; la dependencia se instalo con
     `uv pip install --python .venv/Scripts/python.exe --system-certs "anthropic>=1.10,<2"`.
     Quien reproduzca esto en otra maquina deberia poder usar `uv sync` desde la raiz.
+  - **Fase (i) APROBADA el 2026-10-09, con 3 ajustes:**
+    1. `AnthropicLlmClient` fija `max_retries=0`: con el valor por defecto del SDK
+       (2 reintentos) un timeout de 20 s podia estirarse hasta 60 s, justo el limite
+       de `LLM_REAL_MAX_DELAY_SECONDS`. Test mecanico sin red
+       (`test_llm_anthropic_client.py`) que confirma `client._client.max_retries == 0`.
+    2. TIMEOUT y ERROR_HTTP ya no registran `cost_usd=0`: un fallo de nuestro lado no
+       garantiza que Anthropic no facturara nada del otro lado. Ahora registran el
+       coste estimado solo de entrada (`estimated_input_tokens`), con "(coste
+       estimado)" en `error`. Test de regresion que muestra el efecto practico: sin
+       este ajuste, una segunda llamada que no deberia caber en el presupuesto
+       pasaba de todos modos.
+    3. El prompt exige JSON crudo, sin backticks ni ```json; documentado en la
+       seccion (b). Ya funcionaba sin cambios de codigo (el parser JSON estricto de
+       pydantic rechaza el texto envuelto en backticks igual que cualquier otro
+       texto fuera del objeto) -- se agregaron los dos casos explicitos a
+       `test_llm_schemas.py` para dejarlo probado, no solo documentado.
+    - Suite completa tras los 3 ajustes: 398 passed, 2 skipped; `ruff check .` limpio.
 - **Valores por defecto alineados con `docs/FASE3_PLAN.md` (previo a implementar 3.6)**:
   `DEFAULT_MARGIN_USDT` pasa de 10 a **5** (seccion 8 del plan; la cartera de Fase 2 se
   arruina a 10 USDT/3 posiciones en 3 de 4 estrategias por reglas) y

@@ -114,6 +114,10 @@ async def test_timeout_leaves_sin_llm_and_logs_the_cause(db):
     assert result.status == STATUS_TIMEOUT and result.label == "SIN_LLM"
     reloaded = await shadow_repo.get(db, shadow.id)
     assert reloaded.llm_decision == "SIN_LLM"
+    row = await llm_logs_repo.get_by_signal_group_key(db, shadow.signal_group_key)
+    # 1200 tokens de entrada * 2 USD/MTok = 0.0024 (ajuste 2: coste estimado, no 0).
+    assert row["cost_usd"] == pytest.approx(0.0024)
+    assert "(coste estimado)" in row["error"]
 
 
 @pytest.mark.asyncio
@@ -129,6 +133,39 @@ async def test_http_error_leaves_sin_llm(db):
     )
 
     assert result.status == STATUS_ERROR_HTTP and result.label == "SIN_LLM"
+    row = await llm_logs_repo.get_by_signal_group_key(db, shadow.signal_group_key)
+    assert row["cost_usd"] == pytest.approx(0.0024)
+    assert "(coste estimado)" in row["error"]
+
+
+@pytest.mark.asyncio
+async def test_estimated_cost_of_a_timeout_counts_against_the_next_budget_check(db):
+    """Ajuste 2: si no se registrara un coste estimado en TIMEOUT/ERROR_HTTP, el
+    tope diario subestimaria el gasto y una segunda llamada que no deberia caber
+    pasaria de todos modos."""
+    shadow1 = await _open_shadow(db, key="g1")
+    shadow2 = await _open_shadow(db, key="g2")
+    # Coste de una llamada completa (300 tokens de salida): 0.0054. El timeout solo
+    # deja 0.0024 (entrada). Presupuesto = exactamente una llamada completa.
+    settings = make_settings(LLM_DAILY_BUDGET_USD=0.0054)
+    client = FakeLlmClient([LlmTimeoutError("timeout"), valid_response("APROBAR")])
+    service = LlmDecisionService(db, settings, client_factory=lambda s: client)
+
+    first = await service.decide_group(
+        signal_group_key=shadow1.signal_group_key, shadow_trade_id=shadow1.id,
+        candle_close_time=CANDLE, system_prompt="s", prompt_version="v1",
+        user_message="u", estimated_input_tokens=1200, now=CANDLE,
+    )
+    second = await service.decide_group(
+        signal_group_key=shadow2.signal_group_key, shadow_trade_id=shadow2.id,
+        candle_close_time=CANDLE, system_prompt="s", prompt_version="v1",
+        user_message="u", estimated_input_tokens=1200, now=CANDLE,
+    )
+
+    assert first.status == STATUS_TIMEOUT
+    # 0.0024 (timeout) + 0.0054 (segunda) = 0.0078 > 0.0054: la segunda no entra.
+    assert second.status == STATUS_BUDGET_EXCEEDED
+    assert len(client.calls) == 1  # la segunda nunca llego a llamar al cliente
 
 
 @pytest.mark.asyncio

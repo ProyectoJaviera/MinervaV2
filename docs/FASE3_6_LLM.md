@@ -156,6 +156,13 @@ la API de Anthropic -- ver nota de determinismo abajo):**
 - Una sola llamada por grupo, **sin reintentos**: un reintento retrasa la decisión y
   puede sesgar la comparación. Un fallo deja la etiqueta SIN_LLM (sección d).
 - Tiempo máximo de espera: 20 segundos por llamada (`client.with_options(timeout=20)`).
+- **`max_retries = 0` en el cliente del SDK (ajuste 1 a la fase i, 2026-10-09).** El
+  SDK reintenta por defecto timeouts, 408/409/429 y `>=500` con `max_retries=2`: con
+  `timeout=20s` eso puede estirar una sola llamada "lógica" hasta `20s *
+  (reintentos+1)` = 60 s en el peor caso, justo el límite de `LLM_REAL_MAX_DELAY_
+  SECONDS` (sección l). Como ya se pide "sin reintentos" por diseño, `max_retries=0`
+  hace que eso también valga a nivel de transporte: un fallo deja SIN_LLM dentro de
+  los 20 s, no en silencio hasta 60 s después.
 
 **Plantilla (mensaje de sistema, estático):**
 
@@ -166,7 +173,8 @@ APRUEBA o se RECHAZA. Decides solo con los datos del mensaje; no tienes
 acceso a nada más. No predices precios. Responde SOLO con un objeto JSON
 válido que siga exactamente el esquema indicado, sin texto adicional.
 Esquema: {"decision": "APROBAR" | "RECHAZAR", "confianza": número entre 0 y 1,
-"razonamiento": texto de máximo 300 caracteres}.
+"razonamiento": texto de máximo 300 caracteres}. JSON crudo: sin bloques de
+código, sin ```json ni ``` de ningún tipo, sin texto antes ni después.
 ```
 
 **Mensaje de usuario (dinámico):** un objeto JSON con las features de la sección (a),
@@ -185,7 +193,12 @@ class LlmDecisionOut(BaseModel):
 
 Una respuesta que no pase la validación (JSON malformado, campo extra, valor fuera de
 rango, texto antes o después del JSON) se trata como fallo `INVALID`: etiqueta SIN_LLM.
-La respuesta cruda se guarda igualmente en `llm_logs`.
+La respuesta cruda se guarda igualmente en `llm_logs`. Esto incluye una respuesta
+envuelta en un bloque de código Markdown (` ```json ... ``` ` o ` ``` ... ``` `): el
+prompt lo prohíbe explícitamente, y aunque el modelo lo haga de todos modos, el
+parser JSON de pydantic la rechaza igual que cualquier otro texto fuera del objeto
+-- no hace falta (ni se agrega) un paso que le quite las comillas invertidas antes
+de validar.
 
 La etiqueta sale de `decision` con un mapeo fijo: `APROBAR` → APROBADA,
 `RECHAZAR` → RECHAZADA. La `confianza` se guarda para análisis, pero **no** cambia la
@@ -277,6 +290,14 @@ gasto_hoy (llm_logs del día en REPORT_TIMEZONE)
 
 Al terminar una llamada, su reserva se sustituye por el coste real. Así el tope no se
 supera ni con respuestas largas ni con llamadas simultáneas.
+
+**Coste estimado en TIMEOUT y ERROR_HTTP (ajuste 2 a la fase i, 2026-10-09).** Un
+timeout o un error HTTP de nuestro lado no garantiza que Anthropic no haya generado
+(y facturado) nada: la respuesta pudo completarse del otro lado sin llegar a tiempo.
+Por eso estos dos estados registran en `llm_logs.cost_usd` una estimación
+conservadora -- solo el coste de los tokens de entrada estimados, sin salida -- en vez
+de 0, y el campo `error` termina con "(coste estimado)" para distinguirlo de un coste
+real. Registrar 0 subestimaría `gasto_hoy` frente al tope diario.
 
 **Precios:** en la configuración, con la fuente y la fecha de la sección 0. Se verifican
 antes de cada cambio de modelo.

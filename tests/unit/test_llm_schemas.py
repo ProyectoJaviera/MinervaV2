@@ -32,6 +32,8 @@ def test_decision_maps_to_the_shadow_label():
         '{"decision": "APROBAR", "confianza": 0.8, "razonamiento": "' + ("x" * 301) + '"}',  # >300
         'Aqui esta mi respuesta: {"decision": "APROBAR", "confianza": 0.8, "razonamiento": "ok"}',
         '{"decision": "APROBAR", "confianza": 0.8, "razonamiento": "ok"} y esto no deberia estar',
+        '```json\n{"decision": "APROBAR", "confianza": 0.8, "razonamiento": "ok"}\n```',
+        '```\n{"decision": "APROBAR", "confianza": 0.8, "razonamiento": "ok"}\n```',
     ],
 )
 def test_invalid_payloads_are_rejected(raw):

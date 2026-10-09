@@ -13,6 +13,15 @@ del de la API -- se omite. `thinking.type = "disabled"` tambien devuelve
 (valido solo a efecto "high" o menor). Sin herramientas declaradas en la
 llamada no genera bloques de razonamiento extendido, asi que no consume
 `max_tokens` -- los 300 tokens quedan enteros para la respuesta JSON.
+
+**`max_retries=0` (ajuste 1 a la fase i, 2026-10-09).** El SDK reintenta por
+defecto timeouts, 408/409/429 y >=500 con `max_retries=2`: con
+`timeout=20s` eso puede estirar una sola llamada "logica" hasta
+`20s * (reintentos+1)` = 60 s, justo el limite de retraso maximo para abrir
+en la cuenta real (`LLM_REAL_MAX_DELAY_SECONDS`). Como el diseño ya dice
+"una sola llamada por grupo, sin reintentos" (seccion b), `max_retries=0`
+hace que esa regla tambien valga a nivel de transporte: un fallo deja
+SIN_LLM rapido, dentro de los 20 s, en vez de reintentar en silencio.
 """
 
 from __future__ import annotations
@@ -28,7 +37,9 @@ from app.llm.client import LlmHttpError, LlmRawResponse, LlmTimeoutError
 class AnthropicLlmClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self._client = anthropic.AsyncAnthropic(
+            api_key=settings.anthropic_api_key, max_retries=0
+        )
 
     async def complete(
         self, *, system: str, user: str, model: str, max_tokens: int
