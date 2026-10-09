@@ -133,6 +133,18 @@ async def update_funding(
     )
 
 
+async def set_llm_decision(db: Database, shadow_id: int, label: str) -> bool:
+    """Escribe la etiqueta del LLM una sola vez: `SIN_LLM` -> `APROBADA`/`RECHAZADA`
+    (subfase 3.6). El disparador `llm_decision_inmutable` tambien lo impide a nivel
+    de base; el `WHERE` evita depender solo de el. True si escribio, False si la
+    fila ya tenia una etiqueta (no se toco)."""
+    cursor = await db.execute(
+        "UPDATE shadow_trades SET llm_decision = ? WHERE id = ? AND llm_decision = 'SIN_LLM'",
+        (label, shadow_id),
+    )
+    return cursor.rowcount > 0
+
+
 async def mark_executed(db: Database, shadow_id: int) -> None:
     """La cuenta real abrio esta misma senal: queda marcada, pero la sombra sigue
     siendo la referencia de comparacion (no depende de la ejecucion real)."""

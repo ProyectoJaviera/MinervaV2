@@ -16,6 +16,9 @@ dependencies = [
     "pydantic-settings>=2.4",
     "pandas>=2.2",
     "truststore>=0.9",
+    # SDK oficial de Anthropic (Fase 3.6: decision del LLM). 1.x usa httpx2, no
+    # httpx -- paquete propio, no choca con el httpx de arriba.
+    "anthropic>=1.10,<2",
 ]
 
 [project.optional-dependencies]

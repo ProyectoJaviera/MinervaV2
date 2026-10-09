@@ -233,6 +233,18 @@ class Settings(BaseSettings):
     # verificado.
     anthropic_sonnet_model: str = Field(default="claude-sonnet-5-5", alias="ANTHROPIC_SONNET_MODEL")
     llm_daily_budget_usd: float = Field(default=1.0, alias="LLM_DAILY_BUDGET_USD")
+    # Subfase 3.6 (docs/FASE3_6_LLM.md, secciones b/e/l). max_tokens=300: la
+    # salida es un JSON corto (decision/confianza/razonamiento <=300 caracteres).
+    llm_max_tokens: int = Field(default=300, alias="LLM_MAX_TOKENS")
+    llm_timeout_seconds: float = Field(default=20.0, alias="LLM_TIMEOUT_SECONDS")
+    llm_max_concurrency: int = Field(default=4, alias="LLM_MAX_CONCURRENCY")
+    # La cuenta real no abre si la decision llega mas tarde que esto desde el
+    # cierre de la vela (seccion g); la sombra no depende de este limite.
+    llm_real_max_delay_seconds: float = Field(default=60.0, alias="LLM_REAL_MAX_DELAY_SECONDS")
+    # Precios por millon de tokens, fuente y fecha en docs/FASE3_6_LLM.md seccion 0
+    # (consultado 2026-10-04); se verifican de nuevo antes de cualquier cambio de modelo.
+    llm_price_input_per_mtok: float = Field(default=2.0, alias="LLM_PRICE_INPUT_PER_MTOK")
+    llm_price_output_per_mtok: float = Field(default=10.0, alias="LLM_PRICE_OUTPUT_PER_MTOK")
     # FRACCION 0-1 (score de confluencia, no un porcentaje de precio).
     confluence_score_threshold: float = Field(
         default=0.6, alias="CONFLUENCE_SCORE_THRESHOLD"

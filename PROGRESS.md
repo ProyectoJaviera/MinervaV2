@@ -609,6 +609,38 @@ una:
     etiqueta inmutable + presupuesto + semaforo, sin red; (ii) `ai_value.py` con los
     tres veredictos, potencia y placebo; (iii) `scripts/llm_smoke.py` + modo PILOTO.
     `AUTO_OPEN_WITHOUT_LLM` se mantiene en `false` durante toda la 3.6.
+  - **Correccion al diseño durante la implementacion de (i), verificada con la skill
+    `claude-api` y la documentacion vigente de Anthropic (2026-10-09):** Sonnet 5.5
+    rechaza con `400` un `temperature`/`top_p`/`top_k` distinto del de la API -- el
+    diseño original pedia `temperature = 0.0`, ya invalido. Se usa
+    `thinking={"type": "between_tools"}` con `output_config={"effort": "low"}` (el
+    ajuste de menor razonamiento en este modelo; `{"type": "disabled"}` tambien da
+    `400`); sin herramientas declaradas no genera bloques de razonamiento extendido,
+    asi que los 300 tokens de `max_tokens` quedan enteros para el JSON de salida.
+    `docs/FASE3_6_LLM.md` seccion (b) actualizada.
+  - **Fase (i) completada** (`app/llm/`: `schemas.py`, `client.py` con
+    `FakeLlmClient`/`build_anthropic_client`, `_anthropic_client.py` con el SDK real
+    -- import diferido, nunca se carga en los tests --, `budget.py`,
+    `decision_service.py`). Tabla `llm_logs` y disparador `llm_decision_inmutable`
+    en `app/persistence/database.py`; `shadow_repo.set_llm_decision`. Config nueva:
+    `LLM_MAX_TOKENS=300`, `LLM_TIMEOUT_SECONDS=20`, `LLM_MAX_CONCURRENCY=4`,
+    `LLM_REAL_MAX_DELAY_SECONDS=60`, `LLM_PRICE_INPUT_PER_MTOK=2.0`,
+    `LLM_PRICE_OUTPUT_PER_MTOK=10.0`. Dependencia nueva `anthropic>=1.10,<2` en
+    `pyproject.toml` (SDK 1.x, usa `httpx2`, no choca con el `httpx` del proyecto).
+    `LlmDecisionService` y `real_open_allowed` **no estan conectados a
+    `app/core/scheduler.py`**: nada de esto corre todavia en el ciclo del bot.
+    31 tests nuevos (`test_llm_schemas.py`, `test_llm_budget.py`,
+    `test_llm_decision_service.py`), todos sin red (cliente falso o fabrica que
+    lanza si se invoca); cubren: etiqueta correcta en cada caso, una fila de
+    `llm_logs` por llamada, fallo -> SIN_LLM nunca RECHAZADA, etiqueta inmutable
+    (el disparador bloquea un `UPDATE` directo), presupuesto agotado sin construir
+    ni llamar al cliente real, y concurrencia (10 llamadas simultaneas con
+    presupuesto para 3) sin superar el tope diario. Suite completa: 394 passed,
+    2 skipped; `ruff check .` limpio.
+  - **Nota de instalacion:** el venv del proyecto (`.venv`) no tiene `pip` como
+    modulo; la dependencia se instalo con
+    `uv pip install --python .venv/Scripts/python.exe --system-certs "anthropic>=1.10,<2"`.
+    Quien reproduzca esto en otra maquina deberia poder usar `uv sync` desde la raiz.
 - **Valores por defecto alineados con `docs/FASE3_PLAN.md` (previo a implementar 3.6)**:
   `DEFAULT_MARGIN_USDT` pasa de 10 a **5** (seccion 8 del plan; la cartera de Fase 2 se
   arruina a 10 USDT/3 posiciones en 3 de 4 estrategias por reglas) y

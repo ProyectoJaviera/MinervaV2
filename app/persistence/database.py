@@ -4,9 +4,10 @@ Fase 1 creo `trades`, `system_state`, `ohlcv_cache`, `contract_specs_cache`.
 Fase 2 agrega `asset_universe`, `backtest_trades`, `backtest_skipped_entries`,
 `backtest_runs`, `backtest_verdicts`. Fase 3 subfase 3.2 agrega
 `risk_rejections`; subfase 3.3 agrega `signals` y
-`signals_discarded_by_sl_cap`. El resto del esquema propuesto en
-docs/FASE0.md (llm_logs, news_items, lessons_learned, etc.) se crea en la
-fase que los necesite, para no mantener tablas vacias sin dueno.
+`signals_discarded_by_sl_cap`; subfase 3.5 agrega `shadow_trades`; subfase 3.6
+agrega `llm_logs` y el disparador `llm_decision_inmutable`. El resto del
+esquema propuesto en docs/FASE0.md (news_items, lessons_learned, etc.) se
+crea en la fase que lo necesite, para no mantener tablas vacias sin dueno.
 """
 
 from __future__ import annotations
@@ -325,6 +326,48 @@ CREATE TABLE IF NOT EXISTS shadow_trades (
 );
 
 CREATE INDEX IF NOT EXISTS idx_shadow_trades_status ON shadow_trades (status, symbol);
+
+-- Decisiones del LLM sobre cada senal agrupada (subfase 3.6, docs/FASE3_6_LLM.md
+-- seccion c). Una fila por llamada, exitosa o no. `signal_group_key` es UNICA: una
+-- sola llamada por grupo, sin reintentos. `fase` separa el piloto (excluido del
+-- analisis) de la medicion.
+CREATE TABLE IF NOT EXISTS llm_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    signal_group_key TEXT NOT NULL UNIQUE,
+    shadow_trade_id INTEGER,
+    fase TEXT NOT NULL CHECK (fase IN ('PILOTO', 'MEDICION')),
+    candle_close_time TEXT NOT NULL,
+    decision_delay_s REAL NOT NULL,
+    hour_utc INTEGER NOT NULL,
+    atr_pct REAL,
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    prompt_sha256 TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    response_raw TEXT,
+    status TEXT NOT NULL
+        CHECK (status IN ('OK', 'TIMEOUT', 'ERROR_HTTP', 'INVALID', 'BUDGET_EXCEEDED')),
+    error TEXT,
+    decision TEXT CHECK (decision IN ('APROBAR', 'RECHAZAR')),
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    cost_usd REAL NOT NULL DEFAULT 0,
+    latency_ms INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_logs_created_at ON llm_logs (created_at);
+
+-- Etiqueta inmutable (docs/FASE3_6_LLM.md seccion d): una vez decidida
+-- (SIN_LLM -> APROBADA/RECHAZADA), no se puede volver a cambiar. El codigo ya
+-- filtra con `WHERE llm_decision = 'SIN_LLM'` al actualizar; este disparador lo
+-- garantiza tambien a nivel de base.
+CREATE TRIGGER IF NOT EXISTS llm_decision_inmutable
+BEFORE UPDATE OF llm_decision ON shadow_trades
+WHEN OLD.llm_decision <> 'SIN_LLM' AND NEW.llm_decision <> OLD.llm_decision
+BEGIN
+    SELECT RAISE(ABORT, 'llm_decision es inmutable una vez decidida');
+END;
 
 CREATE TABLE IF NOT EXISTS backtest_verdicts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
