@@ -10,7 +10,7 @@ DECISIONES YA TOMADAS
 - LLM: Claude (API de Anthropic, SDK asíncrono, salidas JSON validadas con esquema). Propón qué modelo usar para cada tarea (p. ej. uno económico para clasificar noticias y uno más capaz para decisiones) y estima el costo mensual.
 - Ejecución: PC local (Windows/Linux/macOS), Docker Compose.
 - Paper trading mínimo: 30 días corridos, y los que hagan falta hasta cumplir los criterios de rentabilidad definidos abajo.
-- Tamaño de posición simulada: 10 USDT de margen o más, configurable. Apalancamiento 10x, margen aislado.
+- Tamaño de posición simulada: 10 USDT de margen o más, configurable. Apalancamiento 10x, margen aislado. (Bajado a 5 USDT por defecto en la Fase 3, `docs/FASE3_PLAN.md` seccion 8; sigue siendo configurable.)
 
 STACK
 - Backend: Python 3.11+, asyncio, FastAPI, WebSockets, SQLite (aiosqlite) o PostgreSQL si lo justificas.

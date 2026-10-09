@@ -68,7 +68,13 @@ class Settings(BaseSettings):
 
     # --- Capital y tamano de posicion ---
     initial_capital_usdt: float = Field(default=100.0, alias="INITIAL_CAPITAL_USDT")
-    default_margin_usdt: float = Field(default=10.0, alias="DEFAULT_MARGIN_USDT")
+    # 5 USDT (bajado de 10): `docs/FASE3_PLAN.md`, seccion 8 -- la simulacion de
+    # cartera de Fase 2 arruina la cuenta a 10 USDT/3 posiciones en 3 de 4
+    # estrategias por reglas, y el filtro del LLM todavia no tiene evidencia
+    # propia. Los resultados ya documentados de la Fase 2 se corrieron con 10 y
+    # no se tocan; una recorrida futura del backtest sin fijar esta variable
+    # usara 5, no 10.
+    default_margin_usdt: float = Field(default=5.0, alias="DEFAULT_MARGIN_USDT")
     leverage: int = Field(default=10, alias="LEVERAGE")
     margin_mode: str = Field(default="ISOLATED", alias="MARGIN_MODE")
 
@@ -219,10 +225,13 @@ class Settings(BaseSettings):
         default="2026-10-01", alias="BACKTEST_OFFICIAL_END_DATE"
     )
 
-    # --- Claude / Anthropic (usado desde Fase 4) ---
+    # --- Claude / Anthropic (usado desde Fase 3.6) ---
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     anthropic_haiku_model: str = Field(default="claude-haiku-4-5", alias="ANTHROPIC_HAIKU_MODEL")
-    anthropic_sonnet_model: str = Field(default="claude-sonnet-5", alias="ANTHROPIC_SONNET_MODEL")
+    # claude-sonnet-5-5: ID verificado en la tabla oficial de modelos a
+    # 2026-10-04 (`docs/FASE3_6_LLM.md`, seccion 0). `claude-sonnet-5` no esta
+    # verificado.
+    anthropic_sonnet_model: str = Field(default="claude-sonnet-5-5", alias="ANTHROPIC_SONNET_MODEL")
     llm_daily_budget_usd: float = Field(default=1.0, alias="LLM_DAILY_BUDGET_USD")
     # FRACCION 0-1 (score de confluencia, no un porcentaje de precio).
     confluence_score_threshold: float = Field(

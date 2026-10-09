@@ -601,6 +601,17 @@ una:
   - Pendientes de decision: δ, punto de 300, caso lo > 0 y hi < δ, tope de SIN_LLM del
     10 %, precios en la consola antes de la primera llamada. El SDK y el modelo
     `claude-sonnet-5-5` ya estan autorizados.
+- **Valores por defecto alineados con `docs/FASE3_PLAN.md` (previo a implementar 3.6)**:
+  `DEFAULT_MARGIN_USDT` pasa de 10 a **5** (seccion 8 del plan; la cartera de Fase 2 se
+  arruina a 10 USDT/3 posiciones en 3 de 4 estrategias por reglas) y
+  `ANTHROPIC_SONNET_MODEL` pasa de `claude-sonnet-5` (sin verificar) a
+  **`claude-sonnet-5-5`** (verificado, `docs/FASE3_6_LLM.md` seccion 0), en
+  `app/config.py` y `.env.example`. Ninguna prueba dependia del valor implicito de
+  margen (las 9 que usan `DEFAULT_MARGIN_USDT` lo fijan explicitamente); suite completa
+  sigue en 363 passed, 2 skipped. Los resultados ya documentados de la Fase 2
+  (`docs/FASE2_*.md`) se corrieron con margen 10 y no se tocan; una recorrida futura del
+  backtest sin fijar `DEFAULT_MARGIN_USDT=10` explicitamente usara 5. Nota añadida en
+  `docs/SPEC.md` junto al valor original.
 - **Universo (arranque del bot, previo a la 3.6)**: commit `c5b432b`.
   - Comprobacion de antiguedad: `is_universe_stale` con `UNIVERSE_STALENESS_HOURS=48`.
     El generador de señales no consulta la red si el universo esta obsoleto.
