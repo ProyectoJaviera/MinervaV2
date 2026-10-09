@@ -587,20 +587,28 @@ una:
   - Regla de decision sobre la IA implementada tal como se fijo: sin IC del 95 % que
     excluya el cero con N efectivo >= 100 por lado, "LA_IA_NO_APORTA_VALOR". Sin
     decisiones del LLM el veredicto es SIN_DATOS.
-- **3.6 -- LLM: DISEÑO v2 con los cambios aprobados, sin implementar**
-  (`docs/FASE3_6_LLM.md`). Cambios: regla de tres veredictos (APORTA_VALOR,
-  NO_APORTA_VALOR con δ = +0,3 USDT propuesto, INCONCLUSO) con punto de analisis fijo
-  de 300 conglomerados efectivos por lado; seccion de potencia (σ = 4,49 USDT por
-  operacion OOS, MDE 1,03 USDT a N = 300); max_tokens 300 (coste maximo 0,0054 USD por
-  llamada con Sonnet 5.5); contexto solo con posiciones reales; piloto de 30 a 50
-  señales con prompt congelado y banda de aprobacion 15–85 %; semaforo 4, 20 s por
-  llamada y 60 s de retraso maximo para abrir en cuenta real; reporte de SIN_LLM por
-  causa, hora y volatilidad; placebo con IC de Wilson.
+- **3.6 -- LLM: DISEÑO v2 APROBADO el 2026-10-09, en implementacion por fases**
+  (`docs/FASE3_6_LLM.md`). Decisiones cerradas: regla de tres veredictos sobre
+  `r = pnl_net_usdt / margin_usdt` (APORTA_VALOR si `lo > 0`; NO_APORTA_VALOR si
+  `hi < δ`; INCONCLUSO en el resto o si SIN_LLM > 10 % de la muestra); **δ = 3 % del
+  margen por operacion** (no USDT fijos, para que valga con margen 5 o 10); punto de
+  analisis unico en 300 conglomerados efectivos por lado; caso `lo > 0` y `hi < δ` ->
+  APORTA_VALOR con marca `MAGNITUD_BAJA`; potencia (σ = 44,9 % del margen medido en el
+  backtest OOS con margen 10; MDE ≈ 10 % del margen a N=300 con potencia 80 %; un
+  efecto de 3 % necesita del orden de 3.500 conglomerados por lado a potencia 80 %, o
+  ~1.700 a potencia 50 %); max_tokens 300 (coste maximo 0,0054 USD por llamada con
+  Sonnet 5.5); contexto solo con posiciones reales; piloto de 30 a 50 señales con
+  prompt congelado y banda de aprobacion 15-85 %; semaforo 4, 20 s por llamada y 60 s
+  de retraso maximo para abrir en cuenta real; reporte de SIN_LLM por causa, hora y
+  volatilidad; placebo con IC de Wilson. SDK y modelo `claude-sonnet-5-5` autorizados.
   - Correccion de diseño: la sombra se abre al cierre de la vela con SIN_LLM y la
     decision escribe la etiqueta una sola vez (las llamadas son asincronas).
-  - Pendientes de decision: δ, punto de 300, caso lo > 0 y hi < δ, tope de SIN_LLM del
-    10 %, precios en la consola antes de la primera llamada. El SDK y el modelo
-    `claude-sonnet-5-5` ya estan autorizados.
+  - Unico pendiente operativo (no bloquea el codigo): confirmar los precios de la
+    seccion 0 en la consola antes de la primera llamada real.
+  - Implementacion en 3 fases, cada una con su commit: (i) cliente LLM + `llm_logs` +
+    etiqueta inmutable + presupuesto + semaforo, sin red; (ii) `ai_value.py` con los
+    tres veredictos, potencia y placebo; (iii) `scripts/llm_smoke.py` + modo PILOTO.
+    `AUTO_OPEN_WITHOUT_LLM` se mantiene en `false` durante toda la 3.6.
 - **Valores por defecto alineados con `docs/FASE3_PLAN.md` (previo a implementar 3.6)**:
   `DEFAULT_MARGIN_USDT` pasa de 10 a **5** (seccion 8 del plan; la cartera de Fase 2 se
   arruina a 10 USDT/3 posiciones en 3 de 4 estrategias por reglas) y
