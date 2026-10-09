@@ -136,14 +136,26 @@ las velas y el instante de decisión. Tres tests:
 junto con un hash SHA-256 de la plantilla. Cualquier cambio de texto cambia la versión
 (sección k).
 
-**Parámetros de la llamada:**
+**Parámetros de la llamada (corregido el 2026-10-09 contra la documentación vigente de
+la API de Anthropic -- ver nota de determinismo abajo):**
 
-- `temperature = 0.0` (la más baja permitida), para que la misma entrada tienda a la
-  misma decisión.
+- **Sin `temperature`.** En Sonnet 5.5 (y en el resto de la generación 5.x) un valor de
+  `temperature`/`top_p`/`top_k` distinto del de la API devuelve `400`; la versión
+  anterior de este documento pedía `temperature = 0.0`, que ya no es válido. Se omite el
+  parámetro.
+- **`thinking = {"type": "between_tools"}`, `output_config = {"effort": "low"}`.** Es el
+  ajuste de menor razonamiento disponible en Sonnet 5.5 (`{"type": "disabled"}` devuelve
+  `400` en este modelo). Sin herramientas declaradas en la llamada, no genera bloques de
+  razonamiento extendido que consuman `max_tokens`, así que los 300 tokens quedan
+  enteros para la respuesta JSON. Requiere efecto `high` o menor; `low` es válido.
+- **Nota de determinismo.** Sin control de `temperature`, la misma entrada ya no
+  garantiza la misma decisión con tanta fuerza como en el diseño original. Es una
+  limitación real de la API vigente, no una eleccion de diseño; `confianza` y
+  `razonamiento` siguen dando una señal de que tan ajustada fue la decision.
 - `max_tokens = 300` (antes 150). Acota la salida y el coste máximo por llamada.
 - Una sola llamada por grupo, **sin reintentos**: un reintento retrasa la decisión y
   puede sesgar la comparación. Un fallo deja la etiqueta SIN_LLM (sección d).
-- Tiempo máximo de espera: 20 segundos por llamada.
+- Tiempo máximo de espera: 20 segundos por llamada (`client.with_options(timeout=20)`).
 
 **Plantilla (mensaje de sistema, estático):**
 
