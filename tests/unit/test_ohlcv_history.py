@@ -6,6 +6,13 @@ reescritura incremental/reanudable de la tarea 2 (descarga SOLO cola/
 cabeza faltante, resiste una interrupcion a mitad de pagina, reintenta
 paginas vacias antes de aceptar fin de historial) mas la separacion
 descarga/lectura de la tarea 3 (`get_cached_or_raise` nunca toca la red).
+
+Subfase 3.6 (iv), incidente de estabilidad (2026-10-10): `find_gaps`/
+`fill_gaps` y la verificacion-reparacion de `download_missing`, con un
+cliente falso que simula el hallazgo real contra la API de Bitunix (una
+respuesta "ancha" -- `limit` alto, sin `start_time`, el patron real de
+`_download_range` -- puede omitir una vela que SI esta presente en una
+respuesta "estrecha" de esa misma vela).
 """
 
 from __future__ import annotations
@@ -16,6 +23,8 @@ from app.market.ohlcv_history import (
     MissingHistoricalDataError,
     download_missing,
     drop_incomplete_last_bar,
+    fill_gaps,
+    find_gaps,
     get_cached_or_raise,
     interval_to_ms,
 )
@@ -356,3 +365,172 @@ def test_drop_incomplete_last_bar_keeps_all_when_closed():
     ]
     result = drop_incomplete_last_bar(bars, "4h", now_ms)
     assert len(result) == 3
+
+
+# --- find_gaps / fill_gaps (incidente de estabilidad, 2026-10-10) -------------
+
+
+def test_find_gaps_detects_a_single_missing_bar():
+    step = interval_to_ms("1m")
+    times = [BASE_MS + i * step for i in range(10) if i != 4]
+    assert find_gaps(times, step) == [BASE_MS + 4 * step]
+
+
+def test_find_gaps_is_empty_for_a_dense_series():
+    step = interval_to_ms("1m")
+    times = [BASE_MS + i * step for i in range(10)]
+    assert find_gaps(times, step) == []
+
+
+def test_find_gaps_checks_the_explicit_bounds_not_just_the_data_present():
+    # Sin huecos "internos", pero faltan el primer y el ultimo minuto pedidos.
+    step = interval_to_ms("1m")
+    times = [BASE_MS + i * step for i in range(1, 9)]
+    gaps = find_gaps(times, step, start=BASE_MS, end=BASE_MS + 9 * step)
+    assert gaps == [BASE_MS, BASE_MS + 9 * step]
+
+
+def test_find_gaps_is_empty_without_times_or_bounds():
+    assert find_gaps([], interval_to_ms("1m")) == []
+
+
+class FakeRestClientForGapFill:
+    """Cliente falso minimo para `fill_gaps`: devuelve lo que haya en
+    `available` dentro de `open_time < end_time` (semantica real verificada,
+    ver el docstring del modulo) y, si se pasa, `open_time >= start_time`."""
+
+    def __init__(self, available: dict[int, dict]) -> None:
+        self.available = available
+        self.calls: list[dict] = []
+
+    async def get_kline(
+        self, symbol, interval, start_time=None, end_time=None, limit=100,
+        price_type="LAST_PRICE",
+    ):
+        self.calls.append({"start_time": start_time, "end_time": end_time, "limit": limit})
+        times = sorted(
+            t for t in self.available
+            if (start_time is None or t >= start_time) and t < end_time
+        )
+        return [self.available[t] for t in times[-limit:]]
+
+
+def _raw(t: int, price_type: str = "LAST_PRICE") -> dict:
+    return {
+        "open": "1", "high": "1", "low": "1", "close": "1", "time": t,
+        "baseVol": "1", "quoteVol": "1", "type": price_type,
+    }
+
+
+@pytest.mark.asyncio
+async def test_fill_gaps_recovers_an_isolated_gap(db):
+    step = interval_to_ms("1m")
+    gap = BASE_MS + 5 * step
+    available = {BASE_MS + i * step: _raw(BASE_MS + i * step) for i in range(10)}
+    client = FakeRestClientForGapFill(available)
+
+    recovered = await fill_gaps(client, db, "BTCUSDT", "1m", "LAST_PRICE", [gap], step)
+
+    assert recovered == [gap]
+    assert len(client.calls) == 1  # una sola llamada estrecha
+    bars = await ohlcv_repo.get_bars(db, "BTCUSDT", "1m", "LAST_PRICE", gap, gap)
+    assert len(bars) == 1
+
+
+@pytest.mark.asyncio
+async def test_fill_gaps_groups_a_contiguous_run_into_one_call(db):
+    step = interval_to_ms("1m")
+    gaps = [BASE_MS + 5 * step, BASE_MS + 6 * step, BASE_MS + 7 * step]
+    available = {BASE_MS + i * step: _raw(BASE_MS + i * step) for i in range(10)}
+    client = FakeRestClientForGapFill(available)
+
+    recovered = await fill_gaps(client, db, "BTCUSDT", "1m", "LAST_PRICE", gaps, step)
+
+    assert sorted(recovered) == gaps
+    assert len(client.calls) == 1  # las 3 velas contiguas, en una sola llamada
+
+
+@pytest.mark.asyncio
+async def test_fill_gaps_reports_what_stays_missing(db):
+    step = interval_to_ms("1m")
+    gap = BASE_MS + 5 * step
+    client = FakeRestClientForGapFill({})  # esa vela no existe ni con pedido estrecho
+
+    recovered = await fill_gaps(client, db, "BTCUSDT", "1m", "LAST_PRICE", [gap], step)
+
+    assert recovered == []
+
+
+@pytest.mark.asyncio
+async def test_fill_gaps_is_a_noop_without_any_gap(db):
+    client = FakeRestClientForGapFill({})
+    recovered = await fill_gaps(client, db, "BTCUSDT", "1m", "LAST_PRICE", [], 60_000)
+    assert recovered == []
+    assert client.calls == []
+
+
+class FlakyRestClient:
+    """Simula el hallazgo real (2026-10-10, ver el docstring del modulo):
+    una respuesta ANCHA (`limit` alto, sin `start_time` -- el patron real de
+    `_download_range`) omite la vela en `flaky_at`; una respuesta ESTRECHA
+    (limit bajo, como usa `fill_gaps`) SI la devuelve. El umbral de `limit`
+    que separa "ancho" de "estrecho" aqui es un MODELO para el test: no se
+    pudo determinar la regla exacta del lado de Bitunix."""
+
+    WIDE_LIMIT_THRESHOLD = 50
+
+    def __init__(self, bars: list[dict], flaky_at: int) -> None:
+        self.bars = bars
+        self.flaky_at = flaky_at
+        self.calls = 0
+
+    async def get_kline(
+        self, symbol, interval, start_time=None, end_time=None, limit=100,
+        price_type="LAST_PRICE",
+    ):
+        self.calls += 1
+        filtered = sorted((b for b in self.bars if b["time"] < end_time), key=lambda b: b["time"])
+        page = filtered[-limit:]
+        is_wide = start_time is None and limit > self.WIDE_LIMIT_THRESHOLD
+        if is_wide:
+            page = [b for b in page if b["time"] != self.flaky_at]
+        return page
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interval", ["1m", "1h", "4h", "1d"])
+async def test_download_missing_self_heals_the_bitunix_wide_query_gap(db, interval):
+    step = interval_to_ms(interval)
+    n = 20
+    bars = [_raw(BASE_MS + i * step) for i in range(n)]
+    flaky_at = BASE_MS + 8 * step  # en medio de la serie, lejos de los bordes
+    client = FlakyRestClient(bars, flaky_at)
+    last_bar = BASE_MS + (n - 1) * step
+    end_time = last_bar + step  # end_time es EXCLUSIVO (open_time < end_time)
+
+    await download_missing(client, db, "BTCUSDT", interval, BASE_MS, end_time, "LAST_PRICE")
+
+    cached = await ohlcv_repo.get_bars(db, "BTCUSDT", interval, "LAST_PRICE", BASE_MS, end_time)
+    times = sorted(b.open_time for b in cached)
+    assert flaky_at in times
+    assert find_gaps(times, step, BASE_MS, last_bar) == []  # 0 huecos: se autoreparo
+
+
+@pytest.mark.asyncio
+async def test_download_missing_does_not_raise_when_a_gap_cannot_be_repaired(db):
+    """Si la vela nunca existe (ni con pedido estrecho -- un hueco real, no
+    el hallazgo de Bitunix), `download_missing` no debe lanzar: deja el
+    hueco, lo registra, y el resto de la serie sigue siendo usable."""
+    step = interval_to_ms("1m")
+    n = 20
+    flaky_at = BASE_MS + 8 * step
+    bars = [b for b in (_raw(BASE_MS + i * step) for i in range(n)) if b["time"] != flaky_at]
+    client = FlakyRestClient(bars, flaky_at)
+    end = BASE_MS + n * step  # end_time es EXCLUSIVO: un paso mas alla de la ultima vela
+
+    await download_missing(client, db, "BTCUSDT", "1m", BASE_MS, end, "LAST_PRICE")
+
+    cached = await ohlcv_repo.get_bars(db, "BTCUSDT", "1m", "LAST_PRICE", BASE_MS, end)
+    times = {b.open_time for b in cached}
+    assert flaky_at not in times  # sigue faltando, pero no exploto
+    assert len(times) == n - 1  # el resto de la serie si esta completo

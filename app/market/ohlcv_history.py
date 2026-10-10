@@ -9,6 +9,27 @@ Formato de cada vela devuelto por `GET /market/kline` (verificado):
 `{"open": "60000", "high": "60001", "close": "60000", "low": "59989.2",
 "time": 111111, "quoteVol": "1", "baseVol": "60000", "type": "LAST_PRICE"}`.
 
+**Semantica de `endTime`, verificada empiricamente el 2026-10-10** contra la
+API real (publica, sin credenciales): es **estrictamente EXCLUSIVA sobre
+`open_time`** (`open_time < endTime`), no sobre el cierre de la vela ni
+inclusiva. Se probo con `endTime` alineado a una vela, a mitad de vela, y 1 ms
+antes de que una vela cerrara; los tres casos son consistentes solo con esa
+regla (ver `docs/FASE2_INTEGRIDAD_VELAS.md`). Por eso `cursor = oldest_time -
+1` en `_download_range` (un paso hacia atras de 1 ms, no de una vela
+completa) YA es correcto: excluye exactamente la vela ya guardada e incluye
+la anterior.
+
+**Pero una paginacion matematicamente correcta no alcanza.** Se encontro (y
+se reprodujo mas de una vez, en vivo) que Bitunix a veces omite UNA vela real
+en una respuesta con `limit=200` sin `startTime` (el patron exacto de
+`_download_range`) que SI esta presente si se pide esa misma vela con una
+ventana chica (`limit` bajo). No se identifico una regla determinista para
+cuando pasa, ni hay documentacion oficial de Bitunix sobre esto que se haya
+podido consultar -- asi que en vez de confiar en la formula de paginacion
+sola, `download_missing` verifica la serie resultante con `find_gaps` y
+repara lo que falte con `fill_gaps` (pedidos puntuales y estrechos, que en
+todas las pruebas si devolvieron la vela real).
+
 **Tarea 2/3 (correccion post-Fase-2)**: la version anterior de
 `get_or_fetch` mezclaba descarga de red y lectura de cache en una sola
 funcion, y su chequeo de "ya cubierto" era todo-o-nada: si el rango pedido
@@ -18,9 +39,11 @@ cada reintento. Se separa en dos funciones con responsabilidades distintas:
 
 - `download_missing`: descarga por red SOLO la cola reciente (mas nuevo
   que lo cacheado) y la cabeza vieja (mas viejo que lo cacheado) que
-  realmente falten. Cada pagina se guarda de inmediato -> interrumpir esta
-  funcion a mitad de camino no pierde progreso, la siguiente llamada
-  retoma desde donde quedo. Usada SOLO por `scripts/download_history.py`.
+  realmente falten, y verifica/repara huecos al final. Cada pagina se
+  guarda de inmediato -> interrumpir esta funcion a mitad de camino no
+  pierde progreso, la siguiente llamada retoma desde donde quedo. La usan
+  `scripts/download_history.py` y, para velas de 1 minuto, la
+  reconciliacion al reiniciar (`app/trading/position_monitor.py`).
 - `get_cached_or_raise`: lectura PURA de `ohlcv_cache`, sin red. Usada por
   el motor de backtest (`app/backtesting/engine.py`), que ya no debe tocar
   la red (ver docs/FASE2_BLOQUEO_RED.md) -- si el rango pedido no esta
@@ -179,6 +202,99 @@ async def _download_range(
         cursor = oldest_time - 1
 
 
+GAP_FILL_MARGIN_BARS = 3
+GAP_FILL_LIMIT = 20
+
+
+def find_gaps(
+    open_times: list[int], step_ms: int, start: int | None = None, end: int | None = None
+) -> list[int]:
+    """`open_time` que faltan en una serie cacheada, dado el paso `step_ms`.
+    Por defecto revisa entre el minimo y el maximo de `open_times`; si se
+    pasan `start`/`end` (alineados a la grilla) revisa ESE rango en vez del
+    que resulte de los datos -- para detectar un hueco justo en el borde de
+    lo pedido, no solo entre lo que ya este cacheado."""
+    times = set(open_times)
+    lo = start if start is not None else (min(times) if times else None)
+    hi = end if end is not None else (max(times) if times else None)
+    if lo is None or hi is None or lo > hi:
+        return []
+    return [t for t in range(lo, hi + 1, step_ms) if t not in times]
+
+
+async def fill_gaps(
+    client: BitunixRestClient,
+    db: Database,
+    symbol: str,
+    interval: str,
+    price_type: str,
+    gap_times: list[int],
+    step_ms: int,
+) -> list[int]:
+    """Repara huecos puntuales con pedidos ESTRECHOS (ventana chica, `limit`
+    bajo: ver la nota de modulo sobre la vela que Bitunix a veces omite en
+    una respuesta de `limit=200`). Agrupa huecos contiguos para no gastar una
+    llamada por minuto. Devuelve los `open_time` que se lograron recuperar
+    (puede ser un subconjunto de `gap_times`, si alguno sigue sin aparecer
+    incluso con la ventana chica)."""
+    if not gap_times:
+        return []
+    gap_times = sorted(gap_times)
+    runs: list[list[int]] = []
+    for t in gap_times:
+        if runs and t - runs[-1][-1] == step_ms:
+            runs[-1].append(t)
+        else:
+            runs.append([t])
+
+    recovered: list[int] = []
+    for run in runs:
+        start_time = run[0] - GAP_FILL_MARGIN_BARS * step_ms
+        end_time = run[-1] + (GAP_FILL_MARGIN_BARS + 1) * step_ms
+        limit = min(len(run) + 2 * GAP_FILL_MARGIN_BARS, GAP_FILL_LIMIT)
+        raw_bars = await client.get_kline(
+            symbol=symbol, interval=interval, start_time=start_time, end_time=end_time,
+            limit=limit, price_type=price_type,
+        )
+        bars = [_bar_from_raw(symbol, interval, price_type, r) for r in raw_bars]
+        if bars:
+            await ohlcv_repo.upsert_bars(db, bars)
+        fetched = {b.open_time for b in bars}
+        recovered.extend(t for t in run if t in fetched)
+    return recovered
+
+
+async def _verify_and_repair(
+    client: BitunixRestClient, db: Database, symbol: str, interval: str,
+    price_type: str, step_ms: int,
+) -> None:
+    """Verifica que lo cacheado este denso (sin huecos) y repara lo que
+    falte -- ver la nota de modulo. Se llama al final de `download_missing`,
+    tanto si hizo falta pedir algo por red como si no (asi una cache ya
+    guardada con huecos de antes se autorepara en la siguiente llamada
+    normal, no solo con una reparacion manual)."""
+    covered = await ohlcv_repo.get_covered_range(db, symbol, interval, price_type)
+    if covered is None:
+        return
+    min_cached, max_cached = covered
+    bars = await ohlcv_repo.get_bars(db, symbol, interval, price_type, min_cached, max_cached)
+    gaps = find_gaps([b.open_time for b in bars], step_ms, min_cached, max_cached)
+    if not gaps:
+        return
+    recovered = await fill_gaps(client, db, symbol, interval, price_type, gaps, step_ms)
+    still_missing = sorted(set(gaps) - set(recovered))
+    logger.info(
+        "%s %s %s: %d hueco(s) detectado(s) tras la descarga, %d reparado(s)",
+        symbol, interval, price_type, len(gaps), len(recovered),
+    )
+    if still_missing:
+        logger.warning(
+            "%s %s %s: %d hueco(s) no se pudieron reparar ni con pedido estrecho: %s",
+            symbol, interval, price_type, len(still_missing),
+            [_fmt(t) for t in still_missing],
+        )
+
+
 async def download_missing(
     client: BitunixRestClient,
     db: Database,
@@ -191,15 +307,18 @@ async def download_missing(
     """Descarga por red SOLO lo que falte en cache para cubrir
     [start_time, end_time]: la cola reciente (mas nuevo que lo cacheado,
     hasta `end_time`) y la cabeza vieja (mas viejo que lo cacheado, hasta
-    `start_time` o el piso real ya conocido). Usada exclusivamente por
-    `scripts/download_history.py` -- el motor de backtest nunca llama
-    esto, solo lee con `get_cached_or_raise`."""
+    `start_time` o el piso real ya conocido); al final verifica y repara
+    huecos puntuales (`_verify_and_repair`, ver la nota de modulo). La usan
+    `scripts/download_history.py` y, para velas de 1 minuto, la
+    reconciliacion al reiniciar -- el motor de backtest nunca llama esto,
+    solo lee con `get_cached_or_raise`."""
     step_ms = interval_to_ms(interval)
     floor = await ohlcv_repo.get_floor(db, symbol, interval, price_type)
 
     if step_ms is None:
         # Sin grilla conocida (p.ej. "1M"): no se puede razonar sobre
-        # rangos faltantes, se descarga el pedido completo tal cual.
+        # rangos faltantes ni verificar huecos, se descarga el pedido
+        # completo tal cual.
         await _download_range(
             client, db, symbol, interval, price_type, start_time, end_time, floor
         )
@@ -210,6 +329,7 @@ async def download_missing(
         await _download_range(
             client, db, symbol, interval, price_type, start_time, end_time, floor
         )
+        await _verify_and_repair(client, db, symbol, interval, price_type, step_ms)
         return
 
     min_cached, max_cached = covered
@@ -225,6 +345,8 @@ async def download_missing(
         await _download_range(
             client, db, symbol, interval, price_type, start_time, min_cached - step_ms, floor
         )
+
+    await _verify_and_repair(client, db, symbol, interval, price_type, step_ms)
 
 
 async def check_series_availability(
