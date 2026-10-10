@@ -17,11 +17,20 @@ from app.persistence.repositories import (
     funding_repo,
     health_repo,
     ohlcv_repo,
+    shadow_repo,
     system_state_repo,
     trades_repo,
 )
+from app.trading.ai_value import ai_value_verdict
 from app.trading.levels import StrategyLevels
-from app.trading.position_monitor import MONITOR_LAST_SEEN_KEY, PositionMonitor
+from app.trading.position_monitor import (
+    MAX_SHADOW_RECONCILE_ATTEMPTS,
+    MONITOR_LAST_SEEN_KEY,
+    PositionMonitor,
+    _residual_gaps_are_tolerable,
+)
+from app.trading.shadow_book import ShadowBook
+from app.trading.signal_generator import SignalCandidate
 
 BAR_MS = 60_000
 
@@ -43,6 +52,13 @@ class FakeRest:
 
     async def get_funding_rate_history(self, *args, **kwargs):
         self.calls.append("get_funding_rate_history")
+        return []
+
+    async def get_kline(self, *args, **kwargs) -> list[dict]:
+        """Vacio: cualquier hueco que `_verify_and_repair` intente reparar con un
+        pedido estrecho sigue sin aparecer (no es el hallazgo de la seccion 2 de
+        docs/FASE2_INTEGRIDAD_VELAS.md, es un hueco de verdad en estas pruebas)."""
+        self.calls.append("get_kline")
         return []
 
     def __getattr__(self, name):
@@ -83,6 +99,42 @@ async def _setup(db, last=100.0, mark=None, **settings_overrides):
     backend = PaperBackend(db, rest, settings)
     monitor = PositionMonitor(db, rest, backend, settings)
     return rest, settings, backend, monitor
+
+
+async def _setup_with_shadow(db, last=100.0, mark=None, **settings_overrides):
+    """Como `_setup`, con un `ShadowBook` adjunto -- lo exigen las pruebas de
+    reconciliacion de sombras (Etapa 2 del incidente de estabilidad)."""
+    rest = FakeRest(last=last, mark=mark)
+    settings = make_settings(**settings_overrides)
+    backend = PaperBackend(db, rest, settings)
+    shadow = ShadowBook(db, settings)
+    monitor = PositionMonitor(db, rest, backend, settings, shadow=shadow)
+    return rest, settings, backend, monitor
+
+
+def _candidate(side=Side.LONG, price=100.0, levels=None, symbol="BTCUSDT") -> SignalCandidate:
+    strategies = ["ema_cross_9_21"]
+    return SignalCandidate(
+        symbol=symbol, side=side, candle_close_time=datetime(2026, 1, 1, 4, tzinfo=UTC),
+        contributing_strategies=strategies, sl_margin_loss_pct=50.0,
+        levels_by_strategy={s: (levels or StrategyLevels()) for s in strategies},
+        price_by_strategy={s: price for s in strategies},
+    )
+
+
+async def _open_downtime_shadow(
+    db, monitor, opened_minutes_ago: int, last_seen_minutes_ago: int, now_ms: int,
+    levels=None,
+):
+    sim = await monitor.shadow.open_candidate(_candidate(levels=levels))
+    opened = datetime.fromtimestamp((now_ms - opened_minutes_ago * BAR_MS) / 1000, tz=UTC)
+    await db.execute(
+        "UPDATE shadow_trades SET opened_at = ? WHERE id = ?", (opened.isoformat(), sim.id)
+    )
+    await system_state_repo.set_state(
+        db, MONITOR_LAST_SEEN_KEY, str(now_ms - last_seen_minutes_ago * BAR_MS)
+    )
+    return sim
 
 
 def _ws_ticker(symbol: str, price: float) -> dict:
@@ -413,6 +465,190 @@ async def test_reconciliation_skips_trades_with_no_downtime_window(db):
     trade = await _open_downtime_trade(db, backend, 20, 0, now)
     await system_state_repo.set_state(db, MONITOR_LAST_SEEN_KEY, str(now - 10_000))
     assert await monitor.reconcile_on_startup(now_ms=now) == [(trade.id, "SIN_VENTANA")]
+
+
+# --- Etapa 2 del incidente de estabilidad: tolerancia, marcado y reintentos --
+
+
+def test_residual_gaps_are_tolerable_requires_isolation_cap_and_mark_confirmation():
+    # Aislado y confirmado por MARK_PRICE: tolerable.
+    assert _residual_gaps_are_tolerable([1000 * BAR_MS], {1000 * BAR_MS}, expected=3000)
+    # Sin huecos: trivialmente tolerable.
+    assert _residual_gaps_are_tolerable([], set(), expected=3000)
+    # Mismo hueco, pero SIN vela en MARK_PRICE para sustituir: no hay con que.
+    assert not _residual_gaps_are_tolerable([1000 * BAR_MS], set(), expected=3000)
+    # Dos huecos contiguos (no aislados), aunque ambos esten en MARK_PRICE.
+    contiguous = [1000 * BAR_MS, 1001 * BAR_MS]
+    assert not _residual_gaps_are_tolerable(contiguous, set(contiguous), expected=3000)
+    # Por encima del tope minimo (2) con una ventana chica (0,1 % de 100 < 2,
+    # asi que manda el minimo fijo).
+    many = [i * 2 * BAR_MS for i in range(3)]  # 3 huecos aislados entre si
+    assert not _residual_gaps_are_tolerable(many, set(many), expected=100)
+    # Con ventana grande el tope lo da la fraccion (0,1 %), no el minimo fijo:
+    # expected=5000 -> tope=5.
+    five = [i * 2 * BAR_MS for i in range(5)]
+    assert _residual_gaps_are_tolerable(five, set(five), expected=5000)
+    six = [i * 2 * BAR_MS for i in range(6)]
+    assert not _residual_gaps_are_tolerable(six, set(six), expected=5000)
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_substitutes_isolated_gap_with_mark_price_bar(db):
+    """Etapa 2a: un hueco aislado de LAST_PRICE, confirmado por MARK_PRICE, se
+    sustituye para evaluar SL/TP -- el cierre queda marcado con fill_source
+    CANDLE_RECON_MARK_SUBSTITUTE en vez de dejar la reconciliacion en CRITICAL."""
+    rest, _s, backend, monitor = await _setup(db)
+    now = _now_ms()
+    trade = await _open_downtime_trade(db, backend, opened_minutes_ago=20,
+                                       last_seen_minutes_ago=10, now_ms=now)
+    first_open, last_closed = _window(now, 20)
+    dip_at = ((now - 5 * BAR_MS) // BAR_MS) * BAR_MS
+    await _seed_1m(db, "BTCUSDT", first_open, last_closed,
+                   overrides={dip_at: {"low": 94.0, "close": 94.5}})
+    await db.execute(
+        "DELETE FROM ohlcv_cache WHERE symbol = ? AND interval = '1m' "
+        "AND price_type = 'LAST_PRICE' AND open_time = ?", ("BTCUSDT", dip_at),
+    )
+
+    outcomes = await monitor.reconcile_on_startup(now_ms=now)
+    assert outcomes == [(trade.id, "CERRADA_SL")]
+    closed = await trades_repo.get_trade(db, trade.id)
+    assert closed.status == TradeStatus.CLOSED
+    assert closed.exit_price == pytest.approx(95.0)  # nominal, igual que CANDLE_RECON
+    assert closed.fill_source == "CANDLE_RECON_MARK_SUBSTITUTE"
+    assert closed.reconciliation_failed is False
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_failure_marks_the_trade_instead_of_closing_or_erroring_silently(db):
+    """Un hueco grande y contiguo (fuera de toda tolerancia) sigue marcando la
+    posicion como fallida -- ya no solo se registra CRITICAL y se olvida."""
+    rest, _s, backend, monitor = await _setup(db)
+    now = _now_ms()
+    trade = await _open_downtime_trade(db, backend, 60, 50, now)
+    first_open, last_closed = _window(now, 60)
+    await _seed_1m(db, "BTCUSDT", first_open, last_closed)
+    await db.execute(
+        "DELETE FROM ohlcv_cache WHERE symbol = ? AND interval = '1m' "
+        "AND open_time BETWEEN ? AND ?",
+        ("BTCUSDT", first_open + 20 * BAR_MS, first_open + 29 * BAR_MS),
+    )
+
+    outcomes = await monitor.reconcile_on_startup(now_ms=now)
+    assert outcomes == [(trade.id, "ERROR")]
+    marked = await trades_repo.get_trade(db, trade.id)
+    assert marked.status == TradeStatus.OPEN
+    assert marked.reconciliation_failed is True
+    assert marked.reconciliation_attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_frozen_shadow_with_failed_reconciliation_is_not_closed_by_a_live_tick(db):
+    rest, settings, backend, monitor = await _setup_with_shadow(db)
+    sim = await monitor.shadow.open_candidate(_candidate(levels=StrategyLevels(95.0, 110.0)))
+    await shadow_repo.update_reconciliation_state(db, sim.id, True, 1)
+    await monitor._reload_trades()
+
+    await monitor.on_tick("BTCUSDT", 90.0)  # cruzaria el SL si no estuviera congelada
+
+    still = await shadow_repo.get(db, sim.id)
+    assert still.status == TradeStatus.OPEN
+
+
+@pytest.mark.asyncio
+async def test_real_trade_tick_close_while_marked_uses_the_unreconciled_fill_source(db):
+    """Una posicion REAL sigue vigilada en vivo aunque este marcada (nunca se
+    congela): el cierre por tick queda distinguible con TICK_UNRECONCILED."""
+    rest, _s, backend, monitor = await _setup(db)
+    trade = await _open_long(backend)
+    await trades_repo.update_reconciliation_state(db, trade.id, True, 1)
+    await monitor._reload_trades()
+
+    await monitor.on_tick("BTCUSDT", 94.5)
+
+    closed = await trades_repo.get_trade(db, trade.id)
+    assert closed.status == TradeStatus.CLOSED
+    assert closed.fill_source == "TICK_UNRECONCILED"
+
+
+@pytest.mark.asyncio
+async def test_retry_reconciliation_success_clears_the_failed_flag(db):
+    rest, settings, backend, monitor = await _setup_with_shadow(db)
+    now = _now_ms()
+    sim = await _open_downtime_shadow(db, monitor, opened_minutes_ago=20,
+                                      last_seen_minutes_ago=10, now_ms=now,
+                                      levels=StrategyLevels(95.0, 110.0))
+    await shadow_repo.update_reconciliation_state(db, sim.id, True, 1)
+    first_open, last_closed = _window(now, 20)
+    await _seed_1m(db, "BTCUSDT", first_open, last_closed)  # ahora las velas SI estan completas
+    await monitor._reload_trades()
+
+    await monitor._retry_failed_reconciliations(now)
+
+    cleared = await shadow_repo.get(db, sim.id)
+    assert cleared.status == TradeStatus.OPEN
+    assert cleared.reconciliation_failed is False
+    assert cleared.reconciliation_attempts == 0
+
+
+@pytest.mark.asyncio
+async def test_shadow_closes_as_reconcile_failed_after_max_attempts(db):
+    rest, settings, backend, monitor = await _setup_with_shadow(db)
+    now = _now_ms()
+    sim = await _open_downtime_shadow(db, monitor, opened_minutes_ago=60,
+                                      last_seen_minutes_ago=50, now_ms=now)
+    first_open, last_closed = _window(now, 60)
+    await _seed_1m(db, "BTCUSDT", first_open, last_closed)
+    await db.execute(
+        "DELETE FROM ohlcv_cache WHERE symbol = ? AND interval = '1m' "
+        "AND open_time BETWEEN ? AND ?",
+        ("BTCUSDT", first_open + 20 * BAR_MS, first_open + 29 * BAR_MS),
+    )
+    await monitor._reload_trades()
+    key = monitor._key(sim)
+
+    for _ in range(MAX_SHADOW_RECONCILE_ATTEMPTS):
+        await monitor._attempt_reconcile_retry(monitor._trades[key], now)
+
+    closed = await shadow_repo.get(db, sim.id)
+    assert closed.status == TradeStatus.CLOSED
+    assert closed.close_reason == "RECONCILE_FAILED"
+    assert closed.fill_source == "RECONCILE_FAILED"
+    assert closed.pnl_gross_usdt == pytest.approx(0.0)
+    assert closed.pnl_net_usdt == pytest.approx(0.0)
+    assert closed.exit_price == pytest.approx(closed.entry_price)
+    assert key not in monitor._trades
+
+
+@pytest.mark.asyncio
+async def test_end_to_end_failed_reconciliation_freezes_shadow_and_excludes_it_from_verdict(db):
+    """Caso de punta a punta pedido en la Etapa 2: reconciliacion falla -> sombra
+    marcada y SIN cierre por tick -> excluida del veredicto de ai_value_verdict."""
+    rest, settings, backend, monitor = await _setup_with_shadow(db)
+    now = _now_ms()
+    sim = await _open_downtime_shadow(db, monitor, opened_minutes_ago=60,
+                                      last_seen_minutes_ago=50, now_ms=now,
+                                      levels=StrategyLevels(95.0, 110.0))
+    first_open, last_closed = _window(now, 60)
+    await _seed_1m(db, "BTCUSDT", first_open, last_closed)
+    await db.execute(
+        "DELETE FROM ohlcv_cache WHERE symbol = ? AND interval = '1m' "
+        "AND open_time BETWEEN ? AND ?",
+        ("BTCUSDT", first_open + 20 * BAR_MS, first_open + 29 * BAR_MS),
+    )
+
+    outcomes = await monitor.reconcile_on_startup(now_ms=now)
+    assert outcomes == [(sim.id, "ERROR")]
+
+    await monitor.on_tick("BTCUSDT", 90.0)  # cruzaria el SL en vivo; no debe cerrarla
+    marked = await shadow_repo.get(db, sim.id)
+    assert marked.status == TradeStatus.OPEN
+    assert marked.reconciliation_failed is True
+
+    unreliable = await shadow_repo.get_unreliable_signal_group_keys(db)
+    assert marked.signal_group_key in unreliable
+    verdict = ai_value_verdict([marked], unreliable_keys=unreliable)
+    assert verdict.total_groups == 0
 
 
 # --- niveles al abrir --------------------------------------------------------

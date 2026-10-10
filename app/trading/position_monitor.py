@@ -28,12 +28,13 @@ from app.core.logging import get_logger
 from app.execution.paper_backend import PaperBackend
 from app.market.bitunix_rest import BitunixRestClient
 from app.market.funding_history import download_missing_funding
-from app.market.ohlcv_history import download_missing
+from app.market.ohlcv_history import download_missing, find_gaps
 from app.persistence.database import Database
-from app.persistence.models import ShadowTrade, Side, Trade
+from app.persistence.models import OHLCVBar, ShadowTrade, Side, Trade
 from app.persistence.repositories import (
     health_repo,
     ohlcv_repo,
+    shadow_repo,
     specs_repo,
     system_state_repo,
     trades_repo,
@@ -60,12 +61,28 @@ TICKER_CACHE_SECONDS = 2.0
 MONITOR_LAST_SEEN_KEY = "monitor_last_seen_ms"
 BAR_MS = 60_000
 RECONCILE_MIN_WINDOW_MS = BAR_MS
-# Velas 1m que pueden faltar en la reconciliacion antes de no fiar en el periodo.
-RECONCILE_MAX_MISSING_BARS = 2
+# Incidente de estabilidad 2026-10-10, Etapa 2a (docs/FASE2_INTEGRIDAD_VELAS.md):
+# tras `fill_gaps`, solo se tolera un hueco residual de LAST_PRICE si es AISLADO
+# (ningun minuto vecino falta tambien), su minuto existe en MARK_PRICE (se
+# sustituye esa vela para evaluar SL/TP/liquidacion) y el total de huecos
+# tolerados no pasa de este tope. Cualquier otro caso sigue en CRITICAL.
+RECONCILE_GAP_TOLERANCE_FRACTION = 0.001
+RECONCILE_GAP_TOLERANCE_MIN = 2
+# Reintentos de una reconciliacion que fallo (posicion marcada, no cerrada a
+# ciegas por tick -- Etapa 2c). Tras agotarlos, una SOMBRA se cierra sin PnL
+# (RECONCILE_FAILED); una posicion REAL sigue vigilada en vivo indefinidamente,
+# solo marcada (ver `FILL_TICK_UNRECONCILED` y `open_real_positions`).
+MAX_SHADOW_RECONCILE_ATTEMPTS = 3
+RECONCILE_RETRY_SECONDS = 300.0
 
 FILL_TICK = "TICK"
 FILL_CANDLE = "CANDLE_RECON"
+FILL_CANDLE_MARK_SUBSTITUTE = "CANDLE_RECON_MARK_SUBSTITUTE"
 FILL_REST = "REST_MARK"
+# Cierre por tick de una posicion REAL cuya ultima reconciliacion esta marcada
+# como fallida: mismo precio/regla que FILL_TICK, pero auditable por separado
+# (la "vela" real que deberia haber evaluado el SL/TP no se pudo reconstruir).
+FILL_TICK_UNRECONCILED = "TICK_UNRECONCILED"
 
 
 def _unbounded(is_long: bool) -> float:
@@ -75,6 +92,27 @@ def _unbounded(is_long: bool) -> float:
 
 def _crosses(is_long: bool, price: float, threshold: float) -> bool:
     return price <= threshold if is_long else price >= threshold
+
+
+def _residual_gaps_are_tolerable(gaps: list[int], mark_times: set[int], expected: int) -> bool:
+    """Decide si los huecos de LAST_PRICE que quedaron tras `fill_gaps` se pueden
+    sustituir por MARK_PRICE en vez de marcar la reconciliacion como fallida
+    (Etapa 2a). Exige TODO lo siguiente:
+    - el total no supera `max(RECONCILE_GAP_TOLERANCE_MIN, 0.1% de la ventana)`;
+    - cada hueco es AISLADO (ningun minuto vecino falta tambien, ida o vuelta);
+    - cada hueco existe en MARK_PRICE (si no, no hay con que sustituirlo)."""
+    if not gaps:
+        return True
+    cap = max(RECONCILE_GAP_TOLERANCE_MIN, math.ceil(expected * RECONCILE_GAP_TOLERANCE_FRACTION))
+    if len(gaps) > cap:
+        return False
+    gap_set = set(gaps)
+    for g in gaps:
+        if g not in mark_times:
+            return False
+        if (g - BAR_MS) in gap_set or (g + BAR_MS) in gap_set:
+            return False
+    return True
 
 
 class PositionMonitor:
@@ -105,6 +143,7 @@ class PositionMonitor:
         self._funding_refresh_at: dict[str, float] = {}
         self._liq_checked_at: dict[tuple[bool, int], float] = {}
         self._ticker_cache: dict[str, tuple[float, dict[str, float]]] = {}
+        self._reconcile_retry_at: dict[tuple[bool, int], float] = {}
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -164,6 +203,11 @@ class PositionMonitor:
             await self._evaluate(trade, price)
 
     async def _evaluate(self, trade: Trade, price: float) -> None:
+        if isinstance(trade, ShadowTrade) and trade.reconciliation_failed:
+            # Etapa 2c: una sombra con reconciliacion fallida queda CONGELADA (no se
+            # cierra con un precio en vivo que no es fiable) hasta que un reintento la
+            # reconcilie o se agoten los intentos (ver `_retry_failed_reconciliations`).
+            return
         is_long = trade.side == Side.LONG
         unbounded = _unbounded(is_long)
         sl_thr = trade.effective_stop if trade.effective_stop is not None else unbounded
@@ -233,6 +277,11 @@ class PositionMonitor:
         self, trade: Trade, price: float, reason: str, fill_source: str,
         closed_at: datetime | None = None,
     ) -> None:
+        if fill_source == FILL_TICK and trade.reconciliation_failed:
+            # Etapa 2c: el cierre por tick de una posicion REAL marcada queda
+            # distinguible de uno normal -- el "tick" real es una foto REST de un
+            # periodo que no se pudo reconstruir con velas, no un feed continuo.
+            fill_source = FILL_TICK_UNRECONCILED
         if isinstance(trade, ShadowTrade):
             closed = await self.shadow.close(
                 trade, price, reason, closed_at=closed_at, fill_source=fill_source
@@ -272,6 +321,7 @@ class PositionMonitor:
         now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
         await self._flush_dirty()
         await self._reload_trades()
+        await self._retry_failed_reconciliations(now_ms)
         await self._check_tick_ages()
         await self._refresh_marks()
         await self._accrue_funding_all(now_ms)
@@ -431,8 +481,10 @@ class PositionMonitor:
     async def reconcile_on_startup(self, now_ms: int | None = None) -> list[tuple[int, str]]:
         """Reproduce con velas 1m el periodo en que el proceso estuvo caido, para cada
         posicion abierta: SL, TP, trailing, liquidacion y funding que habrian ocurrido.
-        Si no se pueden obtener velas completas, la posicion queda abierta y los ticks
-        en vivo toman el control (error registrado como CRITICAL)."""
+        Si no se pueden obtener velas completas, la posicion queda MARCADA (Etapa 2c:
+        `reconciliation_failed`) en vez de cerrarse a ciegas; los ticks en vivo toman
+        el control mientras tanto (sombras: congeladas, ver `_evaluate`) y se reintenta
+        periodicamente (`_retry_failed_reconciliations`)."""
         now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
         raw = await system_state_repo.get_state(self.db, MONITOR_LAST_SEEN_KEY)
         last_seen_ms = int(raw) if raw else None
@@ -443,9 +495,12 @@ class PositionMonitor:
                 outcome = await self._reconcile_trade(trade, last_seen_ms, now_ms)
             except Exception:  # noqa: BLE001 - una posicion no debe impedir arrancar
                 logger.critical(
-                    "Reconciliacion fallida para trade=%d %s; queda abierta y los ticks en vivo "
-                    "toman el control", trade.id, trade.symbol, exc_info=True,
+                    "Reconciliacion fallida para trade=%d %s; se marca y se reintenta "
+                    "(cada %.0fs, maximo %d intentos si es sombra)",
+                    trade.id, trade.symbol, RECONCILE_RETRY_SECONDS,
+                    MAX_SHADOW_RECONCILE_ATTEMPTS, exc_info=True,
                 )
+                await self._mark_reconcile_attempt_failed(trade, now_ms)
                 outcome = "ERROR"
             outcomes.append((trade.id, outcome))
         return outcomes
@@ -458,7 +513,9 @@ class PositionMonitor:
         if now_ms - start_ms < RECONCILE_MIN_WINDOW_MS:
             return "SIN_VENTANA"
 
-        last_bars, mark_bars = await self._load_1m_bars(trade.symbol, start_ms, now_ms)
+        last_bars, mark_bars, substituted = await self._load_1m_bars(
+            trade.symbol, start_ms, now_ms
+        )
         is_long = trade.side == Side.LONG
         marks_by_open = {b.open_time: b for b in mark_bars}
         current = trade
@@ -473,6 +530,9 @@ class PositionMonitor:
                 # como mucho un minuto); el funding ya se aplico arriba por tiempo.
                 continue
             mark_bar = marks_by_open.get(bar.open_time, bar)
+            fill_source = (
+                FILL_CANDLE_MARK_SUBSTITUTE if bar.open_time in substituted else FILL_CANDLE
+            )
             unbounded = _unbounded(is_long)
             sl_thr = current.effective_stop if current.effective_stop is not None else unbounded
             liq_thr = current.liq_price if current.liq_price is not None else unbounded
@@ -485,7 +545,7 @@ class PositionMonitor:
             if adverse is not None:
                 name, exit_price = adverse
                 await self._close(
-                    current, exit_price, self._adverse_reason(current, name), FILL_CANDLE,
+                    current, exit_price, self._adverse_reason(current, name), fill_source,
                     closed_at=closed_at,
                 )
                 return f"CERRADA_{self._adverse_reason(current, name)}"
@@ -495,7 +555,7 @@ class PositionMonitor:
                     is_long, bar.open, bar.high, bar.low, current.tp_price
                 )
                 if tp_exit is not None:
-                    await self._close(current, tp_exit, "TP", FILL_CANDLE, closed_at=closed_at)
+                    await self._close(current, tp_exit, "TP", fill_source, closed_at=closed_at)
                     return "CERRADA_TP"
 
             if current.trailing_distance is not None and current.effective_stop is not None:
@@ -515,7 +575,13 @@ class PositionMonitor:
         self._trades[self._key(trade)] = current
         return "ABIERTA"
 
-    async def _load_1m_bars(self, symbol: str, start_ms: int, now_ms: int):
+    async def _load_1m_bars(
+        self, symbol: str, start_ms: int, now_ms: int
+    ) -> tuple[list[OHLCVBar], list[OHLCVBar], set[int]]:
+        """Devuelve `(last_bars, mark_bars, substituted_times)`: `substituted_times`
+        son los `open_time` de `last_bars` cuya vela en realidad viene de MARK_PRICE
+        (Etapa 2a, hueco residual tolerado) -- `_reconcile_trade` los cierra con
+        `FILL_CANDLE_MARK_SUBSTITUTE` en vez de `FILL_CANDLE`."""
         for price_type in ("LAST_PRICE", "MARK_PRICE"):
             await download_missing(
                 self.rest, self.db, symbol, "1m", start_ms, now_ms, price_type=price_type
@@ -529,8 +595,95 @@ class PositionMonitor:
         mark = await ohlcv_repo.get_bars(
             self.db, symbol, "1m", "MARK_PRICE", first_open, last_closed_open
         )
-        if len(last) < expected - RECONCILE_MAX_MISSING_BARS:
+        if len(last) >= expected:
+            return last, mark, set()
+
+        gaps = find_gaps([b.open_time for b in last], BAR_MS, first_open, last_closed_open)
+        mark_by_open = {b.open_time: b for b in mark}
+        if not _residual_gaps_are_tolerable(gaps, set(mark_by_open), expected):
             raise RuntimeError(
-                f"velas 1m LAST_PRICE incompletas para {symbol}: {len(last)} de {expected}"
+                f"velas 1m LAST_PRICE incompletas para {symbol}: {len(last)} de {expected} "
+                f"({len(gaps)} hueco(s) fuera de tolerancia)"
             )
-        return last, mark
+
+        logger.warning(
+            "%s: %d vela(s) 1m LAST_PRICE faltante(s) dentro de tolerancia para reconciliar, "
+            "sustituida(s) por MARK_PRICE (fill_source=%s): %s",
+            symbol, len(gaps), FILL_CANDLE_MARK_SUBSTITUTE,
+            ", ".join(datetime.fromtimestamp(g / 1000, tz=UTC).isoformat() for g in gaps),
+        )
+        merged = sorted([*last, *(mark_by_open[g] for g in gaps)], key=lambda b: b.open_time)
+        return merged, mark, set(gaps)
+
+    # --- reintentos de reconciliacion fallida (Etapa 2c) ---------------------
+
+    async def _retry_failed_reconciliations(self, now_ms: int) -> None:
+        """Reintenta, a lo sumo cada `RECONCILE_RETRY_SECONDS` por posicion, la
+        reconciliacion de toda posicion marcada `reconciliation_failed`. Se llama en
+        cada ciclo periodico, ademas de al arrancar (`reconcile_on_startup`)."""
+        now_mono = time.monotonic()
+        for key, trade in list(self._trades.items()):
+            if not trade.reconciliation_failed:
+                continue
+            last_retry = self._reconcile_retry_at.get(key)
+            if last_retry is not None and now_mono - last_retry < RECONCILE_RETRY_SECONDS:
+                continue
+            self._reconcile_retry_at[key] = now_mono
+            await self._attempt_reconcile_retry(trade, now_ms)
+
+    async def _attempt_reconcile_retry(self, trade: Trade, now_ms: int) -> None:
+        is_shadow = isinstance(trade, ShadowTrade)
+        try:
+            outcome = await self._reconcile_trade(trade, None, now_ms)
+        except Exception:  # noqa: BLE001 - un reintento fallido no debe tumbar el ciclo
+            logger.warning(
+                "Reintento de reconciliacion fallido para trade=%d %s",
+                trade.id, trade.symbol, exc_info=True,
+            )
+            await self._mark_reconcile_attempt_failed(trade, now_ms)
+            return
+        logger.info(
+            "Reintento de reconciliacion para trade=%d %s: %s", trade.id, trade.symbol, outcome,
+        )
+        await self._clear_reconciliation_failed(trade.id, is_shadow)
+        key = (is_shadow, trade.id)
+        current = self._trades.get(key)
+        if current is not None:
+            self._trades[key] = current.model_copy(
+                update={"reconciliation_failed": False, "reconciliation_attempts": 0}
+            )
+
+    async def _mark_reconcile_attempt_failed(self, trade: Trade, now_ms: int) -> None:
+        """Marca el intento fallido (posicion marcada, no cerrada a ciegas). Una
+        SOMBRA que agota `MAX_SHADOW_RECONCILE_ATTEMPTS` se cierra sin PnL; una
+        posicion REAL sigue vigilada en vivo indefinidamente, solo marcada."""
+        is_shadow = isinstance(trade, ShadowTrade)
+        attempts = trade.reconciliation_attempts + 1
+        if is_shadow:
+            await shadow_repo.update_reconciliation_state(self.db, trade.id, True, attempts)
+        else:
+            await trades_repo.update_reconciliation_state(self.db, trade.id, True, attempts)
+        updated = trade.model_copy(
+            update={"reconciliation_failed": True, "reconciliation_attempts": attempts}
+        )
+        if is_shadow and attempts >= MAX_SHADOW_RECONCILE_ATTEMPTS:
+            await self._give_up_shadow_reconciliation(updated)
+            return
+        self._trades[self._key(updated)] = updated
+
+    async def _give_up_shadow_reconciliation(self, trade: ShadowTrade) -> None:
+        await self.shadow.close_unreliable(trade)
+        key = self._key(trade)
+        self._trades.pop(key, None)
+        self._reconcile_retry_at.pop(key, None)
+        logger.warning(
+            "Sombra trade=%d %s: reconciliacion fallo %d veces seguidas, se cierra sin PnL "
+            "(RECONCILE_FAILED, excluida de ai_value)",
+            trade.id, trade.symbol, trade.reconciliation_attempts,
+        )
+
+    async def _clear_reconciliation_failed(self, trade_id: int, is_shadow: bool) -> None:
+        if is_shadow:
+            await shadow_repo.update_reconciliation_state(self.db, trade_id, False, 0)
+        else:
+            await trades_repo.update_reconciliation_state(self.db, trade_id, False, 0)

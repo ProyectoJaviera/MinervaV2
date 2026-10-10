@@ -160,3 +160,24 @@ class ShadowBook:
                 settlement.pnl_net_usdt, reason, fill_source, closed_at=closed_at,
             )
         return await shadow_repo.get(self.db, trade.id)
+
+    async def close_unreliable(
+        self, trade: ShadowTrade, closed_at: datetime | None = None
+    ) -> ShadowTrade | None:
+        """Cierre administrativo SIN PnL (incidente de estabilidad 2026-10-10, Etapa
+        2c): la reconciliacion de esta sombra fallo `MAX_SHADOW_RECONCILE_ATTEMPTS`
+        veces seguidas (`app/trading/position_monitor.py`) -- no hubo velas 1m
+        suficientes para reconstruir el periodo caido, asi que no se le atribuye
+        ganancia ni perdida. Se marca `close_reason='RECONCILE_FAILED'` y queda
+        excluida de `ai_value_verdict` (`shadow_repo.get_unreliable_signal_group_keys`),
+        a diferencia de `close()` que SIEMPRE liquida PnL real via `settle_close`."""
+        closed_at = closed_at or datetime.now(UTC)
+        async with self._lock:
+            current = await shadow_repo.get(self.db, trade.id)
+            if current is None or current.status != TradeStatus.OPEN:
+                return None
+            await shadow_repo.close(
+                self.db, trade.id, current.entry_price, 0.0, 0.0, 0.0, 0.0,
+                "RECONCILE_FAILED", "RECONCILE_FAILED", closed_at=closed_at,
+            )
+        return await shadow_repo.get(self.db, trade.id)
