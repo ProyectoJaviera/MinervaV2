@@ -335,6 +335,23 @@ de unos **4,05 USD** a 25. El corte diario de 1 USD solo se activaría por encim
 llamadas al día. Si las features reales superan los 1.200 tokens de entrada, el coste
 sube de forma lineal. El piloto medirá los tokens reales y, si difieren, se recalcula.
 
+**Primer dato real (smoke `--real`, 2026-10-10, un grupo DOGEUSDT SHORT con las
+features completas de la fase iv):** 1.393 tokens de entrada, 145 de salida,
+**0,004236 USD**, 2,5 s de latencia. Ya supera los 1.200 tokens de entrada supuestos
+arriba (~16 % más), y confirma el precio verificado en la sección 0 ($2/$10 por MTok,
+`1.393·2/1.000.000 + 145·10/1.000.000 = 0,004236`). Con este coste por llamada (no el
+máximo de 0,0054 USD que usa el presupuesto, que sigue fijo con `max_tokens=300` a
+proposito -- es el peor caso, no el tipico): a 9,32 grupos/día, ≈0,039 USD/día
+(≈1,18 USD/mes); a 25, ≈0,106 USD/día (≈3,18 USD/mes); con 1 USD/día caben ≈236
+llamadas. **Es un solo dato, no una medición:** el piloto (30 a 50 llamadas) tiene
+que recalibrar esta estimación con sus propios tokens medios.
+
+Este mismo dato (unos 2,3 caracteres por token en este prompt) ya corrigió
+`estimate_input_tokens` (`app/llm/prompts.py`): de caracteres/3 (daba 1.048, un 25 %
+por debajo de lo real) a caracteres/2 (da ~1.570, por encima de lo medido -- vuelve a
+ser conservador). Si el piloto mide algo muy distinto de 2,3 caracteres/token, el
+divisor se ajusta otra vez.
+
 **Número de grupos por día que se usa:**
 
 - **9,32 grupos/día (central):** es el ritmo OOS del backtest v2 de las seis estrategias

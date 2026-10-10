@@ -56,8 +56,8 @@ def test_build_user_message_is_valid_sorted_json():
     assert json.loads(text) == {"a": None, "b": 1}
 
 
-def test_estimate_input_tokens_is_chars_over_three():
-    assert estimate_input_tokens("abc", "defghi") == 3  # (3+6)//3
+def test_estimate_input_tokens_is_chars_over_two():
+    assert estimate_input_tokens("abc", "defghi") == 4  # (3+6)//2
 
 
 def _shadow_trade(key="BTCUSDT|LONG|c1", strategies=("ema_cross_9_21",)) -> ShadowTrade:

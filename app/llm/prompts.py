@@ -79,12 +79,17 @@ def build_user_message(features: dict) -> str:
 
 
 def estimate_input_tokens(system: str, user: str) -> int:
-    """Estimacion conservadora de tokens de entrada: caracteres / 3. Es mas alta
-    que la aproximacion habitual de ~4 caracteres por token, a proposito: para
-    no subestimar `coste_max` frente al presupuesto diario (seccion e). El
-    piloto (`scripts/llm_pilot.py`) mide los tokens reales que reporta la API
-    y, si difieren mucho de esto, se recalibra la estimacion."""
-    return (len(system) + len(user)) // 3
+    """Estimacion conservadora de tokens de entrada: caracteres / 2.
+
+    Medido con el primer smoke real (2026-10-10, docs/FASE3_6_LLM.md seccion e):
+    1.393 tokens de entrada reales para este prompt, unos 2,3 caracteres por
+    token -- caracteres/3 (lo usado hasta ahora) daba 1.048, un 25 % por debajo
+    de lo real, y ya no era conservador. Con /2 el mismo mensaje da ~1.570, por
+    encima de lo medido, asi que vuelve a sobrestimar en vez de subestimar
+    `coste_max` frente al presupuesto diario (seccion e). El piloto
+    (`scripts/llm_pilot.py`) mide los tokens reales que reporta la API y, si
+    difieren mucho de esto, se recalibra la estimacion otra vez."""
+    return (len(system) + len(user)) // 2
 
 
 async def build_features_from_shadow_trade(

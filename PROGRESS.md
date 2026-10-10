@@ -843,6 +843,23 @@ una:
       mismo grupo real (DOGEUSDT SHORT).
     - Suite completa: 444 passed, 2 skipped; `ruff check .` limpio. Sin llamadas
       reales, sin tocar el scheduler.
+  - **Recalibracion de `estimate_input_tokens` con el primer smoke real (2026-10-10):**
+    el smoke `--real` sobre DOGEUSDT SHORT (con las features completas de la fase iv)
+    midio **1.393 tokens de entrada, 145 de salida, 0,004236 USD, 2,5 s de latencia**
+    -- confirma el precio de Sonnet 5.5 ($2/$10 por MTok:
+    `1.393·2/1e6 + 145·10/1e6 = 0,004236`). La estimacion de caracteres/3 daba 1.048,
+    un 25 % por debajo de lo real (unos 2,3 caracteres por token en este prompt, no 3).
+    `estimate_input_tokens` (`app/llm/prompts.py`) pasa a **caracteres/2** (da ~1.570
+    para el mismo mensaje, por encima de lo medido: vuelve a ser conservadora en vez
+    de subestimar `coste_max` frente al presupuesto). `docs/FASE3_6_LLM.md` seccion
+    (e) anota el dato real y el gasto esperado con el (no el maximo de `max_tokens=300`,
+    que sigue fijo a proposito para el presupuesto): ≈0,039 USD/dia a 9,32 grupos/dia
+    (≈1,18 USD/mes), ≈0,106 USD/dia a 25 (≈3,18 USD/mes); con 1 USD/dia caben ≈236
+    llamadas. Es un solo dato, no una medicion: el piloto tiene que recalibrar con sus
+    propios tokens medios.
+    - Test actualizado (`test_estimate_input_tokens_is_chars_over_two`).
+    - Suite completa: 444 passed, 2 skipped; `ruff check .` limpio. Sin llamadas
+      reales, sin tocar el scheduler.
 - **Valores por defecto alineados con `docs/FASE3_PLAN.md` (previo a implementar 3.6)**:
   `DEFAULT_MARGIN_USDT` pasa de 10 a **5** (seccion 8 del plan; la cartera de Fase 2 se
   arruina a 10 USDT/3 posiciones en 3 de 4 estrategias por reglas) y
