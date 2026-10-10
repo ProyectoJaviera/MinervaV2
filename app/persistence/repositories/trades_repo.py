@@ -155,6 +155,21 @@ async def get_open_positions(db: Database, symbol: str | None = None) -> list[Tr
     return [_row_to_trade(r) for r in rows]
 
 
+async def get_open_positions_as_of(db: Database, as_of: datetime) -> list[Trade]:
+    """Posiciones REALES (tabla `trades`, nunca `shadow_trades`) abiertas en el
+    instante `as_of`: se abrieron antes o en ese instante, y siguen abiertas o
+    se cerraron despues (subfase 3.6, fase iv -- features del prompt, seccion
+    a punto 7). Sirve para una decision historica (piloto/smoke sobre datos ya
+    guardados), no solo para "ahora": por eso no reusa `get_open_positions`,
+    que solo ve `status = 'OPEN'` en el instante de la consulta."""
+    rows = await db.fetch_all(
+        "SELECT * FROM trades WHERE opened_at <= ? AND (closed_at IS NULL OR closed_at > ?) "
+        "ORDER BY opened_at DESC",
+        (as_of.isoformat(), as_of.isoformat()),
+    )
+    return [_row_to_trade(r) for r in rows]
+
+
 async def get_trades(db: Database, limit: int = 100) -> list[Trade]:
     rows = await db.fetch_all(
         "SELECT * FROM trades ORDER BY opened_at DESC LIMIT ?", (limit,)

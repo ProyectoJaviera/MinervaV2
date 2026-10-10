@@ -1,7 +1,7 @@
 # Subfase 3.6 -- Decisión del LLM sobre las señales (DISEÑO v2, APROBADO)
 
-Estado: **fases (i), (ii) y (iii) implementadas (2026-10-09); nada conectado al bot
-todavía**. Lo único que sigue pendiente de ti, y no bloquea lo ya escrito, es confirmar
+Estado: **fases (i), (ii), (iii) y (iv) implementadas (2026-10-09); nada conectado al
+bot todavía**. Lo único que sigue pendiente de ti, y no bloquea lo ya escrito, es confirmar
 los precios de la sección 0 en tu consola antes de la primera llamada real
 (`scripts/llm_smoke.py` o `scripts/llm_pilot.py`, ambos con `--real --confirm-real`).
 Conectar el LLM al ciclo real del bot (`AUTO_OPEN_WITHOUT_LLM=true`) es una decisión
@@ -300,6 +300,17 @@ Por eso estos dos estados registran en `llm_logs.cost_usd` una estimación
 conservadora -- solo el coste de los tokens de entrada estimados, sin salida -- en vez
 de 0, y el campo `error` termina con "(coste estimado)" para distinguirlo de un coste
 real. Registrar 0 subestimaría `gasto_hoy` frente al tope diario.
+
+**El tope diario NO es acumulativo entre copias de la base (ajuste 6, fase iv,
+2026-10-09).** `gasto_hoy` es `SUM(cost_usd)` sobre `llm_logs` de la base que recibe
+`--db`, no sobre todas las llamadas que hayas hecho hoy en total. Si corrés
+`scripts/llm_smoke.py`/`llm_pilot.py` dos veces con `--db` apuntando a dos copias
+DISTINTAS, cada una ve `gasto_hoy = 0` al empezar, sin memoria de la otra -- el tope
+de `LLM_DAILY_BUDGET_USD` solo protege DENTRO de una misma base. La protección real
+contra un gasto mayor al querido, al usar copias repetidas, es el `--max-calls` de
+cada script (tope duro 3 en el smoke, 50 en el piloto) y el límite de uso/gasto que
+se configure en la consola de Anthropic -- no asumas que el tope diario del `.env` te
+cubre entre corridas con copias distintas.
 
 **Precios:** en la configuración, con la fuente y la fecha de la sección 0. Se verifican
 antes de cada cambio de modelo.
@@ -708,6 +719,12 @@ sesgada. Por eso el informe reporta:
   Tests.
 - **(iii)** ✅ `app/llm/prompts.py`, `scripts/llm_smoke.py`, `scripts/llm_pilot.py`
   (la ejecuta Renzo) y `scripts/placebo_check.py`.
+- **(iv)** ✅ Features de mercado completas (`app/llm/market_features.py`):
+  timeframe y niveles planeados por estrategia, funding de `funding_cache`,
+  ATR(14) y desviación de retornos en 1h, correlación con BTC a 30 y 100 velas, y
+  posiciones REALES abiertas al instante de la decisión. Las 3 pruebas de fuga de
+  la sección (a). `SYSTEM_PROMPT` con contexto (cuenta, apalancamiento, qué mide
+  cada estrategia) y sin tasa de aprobación objetivo.
 
 `AUTO_OPEN_WITHOUT_LLM` se mantiene en `false`: la 3.6 no activa el uso del LLM real en
 el bot hasta una decisión aparte. Nada de lo implementado toca

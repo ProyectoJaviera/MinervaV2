@@ -132,9 +132,12 @@ async def main(args: argparse.Namespace) -> None:
         latencies: list[float] = []
         decisions: list[str] = []
         total_cost = 0.0
+        null_counts: dict[str, int] = {}
+        indicator_slots_total = 0
+        indicator_slots_null = 0
 
         for trade in groups:
-            features = await build_features_from_shadow_trade(db, trade)
+            features = await build_features_from_shadow_trade(db, trade, settings)
             user_message = build_user_message(features)
             estimated_tokens = estimate_input_tokens(SYSTEM_PROMPT, user_message)
 
@@ -157,6 +160,18 @@ async def main(args: argparse.Namespace) -> None:
                     latencies.append(row["latency_ms"])
                 if row["decision"] is not None:
                     decisions.append(row["decision"])
+
+            # Cuantos grupos deciden con cada feature en null (ajuste 5, fase
+            # iv): asi se sabe con que informacion real se esta decidiendo.
+            for key, value in features.items():
+                if key in ("indicators_by_strategy", "timeframe_by_strategy"):
+                    continue
+                if value is None:
+                    null_counts[key] = null_counts.get(key, 0) + 1
+            for indicator_value in features["indicators_by_strategy"].values():
+                indicator_slots_total += 1
+                if indicator_value is None:
+                    indicator_slots_null += 1
 
         n = len(groups)
         valid = sum(1 for s in statuses if s == STATUS_OK)
@@ -194,6 +209,19 @@ async def main(args: argparse.Namespace) -> None:
         else:
             print("Ninguna decision valida: no se puede evaluar la banda de aprobacion.")
         print(f"Coste real total: {total_cost:.6f} USD")
+
+        print()
+        print(f"Campos en null, de {n} grupos procesados (con que informacion real se decide):")
+        if null_counts:
+            for key in sorted(null_counts):
+                print(f"  {key}: {null_counts[key]}/{n}")
+        else:
+            print("  ninguno")
+        if indicator_slots_total:
+            print(
+                f"  indicators_by_strategy sin fila en 'signals' (por estrategia "
+                f"contribuyente): {indicator_slots_null}/{indicator_slots_total}"
+            )
 
         if not dry_run:
             print()

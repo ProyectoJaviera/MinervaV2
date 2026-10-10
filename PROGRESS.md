@@ -755,6 +755,75 @@ una:
     - **Pendiente operativo de Renzo:** correr `scripts/llm_smoke.py --real
       --confirm-real` sobre una copia, comparando el coste con su consola de
       Anthropic, antes de confiar en el calculo de precios.
+  - **Subfase 3.6 (iv) completada (2026-10-09): features de mercado completas,
+    antes del piloto.** La revision de la fase (iii) encontro que
+    `build_features_from_shadow_trade` solo entregaba identidad, indicadores y
+    `sl_margin_loss_pct`; funding, volatilidad, correlacion con BTC y posiciones
+    abiertas quedaban en `null` fijo (no calculadas), faltaban timeframe y niveles,
+    y no existian las 3 pruebas de fuga de la seccion (a). Como congelar el prompt
+    implica una medicion de 30+ dias y cualquier cambio la reinicia, se completo
+    esto antes de congelar nada.
+    1. Nuevo `app/llm/market_features.py`: timeframe de referencia fijo "1h" (el
+       mas fino que ya se cachea para todo el universo, via
+       `mean_reversion_rsi14_bb20`) para ATR/volatilidad/correlacion, independiente
+       del timeframe propio de cada estrategia contribuyente. `fetch_closed_candles`
+       nunca devuelve una vela que no cerro antes o en el instante evaluado
+       (`open_time + duracion <= as_of_ms`). `compute_atr14_pct` (ATR simple de 14
+       rangos, no el suavizado de Wilder -- documentado como simplificacion),
+       `compute_returns_std` (30 retornos logaritmicos), `compute_btc_correlation`
+       (Pearson sobre retornos, alineado por `open_time`, a 30 y 100 velas, sin
+       numpy/scipy), `compute_funding_features` (ultimo evento de `funding_cache`
+       con `funding_time <= vela evaluada`, intervalo del contrato desde
+       `contract_specs_cache`, `funding_is_approximated` si el evento es mas viejo
+       que el intervalo + `FUNDING_STALE_MARGIN_HOURS`), `compute_open_real_positions`
+       (nuevo `trades_repo.get_open_positions_as_of(db, as_of)`: `opened_at <= as_of`
+       y sigue abierta o cerro despues -- NUNCA `shadow_trades`). Todo `None`
+       explicito si falta el dato (velas insuficientes, sin funding cacheado).
+    2. `app/llm/prompts.py`: `build_features_from_shadow_trade` ahora pide
+       `settings` y agrega `timeframe_by_strategy`, `sl_price`, `tp_price`,
+       `trailing_distance`, `liq_price_estimated` (de la propia sombra, fijados al
+       abrir -- nunca `effective_stop`/`best_price`, que siguen al precio
+       POSTERIOR a la decision) y las features de `market_features`. Nuevo
+       `signals_repo.get_by_symbol_strategy_candle` (ya existia, reusado para
+       timeframe tambien).
+    3. `SYSTEM_PROMPT` ampliado: contexto de la cuenta (paper, 10x aislado, SL hasta
+       50 % del margen), que mide cada estrategia contribuyente, que conviene
+       sopesar (tendencia/volatilidad, funding en contra, correlacion con BTC,
+       posiciones reales abiertas, riesgo del SL), que `null` nunca se infiere, y
+       que NO hay una tasa de aprobacion objetivo. Sigue en `prompt_version =
+       "signal_review_v1"`: todavia no se uso en ninguna medicion real (solo
+       copias), y lo que de verdad evita mezclar dos versiones es `PROMPT_SHA256`
+       (via `measurement_keys`), no la etiqueta legible.
+    4. `scripts/llm_smoke.py`: imprime tambien el `user_message` completo enviado
+       (son datos, no secretos).
+    5. `scripts/llm_pilot.py`: cuenta y reporta, por campo, en cuantos de los
+       grupos procesados quedo en `null` (y, para `indicators_by_strategy`, cuantos
+       slots por estrategia sin fila en `signals`) -- para saber con que
+       informacion real decidio el piloto.
+    6. Documentado en `docs/FASE3_6_LLM.md` (seccion e): el tope diario es
+       `SUM(cost_usd)` sobre `llm_logs` de la base que recibe `--db`, no
+       acumulativo entre copias distintas; la proteccion real entre corridas con
+       copias es `--max-calls` y el limite de la consola de Anthropic.
+    - **Pruebas de fuga (seccion a, las 3 obligatorias) en
+      `tests/unit/test_llm_market_features.py`:** velas futuras con valores
+      extremos no cambian ATR ni la desviacion de retornos; la serie "truncada" al
+      cierre evaluado da exactamente los mismos bares y el mismo ATR que leerla de
+      una base con el resto de la serie "completa" ya cargado; ninguna vela
+      devuelta tiene `open_time` posterior al cierre evaluado (ni, mas estricto,
+      sin cerrar a ese instante). 16 tests en total en ese archivo (incluye ATR,
+      desviacion, correlacion, funding y posiciones reales). `test_llm_prompts.py`
+      ampliado a 11 tests (niveles planeados, contexto del prompt, sin tasa
+      objetivo, nulos de mercado sin datos cacheados).
+    - **Smoke de punta a punta contra copias de la base real** (regla de
+      CLAUDE.md): `llm_pilot.py` con los 3 grupos reales -- 0/5 slots de
+      indicadores en null (ya habia fila en `signals` para los 5), solo
+      `trailing_distance` en null para los 3 (esa estrategia no la usa); `llm_smoke.py`
+      con 1 grupo, imprimiendo un `user_message` real con ATR, RSI, bandas de
+      Bollinger, correlacion con BTC (0.73/0.27), funding, niveles y 0 posiciones
+      reales abiertas. Ambos sin red ni llamadas reales.
+    - `AUTO_OPEN_WITHOUT_LLM` sigue en `false`; nada de la fase (iv) toca
+      `app/core/scheduler.py`. No se hicieron llamadas reales a la API.
+    - Suite completa: 443 passed, 2 skipped; `ruff check .` limpio.
 - **Valores por defecto alineados con `docs/FASE3_PLAN.md` (previo a implementar 3.6)**:
   `DEFAULT_MARGIN_USDT` pasa de 10 a **5** (seccion 8 del plan; la cartera de Fase 2 se
   arruina a 10 USDT/3 posiciones en 3 de 4 estrategias por reglas) y

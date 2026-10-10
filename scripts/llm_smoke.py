@@ -107,7 +107,7 @@ async def main(args: argparse.Namespace) -> None:
         print()
 
         for trade in groups:
-            features = await build_features_from_shadow_trade(db, trade)
+            features = await build_features_from_shadow_trade(db, trade, settings)
             user_message = build_user_message(features)
             estimated_tokens = estimate_input_tokens(SYSTEM_PROMPT, user_message)
 
@@ -120,6 +120,7 @@ async def main(args: argparse.Namespace) -> None:
             row = await llm_logs_repo.get_by_signal_group_key(db, trade.signal_group_key)
 
             print(f"-- grupo {trade.signal_group_key} ({trade.symbol} {trade.side.value}) --")
+            print(f"  mensaje de usuario (sin secretos): {user_message}")
             print(f"  status: {result.status}   etiqueta: {result.label}")
             if row is not None:
                 print(f"  tokens entrada/salida: {row['input_tokens']}/{row['output_tokens']} "
