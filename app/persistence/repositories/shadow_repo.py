@@ -50,6 +50,8 @@ def _row_to_shadow(row) -> ShadowTrade:
         executed_in_real_account=bool(row["executed_in_real_account"]),
         reconciliation_failed=bool(row["reconciliation_failed"]),
         reconciliation_attempts=row["reconciliation_attempts"],
+        reconciliation_window_start_ms=row["reconciliation_window_start_ms"],
+        reconciliation_first_failed_at_ms=row["reconciliation_first_failed_at_ms"],
     )
 
 
@@ -148,16 +150,20 @@ async def set_llm_decision(db: Database, shadow_id: int, label: str) -> bool:
 
 
 async def update_reconciliation_state(
-    db: Database, shadow_id: int, failed: bool, attempts: int
+    db: Database, shadow_id: int, failed: bool, attempts: int,
+    window_start_ms: int | None = None, first_failed_at_ms: int | None = None,
 ) -> None:
     """Incidente de estabilidad 2026-10-10, Etapa 2: marca si la ultima
     reconciliacion fallo y cuantos intentos van. Mientras el flag este
     puesto, el monitor CONGELA la sombra (no la evalua por tick) -- ver
-    `_evaluate` en `app/trading/position_monitor.py`."""
+    `_evaluate` en `app/trading/position_monitor.py`. `window_start_ms`/
+    `first_failed_at_ms` (revision de Etapa 2, correcciones 1 y 2) se fijan
+    solo en la primera falla de la racha -- el llamador decide cuando
+    preservarlos."""
     await db.execute(
-        "UPDATE shadow_trades SET reconciliation_failed = ?, reconciliation_attempts = ? "
-        "WHERE id = ?",
-        (int(failed), attempts, shadow_id),
+        "UPDATE shadow_trades SET reconciliation_failed = ?, reconciliation_attempts = ?, "
+        "reconciliation_window_start_ms = ?, reconciliation_first_failed_at_ms = ? WHERE id = ?",
+        (int(failed), attempts, window_start_ms, first_failed_at_ms, shadow_id),
     )
 
 

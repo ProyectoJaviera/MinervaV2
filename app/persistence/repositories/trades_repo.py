@@ -45,6 +45,8 @@ def _row_to_trade(row) -> Trade:
         fill_source=row["fill_source"],
         reconciliation_failed=bool(row["reconciliation_failed"]),
         reconciliation_attempts=row["reconciliation_attempts"],
+        reconciliation_window_start_ms=row["reconciliation_window_start_ms"],
+        reconciliation_first_failed_at_ms=row["reconciliation_first_failed_at_ms"],
     )
 
 
@@ -158,16 +160,20 @@ async def get_open_positions(db: Database, symbol: str | None = None) -> list[Tr
 
 
 async def update_reconciliation_state(
-    db: Database, trade_id: int, failed: bool, attempts: int
+    db: Database, trade_id: int, failed: bool, attempts: int,
+    window_start_ms: int | None = None, first_failed_at_ms: int | None = None,
 ) -> None:
     """Incidente de estabilidad 2026-10-10, Etapa 2: marca si la ultima
     reconciliacion fallo y cuantos intentos van. Las posiciones REALES siguen
     vigiladas en vivo igual con el flag puesto -- solo cambia el
     `fill_source` de un cierre por tick (ver `_close` en
-    `app/trading/position_monitor.py`)."""
+    `app/trading/position_monitor.py`). `window_start_ms`/`first_failed_at_ms`
+    (revision de Etapa 2, correcciones 1 y 2) se fijan solo en la primera
+    falla de la racha -- el llamador decide cuando preservarlos."""
     await db.execute(
-        "UPDATE trades SET reconciliation_failed = ?, reconciliation_attempts = ? WHERE id = ?",
-        (int(failed), attempts, trade_id),
+        "UPDATE trades SET reconciliation_failed = ?, reconciliation_attempts = ?, "
+        "reconciliation_window_start_ms = ?, reconciliation_first_failed_at_ms = ? WHERE id = ?",
+        (int(failed), attempts, window_start_ms, first_failed_at_ms, trade_id),
     )
 
 

@@ -67,6 +67,18 @@ class Trade(BaseModel):
     # sin PnL, excluida de la medicion).
     reconciliation_failed: bool = False
     reconciliation_attempts: int = 0
+    # Revision de Etapa 2 (correcciones 1 y 2): se fijan SOLO en la primera falla
+    # de la racha actual (no se mueven en reintentos posteriores fallidos, ni
+    # entre reinicios del bot, hasta que la reconciliacion se reintente con
+    # exito). `reconciliation_window_start_ms` es desde donde debe seguir
+    # reconciliando cada reintento -- nunca desde `opened_at`: rejugar toda la
+    # vida de la posicion con el `effective_stop`/`best_price` ACTUALES (ya
+    # avanzados por trailing) contra velas de antes de la falla puede cerrarla
+    # por error. `reconciliation_first_failed_at_ms` es cuando empezo la racha,
+    # para el minimo de horas antes de rendirse con una sombra (ver
+    # `MIN_SHADOW_RECONCILE_GIVE_UP_HOURS` en `app/trading/position_monitor.py`).
+    reconciliation_window_start_ms: int | None = None
+    reconciliation_first_failed_at_ms: int | None = None
 
 
 class ShadowTrade(Trade):

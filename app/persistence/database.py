@@ -510,9 +510,15 @@ _TRADES_MIGRATED_COLUMNS = {
     # una reconciliacion fallida marca la posicion en vez de cerrarla a ciegas por
     # precio en vivo. Las REALES siguen vigiladas en vivo pero marcadas (el cierre
     # por tick usa `fill_source='TICK_UNRECONCILED'`, auditable); las sombras se
-    # congelan (ver `_SHADOW_TRADES_MIGRATED_COLUMNS`, mismo par de columnas).
+    # congelan (ver `_SHADOW_TRADES_MIGRATED_COLUMNS`, mismo set de columnas).
     "reconciliation_failed": "INTEGER NOT NULL DEFAULT 0",
     "reconciliation_attempts": "INTEGER NOT NULL DEFAULT 0",
+    # Revision de Etapa 2 (correcciones 1 y 2): fijadas solo en la primera
+    # falla de la racha, para que los reintentos resuman desde ahi (no desde
+    # `opened_at`) y el minimo de horas antes de rendirse se mida desde el
+    # inicio real de la racha, no desde el ultimo reintento.
+    "reconciliation_window_start_ms": "INTEGER",
+    "reconciliation_first_failed_at_ms": "INTEGER",
 }
 
 _SIGNALS_MIGRATED_COLUMNS = {
@@ -522,6 +528,8 @@ _SIGNALS_MIGRATED_COLUMNS = {
 _SHADOW_TRADES_MIGRATED_COLUMNS = {
     "reconciliation_failed": "INTEGER NOT NULL DEFAULT 0",
     "reconciliation_attempts": "INTEGER NOT NULL DEFAULT 0",
+    "reconciliation_window_start_ms": "INTEGER",
+    "reconciliation_first_failed_at_ms": "INTEGER",
 }
 
 

@@ -591,24 +591,70 @@ async def test_retry_reconciliation_success_clears_the_failed_flag(db):
     assert cleared.reconciliation_attempts == 0
 
 
+def _irreparable_gap(db, symbol: str, first_open: int):
+    """Hueco contiguo de 10 velas, siempre fuera de la tolerancia aislada de la
+    Etapa 2a -- usado para forzar una falla de reconciliacion determinista."""
+    return db.execute(
+        "DELETE FROM ohlcv_cache WHERE symbol = ? AND interval = '1m' "
+        "AND open_time BETWEEN ? AND ?",
+        (symbol, first_open + 20 * BAR_MS, first_open + 29 * BAR_MS),
+    )
+
+
 @pytest.mark.asyncio
-async def test_shadow_closes_as_reconcile_failed_after_max_attempts(db):
+async def test_shadow_does_not_give_up_after_max_attempts_if_little_time_elapsed(db):
+    """Correccion 2 (revision de Etapa 2): 3 intentos cada 300 s son ~10 min -- un
+    corte de esa duracion no debe descartar una sombra sana. Reloj controlado:
+    los 3 intentos ocurren dentro de una hora, muy por debajo de
+    `MIN_SHADOW_RECONCILE_GIVE_UP_HOURS` (6h), asi que NO debe rendirse."""
     rest, settings, backend, monitor = await _setup_with_shadow(db)
     now = _now_ms()
     sim = await _open_downtime_shadow(db, monitor, opened_minutes_ago=60,
                                       last_seen_minutes_ago=50, now_ms=now)
     first_open, last_closed = _window(now, 60)
     await _seed_1m(db, "BTCUSDT", first_open, last_closed)
-    await db.execute(
-        "DELETE FROM ohlcv_cache WHERE symbol = ? AND interval = '1m' "
-        "AND open_time BETWEEN ? AND ?",
-        ("BTCUSDT", first_open + 20 * BAR_MS, first_open + 29 * BAR_MS),
-    )
+    await _irreparable_gap(db, "BTCUSDT", first_open)
     await monitor._reload_trades()
     key = monitor._key(sim)
 
-    for _ in range(MAX_SHADOW_RECONCILE_ATTEMPTS):
-        await monitor._attempt_reconcile_retry(monitor._trades[key], now)
+    for hours in (0, 0.5, 0.9):  # tres intentos dentro de la misma hora
+        await monitor._attempt_reconcile_retry(
+            monitor._trades[key], now + int(hours * 3_600_000)
+        )
+
+    still = await shadow_repo.get(db, sim.id)
+    assert still.status == TradeStatus.OPEN
+    assert still.reconciliation_failed is True
+    assert still.reconciliation_attempts == MAX_SHADOW_RECONCILE_ATTEMPTS
+    assert key in monitor._trades
+
+
+@pytest.mark.asyncio
+async def test_shadow_closes_as_reconcile_failed_after_max_attempts_and_enough_elapsed_time(db):
+    """Con el minimo de intentos Y de horas de racha fallida cumplidos (reloj
+    controlado: la tercera falla llega 7h despues de la primera), la sombra se
+    cierra sin PnL."""
+    rest, settings, backend, monitor = await _setup_with_shadow(db)
+    now = _now_ms()
+    sim = await _open_downtime_shadow(db, monitor, opened_minutes_ago=60,
+                                      last_seen_minutes_ago=50, now_ms=now)
+    first_open, last_closed = _window(now, 60)
+    await _seed_1m(db, "BTCUSDT", first_open, last_closed)
+    await _irreparable_gap(db, "BTCUSDT", first_open)
+    await monitor._reload_trades()
+    key = monitor._key(sim)
+
+    first_attempt_at = now
+    await monitor._attempt_reconcile_retry(monitor._trades[key], first_attempt_at)
+    window_after_first = monitor._trades[key].reconciliation_window_start_ms
+    await monitor._attempt_reconcile_retry(
+        monitor._trades[key], first_attempt_at + 3 * 3_600_000
+    )
+    # La ventana desde donde reintentar no se mueve entre fallas sucesivas.
+    assert monitor._trades[key].reconciliation_window_start_ms == window_after_first
+    await monitor._attempt_reconcile_retry(
+        monitor._trades[key], first_attempt_at + 7 * 3_600_000
+    )
 
     closed = await shadow_repo.get(db, sim.id)
     assert closed.status == TradeStatus.CLOSED
@@ -618,6 +664,60 @@ async def test_shadow_closes_as_reconcile_failed_after_max_attempts(db):
     assert closed.pnl_net_usdt == pytest.approx(0.0)
     assert closed.exit_price == pytest.approx(closed.entry_price)
     assert key not in monitor._trades
+
+
+@pytest.mark.asyncio
+async def test_retry_resumes_from_the_original_failure_window_not_from_opened_at(db):
+    """Correccion 1 (revision de Etapa 2): un trailing que YA habia avanzado
+    ANTES de la falla deja `effective_stop` mas ajustado que al abrir. Si el
+    reintento rejugara desde `opened_at` (el bug reportado), una mecha vieja
+    -- de ANTES de que el stop avanzara -- cruzaria el stop de HOY y cerraria
+    la sombra por error. Con la ventana persistida desde la falla original,
+    esa mecha vieja ni se mira."""
+    rest, settings, backend, monitor = await _setup_with_shadow(db)
+    now = _now_ms()
+    sim = await _open_downtime_shadow(db, monitor, opened_minutes_ago=60,
+                                      last_seen_minutes_ago=10, now_ms=now,
+                                      levels=StrategyLevels(95.0, 110.0))
+    # El trailing ya habia avanzado el stop a 99 ANTES de la falla (price action
+    # favorable ya reconciliada/ticada con exito, no parte de la caida).
+    await shadow_repo.update_risk_state(db, sim.id, 99.0, 104.0)
+    first_open, last_closed = _window(now, 60)
+    # Mecha vieja (minuto -50, bien antes de last_seen_ms=-10) que cruza el
+    # stop de HOY (99) pero NO el original (95): si se rejugara desde
+    # opened_at, cerraria por SL; no deberia ni evaluarse.
+    old_wick_at = first_open + 10 * BAR_MS
+    await _seed_1m(db, "BTCUSDT", first_open, last_closed,
+                   overrides={old_wick_at: {"low": 96.0, "close": 96.5}})
+    # Hueco contiguo DENTRO de la ventana reciente (last_seen_ms=-10min..ahora),
+    # para que la PRIMERA reconciliacion (que ya parte de ahi, no de opened_at)
+    # falle de verdad.
+    gap_end = last_closed
+    gap_start = last_closed - 3 * BAR_MS
+    await db.execute(
+        "DELETE FROM ohlcv_cache WHERE symbol = 'BTCUSDT' AND interval = '1m' "
+        "AND open_time BETWEEN ? AND ?", (gap_start, gap_end),
+    )
+
+    outcomes = await monitor.reconcile_on_startup(now_ms=now)
+    assert outcomes == [(sim.id, "ERROR")]
+    marked = await shadow_repo.get(db, sim.id)
+    assert marked.reconciliation_window_start_ms is not None
+    assert marked.reconciliation_window_start_ms > old_wick_at  # la mecha queda afuera
+
+    # Se repara (upsert) el hueco que hizo fallar el primer intento; el
+    # reintento ya puede completar la ventana (que NUNCA incluyo la mecha vieja).
+    await _seed_1m(db, "BTCUSDT", first_open, last_closed,
+                   overrides={old_wick_at: {"low": 96.0, "close": 96.5}})
+
+    await monitor._reload_trades()
+    key = monitor._key(sim)
+    await monitor._attempt_reconcile_retry(monitor._trades[key], now)
+
+    still_open = await shadow_repo.get(db, sim.id)
+    assert still_open.status == TradeStatus.OPEN
+    assert still_open.reconciliation_failed is False
+    assert still_open.close_reason is None
 
 
 @pytest.mark.asyncio

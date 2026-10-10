@@ -74,6 +74,11 @@ RECONCILE_GAP_TOLERANCE_MIN = 2
 # solo marcada (ver `FILL_TICK_UNRECONCILED` y `open_real_positions`).
 MAX_SHADOW_RECONCILE_ATTEMPTS = 3
 RECONCILE_RETRY_SECONDS = 300.0
+# Revision de Etapa 2, correccion 2: 3 intentos cada 300s son ~10 min -- un
+# corte de internet o de la exchange de esa duracion descartaria sombras
+# sanas. Rendirse exige ADEMAS un minimo de horas de racha fallida continua
+# (no solo de intentos): las dos condiciones deben cumplirse juntas.
+MIN_SHADOW_RECONCILE_GIVE_UP_HOURS = 6.0
 
 FILL_TICK = "TICK"
 FILL_CANDLE = "CANDLE_RECON"
@@ -491,16 +496,25 @@ class PositionMonitor:
         await self._reload_trades()
         outcomes: list[tuple[int, str]] = []
         for trade in list(self._trades.values()):
+            # Correccion 1 (revision de Etapa 2): si YA esta marcada de una racha
+            # anterior, se reconcilia desde donde quedo esa racha
+            # (`reconciliation_window_start_ms`), no desde el `last_seen_ms`
+            # global actual -- que para esta posicion ya avanzo de mas.
+            effective_last_seen = (
+                trade.reconciliation_window_start_ms
+                if trade.reconciliation_failed else last_seen_ms
+            )
             try:
-                outcome = await self._reconcile_trade(trade, last_seen_ms, now_ms)
+                outcome = await self._reconcile_trade(trade, effective_last_seen, now_ms)
             except Exception:  # noqa: BLE001 - una posicion no debe impedir arrancar
                 logger.critical(
                     "Reconciliacion fallida para trade=%d %s; se marca y se reintenta "
-                    "(cada %.0fs, maximo %d intentos si es sombra)",
+                    "(cada %.0fs, minimo %d intentos y %.0fh de racha si es sombra)",
                     trade.id, trade.symbol, RECONCILE_RETRY_SECONDS,
-                    MAX_SHADOW_RECONCILE_ATTEMPTS, exc_info=True,
+                    MAX_SHADOW_RECONCILE_ATTEMPTS, MIN_SHADOW_RECONCILE_GIVE_UP_HOURS,
+                    exc_info=True,
                 )
-                await self._mark_reconcile_attempt_failed(trade, now_ms)
+                await self._mark_reconcile_attempt_failed(trade, now_ms, effective_last_seen)
                 outcome = "ERROR"
             outcomes.append((trade.id, outcome))
         return outcomes
@@ -633,14 +647,17 @@ class PositionMonitor:
 
     async def _attempt_reconcile_retry(self, trade: Trade, now_ms: int) -> None:
         is_shadow = isinstance(trade, ShadowTrade)
+        # Correccion 1: se reintenta desde la MISMA ventana que fallo la primera
+        # vez (`reconciliation_window_start_ms`), nunca desde `opened_at`.
+        last_seen_ms = trade.reconciliation_window_start_ms
         try:
-            outcome = await self._reconcile_trade(trade, None, now_ms)
+            outcome = await self._reconcile_trade(trade, last_seen_ms, now_ms)
         except Exception:  # noqa: BLE001 - un reintento fallido no debe tumbar el ciclo
             logger.warning(
                 "Reintento de reconciliacion fallido para trade=%d %s",
                 trade.id, trade.symbol, exc_info=True,
             )
-            await self._mark_reconcile_attempt_failed(trade, now_ms)
+            await self._mark_reconcile_attempt_failed(trade, now_ms, last_seen_ms)
             return
         logger.info(
             "Reintento de reconciliacion para trade=%d %s: %s", trade.id, trade.symbol, outcome,
@@ -649,41 +666,73 @@ class PositionMonitor:
         key = (is_shadow, trade.id)
         current = self._trades.get(key)
         if current is not None:
-            self._trades[key] = current.model_copy(
-                update={"reconciliation_failed": False, "reconciliation_attempts": 0}
-            )
+            self._trades[key] = current.model_copy(update={
+                "reconciliation_failed": False, "reconciliation_attempts": 0,
+                "reconciliation_window_start_ms": None, "reconciliation_first_failed_at_ms": None,
+            })
 
-    async def _mark_reconcile_attempt_failed(self, trade: Trade, now_ms: int) -> None:
-        """Marca el intento fallido (posicion marcada, no cerrada a ciegas). Una
-        SOMBRA que agota `MAX_SHADOW_RECONCILE_ATTEMPTS` se cierra sin PnL; una
-        posicion REAL sigue vigilada en vivo indefinidamente, solo marcada."""
+    async def _mark_reconcile_attempt_failed(
+        self, trade: Trade, now_ms: int, last_seen_ms: int | None,
+    ) -> None:
+        """Marca el intento fallido (posicion marcada, no cerrada a ciegas).
+
+        Correccion 1 (revision de Etapa 2): persiste, SOLO en la primera falla de
+        la racha, desde donde reintentar (`reconciliation_window_start_ms`) y
+        cuando empezo la racha (`reconciliation_first_failed_at_ms`) -- todo
+        reintento posterior (fallido o no) sigue reconciliando desde ESE mismo
+        instante, nunca desde `opened_at`: rejugar toda la vida de la posicion con
+        el `effective_stop`/`best_price` YA avanzados por trailing contra velas de
+        antes de la falla puede cerrarla por error (vela vieja, stop de hoy).
+
+        Correccion 2: una SOMBRA solo se cierra sin PnL cuando agota
+        `MAX_SHADOW_RECONCILE_ATTEMPTS` intentos Y lleva al menos
+        `MIN_SHADOW_RECONCILE_GIVE_UP_HOURS` de racha fallida continua -- las dos
+        condiciones a la vez, para que un corte de red o de la exchange de unos
+        minutos no descarte una sombra sana. Una posicion REAL nunca se cierra
+        sola: sigue vigilada en vivo indefinidamente, solo marcada."""
         is_shadow = isinstance(trade, ShadowTrade)
+        opened_ms = int(trade.opened_at.timestamp() * 1000)
         attempts = trade.reconciliation_attempts + 1
-        if is_shadow:
-            await shadow_repo.update_reconciliation_state(self.db, trade.id, True, attempts)
+        if trade.reconciliation_failed and trade.reconciliation_window_start_ms is not None:
+            window_start_ms = trade.reconciliation_window_start_ms
+            first_failed_at_ms = trade.reconciliation_first_failed_at_ms or now_ms
         else:
-            await trades_repo.update_reconciliation_state(self.db, trade.id, True, attempts)
-        updated = trade.model_copy(
-            update={"reconciliation_failed": True, "reconciliation_attempts": attempts}
+            window_start_ms = max(opened_ms, last_seen_ms or opened_ms)
+            first_failed_at_ms = now_ms
+
+        repo = shadow_repo if is_shadow else trades_repo
+        await repo.update_reconciliation_state(
+            self.db, trade.id, True, attempts, window_start_ms, first_failed_at_ms,
         )
-        if is_shadow and attempts >= MAX_SHADOW_RECONCILE_ATTEMPTS:
-            await self._give_up_shadow_reconciliation(updated)
+        updated = trade.model_copy(update={
+            "reconciliation_failed": True,
+            "reconciliation_attempts": attempts,
+            "reconciliation_window_start_ms": window_start_ms,
+            "reconciliation_first_failed_at_ms": first_failed_at_ms,
+        })
+        elapsed_hours = (now_ms - first_failed_at_ms) / 3_600_000
+        if (
+            is_shadow
+            and attempts >= MAX_SHADOW_RECONCILE_ATTEMPTS
+            and elapsed_hours >= MIN_SHADOW_RECONCILE_GIVE_UP_HOURS
+        ):
+            await self._give_up_shadow_reconciliation(updated, elapsed_hours)
             return
         self._trades[self._key(updated)] = updated
 
-    async def _give_up_shadow_reconciliation(self, trade: ShadowTrade) -> None:
+    async def _give_up_shadow_reconciliation(
+        self, trade: ShadowTrade, elapsed_hours: float
+    ) -> None:
         await self.shadow.close_unreliable(trade)
         key = self._key(trade)
         self._trades.pop(key, None)
         self._reconcile_retry_at.pop(key, None)
         logger.warning(
-            "Sombra trade=%d %s: reconciliacion fallo %d veces seguidas, se cierra sin PnL "
-            "(RECONCILE_FAILED, excluida de ai_value)",
-            trade.id, trade.symbol, trade.reconciliation_attempts,
+            "Sombra trade=%d %s: reconciliacion fallo %d veces seguidas en %.1fh, se cierra "
+            "sin PnL (RECONCILE_FAILED, excluida de ai_value)",
+            trade.id, trade.symbol, trade.reconciliation_attempts, elapsed_hours,
         )
 
     async def _clear_reconciliation_failed(self, trade_id: int, is_shadow: bool) -> None:
-        if is_shadow:
-            await shadow_repo.update_reconciliation_state(self.db, trade_id, False, 0)
-        else:
-            await trades_repo.update_reconciliation_state(self.db, trade_id, False, 0)
+        repo = shadow_repo if is_shadow else trades_repo
+        await repo.update_reconciliation_state(self.db, trade_id, False, 0, None, None)
