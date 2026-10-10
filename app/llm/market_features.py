@@ -139,8 +139,10 @@ async def compute_funding_features(
     """Tasa de funding vigente en la vela evaluada (el ultimo evento cacheado
     con `funding_time <= candle_close_ms`), el intervalo del contrato en horas,
     y si esa tasa esta obsoleta (mas vieja que el intervalo mas el margen de
-    `funding_stale_margin_hours`). `funding_rate_pct` y `funding_is_approximated`
-    salen `None` si no hay ningun evento cacheado hasta ese instante."""
+    `funding_stale_margin_hours`). `funding_rate_pct` esta en PORCENTAJE
+    (0,01 = 0,01 %), no en la fraccion cruda que guarda `funding_cache`.
+    `funding_rate_pct` y `funding_is_approximated` salen `None` si no hay
+    ningun evento cacheado hasta ese instante."""
     spec = await specs_repo.get_spec(db, symbol)
     interval_h = (
         float(spec.funding_interval_hours)
@@ -157,7 +159,10 @@ async def compute_funding_features(
     latest_time, latest_rate = events[-1]
     tolerance_ms = (interval_h + funding_stale_margin_hours) * 3_600_000
     return {
-        "funding_rate_pct": latest_rate,
+        # `funding_cache` guarda la fraccion cruda de Bitunix (0,0001 = 0,01 %);
+        # `* 100` para porcentaje, igual que `signal_generator.py` linea ~351
+        # (`signals.funding_rate_pct`) -- mismo nombre de campo, misma unidad.
+        "funding_rate_pct": latest_rate * 100,
         "funding_interval_hours": interval_h,
         "funding_is_approximated": (candle_close_ms - latest_time) > tolerance_ms,
     }

@@ -129,7 +129,9 @@ async def test_funding_features_use_the_latest_event_at_or_before_the_candle(db)
 
     features = await mf.compute_funding_features(db, "BTCUSDT", candle_close_ms, 9.0)
 
-    assert features["funding_rate_pct"] == 0.0002
+    # funding_rate_pct esta en PORCENTAJE (0,0002 de fraccion -> 0,02 de %),
+    # igual que signals.funding_rate_pct (signal_generator.py, `* 100`).
+    assert features["funding_rate_pct"] == pytest.approx(0.02)
     assert features["funding_interval_hours"] == 8.0
     assert features["funding_is_approximated"] is False  # dentro de 8h + 9h de margen
 
@@ -144,7 +146,7 @@ async def test_funding_is_approximated_when_the_latest_event_is_stale(db):
 
     features = await mf.compute_funding_features(db, "BTCUSDT", candle_close_ms, 9.0)
 
-    assert features["funding_rate_pct"] == 0.0001
+    assert features["funding_rate_pct"] == pytest.approx(0.01)
     assert features["funding_is_approximated"] is True
 
 
@@ -163,7 +165,17 @@ async def test_funding_never_uses_an_event_after_the_evaluated_candle(db):
         (BASE_MS, 0.0001), (BASE_MS + 100 * HOUR_MS, 0.9999),  # muy posterior
     ])
     features = await mf.compute_funding_features(db, "BTCUSDT", BASE_MS + HOUR_MS, 9.0)
-    assert features["funding_rate_pct"] == 0.0001  # nunca ve el evento futuro
+    assert features["funding_rate_pct"] == pytest.approx(0.01)  # nunca ve el evento futuro
+
+
+@pytest.mark.asyncio
+async def test_funding_rate_pct_is_in_percent_not_the_raw_cache_fraction(db):
+    # Unidades (error real encontrado y corregido en la fase iv): `funding_cache`
+    # guarda la fraccion cruda de Bitunix (0,0001 = 0,01 %); la feature del
+    # prompt tiene que devolver PORCENTAJE (0,01), no la fraccion sin convertir.
+    await funding_repo.upsert_funding(db, "BTCUSDT", [(BASE_MS, 0.0001)])
+    features = await mf.compute_funding_features(db, "BTCUSDT", BASE_MS, 9.0)
+    assert features["funding_rate_pct"] == pytest.approx(0.01)  # no 0.0001
 
 
 # --- posiciones reales abiertas (nunca sombras) ----------------------------------

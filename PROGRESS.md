@@ -824,6 +824,25 @@ una:
     - `AUTO_OPEN_WITHOUT_LLM` sigue en `false`; nada de la fase (iv) toca
       `app/core/scheduler.py`. No se hicieron llamadas reales a la API.
     - Suite completa: 443 passed, 2 skipped; `ruff check .` limpio.
+  - **Correccion de unidades en `funding_rate_pct` (revision de la fase iv,
+    2026-10-10):** `market_features.compute_funding_features` devolvia la
+    fraccion cruda de `funding_cache` (0,0001) sin convertir a porcentaje; el
+    LLM habria visto un funding 100 veces menor que el real.
+    `signal_generator.py` linea ~351 (`signals.funding_rate_pct`) ya multiplica
+    por 100 -- se corrigio `market_features.py` para usar la misma convencion
+    (`latest_rate * 100`), documentado en el docstring de la funcion y en
+    `docs/FASE3_6_LLM.md` seccion (a): "`funding_rate_pct` está en porcentaje
+    (0,01 = 0,01 %)". Revisados `prompts.py`, `llm_pilot.py`/`llm_smoke.py` y el
+    doc: ninguno mas asumia la unidad cruda. `PROMPT_VERSION` se queda en
+    `signal_review_v1` (no se tocó `SYSTEM_PROMPT`, el hash no cambia).
+    - Tests corregidos en `test_llm_market_features.py` (0,0001/0,0002 de
+      fraccion -> 0,01/0,02 de porcentaje) y nuevo test explicito de unidades
+      (`test_funding_rate_pct_is_in_percent_not_the_raw_cache_fraction`).
+    - Probado `llm_smoke.py` en `--dry-run` contra una copia fresca de la base
+      real: `funding_rate_pct` pasa de 0,0001 (error) a 0,01 (correcto) para el
+      mismo grupo real (DOGEUSDT SHORT).
+    - Suite completa: 444 passed, 2 skipped; `ruff check .` limpio. Sin llamadas
+      reales, sin tocar el scheduler.
 - **Valores por defecto alineados con `docs/FASE3_PLAN.md` (previo a implementar 3.6)**:
   `DEFAULT_MARGIN_USDT` pasa de 10 a **5** (seccion 8 del plan; la cartera de Fase 2 se
   arruina a 10 USDT/3 posiciones en 3 de 4 estrategias por reglas) y

@@ -99,6 +99,11 @@ cerrar la vela evaluada. Todo son datos hasta el instante de la decisión.
    `sl_margin_loss_pct` (riesgo planeado como % del margen, frente al tope de 50 %).
 4. **Funding:** tasa en la vela evaluada, intervalo del contrato, y si la tasa es
    aproximada (bares posteriores al último evento real, ver subfase 3.3).
+   `funding_rate_pct` está en **porcentaje** (0,01 = 0,01 %), no en la fracción
+   cruda que guarda `funding_cache` (0,0001) -- misma convención que
+   `signals.funding_rate_pct` (`app/trading/signal_generator.py`, `* 100`). Error
+   real encontrado y corregido en la fase (iv): `market_features.py` devolvía la
+   fracción cruda sin convertir, 100 veces menor que el valor real.
 5. **Volatilidad reciente:** ATR(14) relativo al precio, y desviación típica de los
    retornos logarítmicos de las últimas 30 velas cerradas. Ambas calculadas solo con
    velas cuyo cierre es anterior o igual a la vela evaluada.
