@@ -156,6 +156,47 @@ async def mark_series_complete(
     )
 
 
+async def get_unrepairable_gaps(
+    db: Database, symbol: str, interval: str, price_type: str
+) -> dict[int, datetime]:
+    """`open_time -> last_attempted_at` de los huecos ya confirmados
+    irreparables (ni con pedido estrecho) para este simbolo/intervalo/
+    price_type -- evita que `_verify_and_repair` los reintente cada ciclo
+    (incidente de estabilidad 2026-10-10; `GAP_RETRY_COOLDOWN_HOURS` en
+    `app/market/ohlcv_history.py`)."""
+    rows = await db.fetch_all(
+        "SELECT open_time, last_attempted_at FROM ohlcv_unrepairable_gaps "
+        "WHERE symbol = ? AND interval = ? AND price_type = ?",
+        (symbol, interval, price_type),
+    )
+    return {r["open_time"]: datetime.fromisoformat(r["last_attempted_at"]) for r in rows}
+
+
+async def mark_unrepairable_gap(
+    db: Database, symbol: str, interval: str, price_type: str, open_time: int, now: datetime,
+) -> None:
+    await db.execute(
+        """
+        INSERT INTO ohlcv_unrepairable_gaps (
+            symbol, interval, price_type, open_time, first_seen_at, last_attempted_at, attempts
+        ) VALUES (?, ?, ?, ?, ?, ?, 1)
+        ON CONFLICT (symbol, interval, price_type, open_time) DO UPDATE SET
+            last_attempted_at = excluded.last_attempted_at, attempts = attempts + 1
+        """,
+        (symbol, interval, price_type, open_time, now.isoformat(), now.isoformat()),
+    )
+
+
+async def clear_unrepairable_gap(
+    db: Database, symbol: str, interval: str, price_type: str, open_time: int,
+) -> None:
+    await db.execute(
+        "DELETE FROM ohlcv_unrepairable_gaps "
+        "WHERE symbol = ? AND interval = ? AND price_type = ? AND open_time = ?",
+        (symbol, interval, price_type, open_time),
+    )
+
+
 async def get_series_complete_start(
     db: Database, symbol: str, interval: str, price_type: str
 ) -> int | None:

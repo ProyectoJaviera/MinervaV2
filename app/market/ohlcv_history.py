@@ -204,6 +204,17 @@ async def _download_range(
 
 GAP_FILL_MARGIN_BARS = 3
 GAP_FILL_LIMIT = 20
+# Cuantas velas de hueco entran en una sola llamada de `fill_gaps`, dejando
+# margen de `GAP_FILL_MARGIN_BARS` de cada lado sin pasar de `GAP_FILL_LIMIT`
+# en total. Una racha contigua mas larga que esto se reintenta en varias
+# llamadas (nunca se trunca en silencio: lo que no entre en una llamada entra
+# en la siguiente, ver `fill_gaps`).
+GAP_FILL_CHUNK_BARS = GAP_FILL_LIMIT - 2 * GAP_FILL_MARGIN_BARS
+# Cuanto se espera antes de reintentar un hueco ya confirmado irreparable
+# (`ohlcv_unrepairable_gaps`) -- evita golpear la API cada ciclo del
+# generador de señales por un hueco permanente (incidente de estabilidad
+# 2026-10-10, "Añadido 0"; ver docs/FASE2_INTEGRIDAD_VELAS.md).
+GAP_RETRY_COOLDOWN_HOURS = 24.0
 
 
 def find_gaps(
@@ -249,50 +260,124 @@ async def fill_gaps(
 
     recovered: list[int] = []
     for run in runs:
-        start_time = run[0] - GAP_FILL_MARGIN_BARS * step_ms
-        end_time = run[-1] + (GAP_FILL_MARGIN_BARS + 1) * step_ms
-        limit = min(len(run) + 2 * GAP_FILL_MARGIN_BARS, GAP_FILL_LIMIT)
-        raw_bars = await client.get_kline(
-            symbol=symbol, interval=interval, start_time=start_time, end_time=end_time,
-            limit=limit, price_type=price_type,
-        )
-        bars = [_bar_from_raw(symbol, interval, price_type, r) for r in raw_bars]
-        if bars:
-            await ohlcv_repo.upsert_bars(db, bars)
-        fetched = {b.open_time for b in bars}
-        recovered.extend(t for t in run if t in fetched)
+        # Una racha mas larga que lo que entra en una sola llamada (con
+        # margen) se parte en varios pedidos -- nunca se trunca en silencio.
+        for i in range(0, len(run), GAP_FILL_CHUNK_BARS):
+            chunk = run[i : i + GAP_FILL_CHUNK_BARS]
+            start_time = chunk[0] - GAP_FILL_MARGIN_BARS * step_ms
+            end_time = chunk[-1] + (GAP_FILL_MARGIN_BARS + 1) * step_ms
+            limit = len(chunk) + 2 * GAP_FILL_MARGIN_BARS  # <= GAP_FILL_LIMIT por construccion
+            raw_bars = await client.get_kline(
+                symbol=symbol, interval=interval, start_time=start_time, end_time=end_time,
+                limit=limit, price_type=price_type,
+            )
+            bars = [_bar_from_raw(symbol, interval, price_type, r) for r in raw_bars]
+            if bars:
+                await ohlcv_repo.upsert_bars(db, bars)
+            fetched = {b.open_time for b in bars}
+            recovered.extend(t for t in chunk if t in fetched)
     return recovered
+
+
+def _align_up(ms: int, anchor: int, step_ms: int) -> int:
+    """Redondea `ms` hacia arriba al primer punto de la grilla `anchor,
+    anchor+step,...` (NO a la grilla de epoca 0): `anchor` es siempre un
+    `open_time` real ya cacheado (`min_cached`), asi esto funciona aunque la
+    serie no caiga en la grilla de epoca -- las velas reales de Bitunix si
+    caen ahi (verificado empiricamente), pero anclar a un dato real en vez
+    de asumirlo evita huecos falsos si alguna vez no fuera asi."""
+    if ms <= anchor:
+        return anchor
+    steps = -(-(ms - anchor) // step_ms)
+    return anchor + steps * step_ms
+
+
+def _align_down(ms: int, anchor: int, step_ms: int) -> int:
+    if ms <= anchor:
+        return anchor
+    steps = (ms - anchor) // step_ms
+    return anchor + steps * step_ms
 
 
 async def _verify_and_repair(
     client: BitunixRestClient, db: Database, symbol: str, interval: str,
-    price_type: str, step_ms: int,
+    price_type: str, step_ms: int, start_time: int, end_time: int,
 ) -> None:
-    """Verifica que lo cacheado este denso (sin huecos) y repara lo que
-    falte -- ver la nota de modulo. Se llama al final de `download_missing`,
-    tanto si hizo falta pedir algo por red como si no (asi una cache ya
-    guardada con huecos de antes se autorepara en la siguiente llamada
-    normal, no solo con una reparacion manual)."""
+    """Verifica que la VENTANA PEDIDA (`[start_time, end_time]`, acotada a lo
+    que de verdad esta cacheado) este densa, y repara lo que falte -- ver la
+    nota de modulo. Se llama al final de `download_missing`, tanto si hizo
+    falta pedir algo por red como si no (asi una cache ya guardada con
+    huecos de antes se autorepara en la siguiente llamada normal, no solo
+    con una reparacion manual).
+
+    Revisa SOLO lo pedido, no toda la serie cacheada: `download_missing` la
+    llama el generador de señales en cada ciclo (`app/trading/
+    signal_generator.py`), y un hueco permanente de hace años (ver seccion 5
+    de docs/FASE2_INTEGRIDAD_VELAS.md) en una parte de la serie que nadie
+    pidio no tiene por que reintentarse ahi.
+
+    Un hueco que YA se confirmo irreparable (`ohlcv_unrepairable_gaps`) no se
+    reintenta hasta que pasen `GAP_RETRY_COOLDOWN_HOURS` desde el ultimo
+    intento -- y el WARNING de "no se pudo reparar" se registra una sola vez,
+    al confirmarlo por primera vez; los reintentos posteriores que sigan
+    fallando quedan en INFO, no en WARNING."""
     covered = await ohlcv_repo.get_covered_range(db, symbol, interval, price_type)
     if covered is None:
         return
     min_cached, max_cached = covered
-    bars = await ohlcv_repo.get_bars(db, symbol, interval, price_type, min_cached, max_cached)
-    gaps = find_gaps([b.open_time for b in bars], step_ms, min_cached, max_cached)
+    lo = max(_align_up(start_time, min_cached, step_ms), min_cached)
+    hi = min(_align_down(end_time, min_cached, step_ms), max_cached)
+    if lo > hi:
+        return
+
+    bars = await ohlcv_repo.get_bars(db, symbol, interval, price_type, lo, hi)
+    gaps = find_gaps([b.open_time for b in bars], step_ms, lo, hi)
     if not gaps:
         return
-    recovered = await fill_gaps(client, db, symbol, interval, price_type, gaps, step_ms)
-    still_missing = sorted(set(gaps) - set(recovered))
-    logger.info(
-        "%s %s %s: %d hueco(s) detectado(s) tras la descarga, %d reparado(s)",
-        symbol, interval, price_type, len(gaps), len(recovered),
-    )
-    if still_missing:
-        logger.warning(
-            "%s %s %s: %d hueco(s) no se pudieron reparar ni con pedido estrecho: %s",
-            symbol, interval, price_type, len(still_missing),
-            [_fmt(t) for t in still_missing],
+
+    now = datetime.now(UTC)
+    known = await ohlcv_repo.get_unrepairable_gaps(db, symbol, interval, price_type)
+    to_retry = []
+    for g in gaps:
+        last_attempt = known.get(g)
+        if last_attempt is None:
+            to_retry.append(g)
+            continue
+        age_hours = (now - last_attempt).total_seconds() / 3600
+        if age_hours >= GAP_RETRY_COOLDOWN_HOURS:
+            to_retry.append(g)
+    if not to_retry:
+        return  # todos los huecos de la ventana ya son conocidos y en cooldown
+
+    recovered = await fill_gaps(client, db, symbol, interval, price_type, to_retry, step_ms)
+    if recovered:
+        logger.info(
+            "%s %s %s: %d hueco(s) detectado(s) en la ventana pedida, %d reparado(s)",
+            symbol, interval, price_type, len(to_retry), len(recovered),
         )
+    for g in recovered:
+        if g in known:
+            await ohlcv_repo.clear_unrepairable_gap(db, symbol, interval, price_type, g)
+            logger.info(
+                "%s %s %s: hueco en %s recuperado tras reintento", symbol, interval, price_type,
+                _fmt(g),
+            )
+
+    still_missing = sorted(set(to_retry) - set(recovered))
+    for g in still_missing:
+        is_new = g not in known
+        await ohlcv_repo.mark_unrepairable_gap(db, symbol, interval, price_type, g, now)
+        if is_new:
+            logger.warning(
+                "%s %s %s: hueco en %s no se pudo reparar ni con pedido estrecho (confirmado "
+                "irreparable; no se reintentara por %.0fh)",
+                symbol, interval, price_type, _fmt(g), GAP_RETRY_COOLDOWN_HOURS,
+            )
+        else:
+            logger.info(
+                "%s %s %s: hueco en %s sigue sin repararse tras reintento",
+                symbol, interval, price_type, _fmt(g),
+            )
 
 
 async def download_missing(
@@ -329,7 +414,9 @@ async def download_missing(
         await _download_range(
             client, db, symbol, interval, price_type, start_time, end_time, floor
         )
-        await _verify_and_repair(client, db, symbol, interval, price_type, step_ms)
+        await _verify_and_repair(
+            client, db, symbol, interval, price_type, step_ms, start_time, end_time
+        )
         return
 
     min_cached, max_cached = covered
@@ -346,7 +433,9 @@ async def download_missing(
             client, db, symbol, interval, price_type, start_time, min_cached - step_ms, floor
         )
 
-    await _verify_and_repair(client, db, symbol, interval, price_type, step_ms)
+    await _verify_and_repair(
+        client, db, symbol, interval, price_type, step_ms, start_time, end_time
+    )
 
 
 async def check_series_availability(

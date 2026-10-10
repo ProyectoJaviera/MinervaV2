@@ -32,7 +32,14 @@ from app.persistence.models import OHLCVBar
 from app.persistence.repositories import ohlcv_repo
 
 STEP_MS = interval_to_ms("4h")
-BASE_MS = 1_700_000_000_000
+# Alineado a la grilla de 4h (multiplo exacto de STEP_MS desde el epoch): las
+# velas reales de Bitunix SIEMPRE caen en esa grilla (verificado
+# empiricamente, ver docs/FASE2_INTEGRIDAD_VELAS.md); `_align_up`/
+# `_align_down` en `ohlcv_history._verify_and_repair` asumen lo mismo. Un
+# `BASE_MS` arbitrario sin alinear (el valor anterior, 1_700_000_000_000, no
+# es multiplo de STEP_MS) hacia que esas funciones compararan contra
+# timestamps que ninguna vela de prueba podia tener nunca.
+BASE_MS = (1_700_000_000_000 // STEP_MS) * STEP_MS
 
 
 def _raw_bar(idx: int, price_type: str = "LAST_PRICE", include_type_field: bool = True) -> dict:

@@ -111,6 +111,23 @@ CREATE TABLE IF NOT EXISTS ohlcv_series_complete (
     PRIMARY KEY (symbol, interval, price_type)
 );
 
+-- Huecos puntuales que `fill_gaps` ya intento reparar con un pedido estrecho
+-- y SIGUEN sin aparecer (incidente de estabilidad 2026-10-10, "Añadido 0" --
+-- ver docs/FASE2_INTEGRIDAD_VELAS.md). Evita que `_verify_and_repair` los
+-- reintente contra la API en cada ciclo del generador de señales: los vuelve
+-- a intentar solo despues de `GAP_RETRY_COOLDOWN_HOURS` (app/market/
+-- ohlcv_history.py), y se borra la fila si un reintento SI lo recupera.
+CREATE TABLE IF NOT EXISTS ohlcv_unrepairable_gaps (
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    price_type TEXT NOT NULL,
+    open_time INTEGER NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    last_attempted_at TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (symbol, interval, price_type, open_time)
+);
+
 -- Cache de funding_rate_history (igual proposito que ohlcv_cache): evita
 -- re-descargar en cada corrida/reintento del backtest. `floor_time` (en
 -- `ohlcv_floor` con interval='__funding__', price_type='__funding__' para
