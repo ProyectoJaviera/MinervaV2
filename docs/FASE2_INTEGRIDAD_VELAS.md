@@ -192,10 +192,12 @@ experimento vs. confiabilidad del dato).
 (`app/trading/position_monitor.py`):
 - **Sombra**: se CONGELA (`_evaluate` no la evalúa por tick mientras
   `reconciliation_failed`), no se cierra con un precio en vivo que no es
-  fiable. Se reintenta la reconciliación completa desde la apertura (al
-  arrancar, y después cada `RECONCILE_RETRY_SECONDS` = 300 s vía
-  `_retry_failed_reconciliations`, llamado en cada `tick_periodic`). Si tras
-  `MAX_SHADOW_RECONCILE_ATTEMPTS` = 3 intentos sigue fallando, se cierra
+  fiable. Se reintenta la reconciliación (al arrancar, y después cada
+  `RECONCILE_RETRY_SECONDS` = 300 s vía `_retry_failed_reconciliations`,
+  llamado en cada `tick_periodic`) desde la ventana de la falla ORIGINAL, no
+  desde la apertura (ver correcciones de la revisión, abajo). Si tras
+  `MAX_SHADOW_RECONCILE_ATTEMPTS` = 3 intentos Y `MIN_SHADOW_RECONCILE_
+  GIVE_UP_HOURS` = 6h de racha fallida sigue fallando, se cierra
   administrativamente SIN PnL (`ShadowBook.close_unreliable`:
   `close_reason='RECONCILE_FAILED'`, `pnl_gross_usdt=pnl_net_usdt=0.0`,
   `exit_price=entry_price`) y queda excluida (ver b).
@@ -209,8 +211,9 @@ experimento vs. confiabilidad del dato).
   exposición real aunque esté marcada, no una posición oculta.
 - Un reintento exitoso (en cualquier desenlace: sigue abierta, se cierra por
   SL/TP/liquidación con vela real, o no había ventana) limpia la marca
-  (`reconciliation_failed=False`, `reconciliation_attempts=0`) tanto en la fila
-  persistida como en el objeto en memoria.
+  (`reconciliation_failed=False`, `reconciliation_attempts=0`,
+  `reconciliation_window_start_ms=None`, `reconciliation_first_failed_at_ms=
+  None`) tanto en la fila persistida como en el objeto en memoria.
 
 **d. Pruebas**: unitarias para `_residual_gaps_are_tolerable` (aislado vs.
 contiguo, confirmado por MARK_PRICE vs. no, dentro/fuera del tope), la
@@ -221,3 +224,62 @@ cierre sin PnL al agotarlos; más un caso de punta a punta: reconciliación
 falla -> sombra marcada y sin cierre por tick -> excluida del veredicto de
 `ai_value_verdict`. Ver `tests/unit/test_position_monitor.py` y
 `tests/unit/test_ai_value.py`.
+
+### Revisión de la Etapa 2 (misma fecha): tres correcciones antes de reiniciar el bot
+
+Aprobada con tres correcciones pedidas sobre la implementación de arriba,
+todas en `app/trading/position_monitor.py` salvo donde se indique:
+
+**Corrección 1 -- reintentar desde la ventana de la falla, no desde
+`opened_at`.** El `_attempt_reconcile_retry` original llamaba
+`_reconcile_trade(trade, None, now_ms)`, que resuelve a `start_ms = opened_ms`:
+cada reintento rejugaba TODA la vida de la posición con el `effective_stop`/
+`best_price` ACTUALES (ya avanzados por trailing desde que se abrió) contra
+velas viejas, de ANTES de que el stop avanzara -- una mecha vieja que nunca
+cruzó el stop que tenía en ese momento podía cruzar el stop de HOY y cerrar la
+posición por error. Corregido con dos columnas nuevas en `trades` y
+`shadow_trades`, fijadas SOLO en la primera falla de la racha actual (no se
+mueven en fallas posteriores, ni entre reinicios del bot, hasta que la
+reconciliación se reintente con éxito):
+- `reconciliation_window_start_ms`: desde dónde debe seguir reconciliando
+  cada reintento (el `start_ms` que se intentó la primera vez que falló).
+- `reconciliation_first_failed_at_ms`: cuándo empezó la racha (para la
+  Corrección 2).
+
+`reconcile_on_startup` también se corrigió: si una posición YA está marcada
+(p.ej. el bot se cayó de nuevo antes de resolverla), usa
+`reconciliation_window_start_ms` en vez del `monitor_last_seen_ms` global
+(que para esa posición ya avanzó de más). Test:
+`test_retry_resumes_from_the_original_failure_window_not_from_opened_at` --
+trailing ya avanzado a un stop más ajustado, una mecha vieja que cruzaría ese
+stop si se rejugara desde la apertura, el reintento no la cierra porque la
+ventana persistida nunca incluye esa mecha.
+
+**Corrección 2 -- rendirse por tiempo, no solo por intentos.** 3 intentos
+cada 300 s son ~10 minutos: un corte de internet o de la exchange de esa
+duración descartaría sombras sanas. Nueva constante
+`MIN_SHADOW_RECONCILE_GIVE_UP_HOURS = 6.0`: una sombra solo se cierra como
+`RECONCILE_FAILED` cuando se cumplen LAS DOS condiciones a la vez --
+`reconciliation_attempts >= MAX_SHADOW_RECONCILE_ATTEMPTS` (3) Y
+`(now_ms - reconciliation_first_failed_at_ms) >= 6h`. El compromiso: una
+sombra con reconciliación rota puede quedar congelada (sin aportar a la
+medición, pero tampoco cerrada con PnL inventado) hasta 6 horas antes de
+descartarse definitivamente -- se prefiere una demora larga a perder una
+sombra sana por un corte corto. Tests con reloj controlado (`now_ms` pasado
+explícitamente a cada llamada, no tiempo real): `test_shadow_does_not_give_
+up_after_max_attempts_if_little_time_elapsed` (3 intentos en menos de una
+hora, sigue abierta) y
+`test_shadow_closes_as_reconcile_failed_after_max_attempts_and_enough_elapsed_time`
+(3er intento 7h después del primero, se cierra).
+
+**Corrección 3 -- separar RECONCILE_FAILED de los agregados del reporte**
+(`app/trading/shadow_report.py`). Una sombra `RECONCILE_FAILED` tiene PnL 0
+FORZADO (cierre administrativo, no un resultado de mercado real); contarla en
+"cerradas"/winrate/profit factor/esperanza por estrategia diluye esas tasas
+sin que sea una pérdida de verdad. `build_report` ahora separa
+`trades_closed` en confiables y `RECONCILE_FAILED` ANTES de calcular
+`summarize_by_strategy`/`summarize_totals` (que solo ven las confiables), y
+reporta las excluidas aparte, como conteo simple ("Excluidas por
+reconciliación fallida"). El veredicto de `ai_value_verdict` no cambia (ya las
+excluía desde la Etapa 2b, vía `unreliable_keys`). Test:
+`test_report_excludes_reconcile_failed_shadows_from_the_aggregates`.

@@ -1035,4 +1035,51 @@ API en cada ciclo, e inundaria el log con el mismo WARNING. Corregido:
   con outcome `"ABIERTA"` y `reconciliation_failed=False` -- sin ERROR.
   Confirma que el camino normal (sin huecos que tolerar) sigue funcionando
   igual con todo lo nuevo de la Etapa 2 encima.
-- Sin push todavia (pedido explicito: esperar a que se pida).
+
+**Revision de la Etapa 2 (misma fecha): aprobada con tres correcciones antes
+de reiniciar el bot.**
+- **Correccion 1 -- reintentar desde la ventana de la falla, no desde
+  `opened_at`**: `_attempt_reconcile_retry` llamaba `_reconcile_trade(trade,
+  None, now_ms)`, que resuelve a `start_ms = opened_ms` -- cada reintento
+  rejugaba TODA la vida de la posicion con el `effective_stop`/`best_price`
+  ACTUALES (ya avanzados por trailing) contra velas viejas, de antes de que
+  el stop avanzara: una mecha vieja podia cruzar el stop de HOY y cerrar la
+  posicion por error. Dos columnas nuevas, fijadas SOLO en la primera falla
+  de la racha (no se mueven en fallas posteriores ni entre reinicios):
+  `reconciliation_window_start_ms` (desde donde reintentar) y
+  `reconciliation_first_failed_at_ms` (cuando empezo la racha, para la
+  correccion 2). `reconcile_on_startup` tambien corregido: si una posicion YA
+  esta marcada, usa esa ventana persistida en vez del `monitor_last_seen_ms`
+  global (que para ella ya avanzo de mas).
+- **Correccion 2 -- rendirse por tiempo, no solo por intentos**: 3 intentos
+  cada 300s son ~10 min; un corte de internet o de la exchange de esa
+  duracion descartaria sombras sanas. Nueva constante
+  `MIN_SHADOW_RECONCILE_GIVE_UP_HOURS = 6.0`: una sombra solo se cierra como
+  `RECONCILE_FAILED` con `reconciliation_attempts >=
+  MAX_SHADOW_RECONCILE_ATTEMPTS` (3) Y `(now_ms -
+  reconciliation_first_failed_at_ms) >= 6h` a la vez. Compromiso
+  documentado: puede quedar congelada hasta 6h antes de descartarse, se
+  prefiere esa demora a perder una sombra sana por un corte corto.
+- **Correccion 3 -- separar RECONCILE_FAILED de los agregados del reporte**
+  (`app/trading/shadow_report.py`): su PnL 0 es forzado (cierre
+  administrativo), no un resultado real -- mezclarlo en cerradas/winrate/PF/
+  esperanza por estrategia diluia esas tasas. `build_report` separa
+  `trades_closed` en confiables y `RECONCILE_FAILED` ANTES de
+  `summarize_by_strategy`/`summarize_totals`, y reporta las excluidas aparte
+  (conteo simple). El veredicto de `ai_value_verdict` no cambia (ya las
+  excluia desde la Etapa 2b).
+- Tests con reloj controlado (`now_ms` explicito, no tiempo real): 3 nuevos
+  en `tests/unit/test_position_monitor.py`
+  (`test_retry_resumes_from_the_original_failure_window_not_from_opened_at`,
+  `test_shadow_does_not_give_up_after_max_attempts_if_little_time_elapsed`,
+  `test_shadow_closes_as_reconcile_failed_after_max_attempts_and_enough_
+  elapsed_time`) y 1 en `tests/unit/test_ai_value.py`
+  (`test_report_excludes_reconcile_failed_shadows_from_the_aggregates`).
+- Suite completa: 470 passed, 2 skipped; `ruff check .` limpio.
+- **Smoke de punta a punta** (nueva copia de `data/minerva_estabilidad.db`,
+  con WAL/SHM, assert de ruta distinta, red real publica sin credenciales):
+  la sombra TRXUSDT (id 2) reconcilio sin ERROR (`"ABIERTA"`,
+  `reconciliation_failed=False`, columnas nuevas en `None` tras exito), y
+  `shadow_report.build_report` incluye la linea de exclusion de
+  RECONCILE_FAILED.
+- Push realizado (pedido explicito: "Detente y realiza el push").
