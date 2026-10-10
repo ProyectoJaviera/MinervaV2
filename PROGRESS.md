@@ -887,3 +887,84 @@ una:
     2 skipped; `ruff check .` limpio.
   - `httpx` queda en WARNING en `setup_logging`.
 - 3.6 a 3.8: pendientes.
+
+## Incidente de estabilidad (2026-10-10): reconciliacion e integridad de velas
+
+Al arrancar el bot de estabilidad (copia de la base, ~5,75 dias apagado) la
+reconciliacion fallo con CRITICAL para las 3 sombras abiertas (ids 1 XRPUSDT,
+2 TRXUSDT, 3 DOGEUSDT) por "velas 1m LAST_PRICE incompletas". El monitor, sin
+ticks desde el arranque, cerro trade=3 (TP) y trade=1 (SL) con el precio REST
+del momento del reinicio, no con el nivel de SL/TP real.
+
+**Diagnostico (ver `docs/FASE2_INTEGRIDAD_VELAS.md` para el detalle completo):**
+- Cuantificado con los propios fee/slippage de cada trade: trade 3 cerro en
+  +9,99 USDT (~100 % del margen) contra un ~+1,70 USDT (~17 %) si hubiera
+  cerrado en el nivel del TP -- 5,9x. Trade 1 cerro en -7,05 USDT (~-70 %)
+  contra un ~-5,22 USDT (~-52 %, el tope de diseño del 50 % mas fees/slippage)
+  si hubiera cerrado en el SL -- 35 % mas perdida de la prevista. Trade 2
+  (TRXUSDT) sigue OPEN: no se sabe si en esos dias toco SL o TP, no hay
+  evidencia de que no lo haya hecho.
+- El mismo mecanismo de reconciliacion corre igual para sombras y reales
+  (`PositionMonitor._reload_trades` carga ambas en la misma estructura):
+  confirmado con datos reales, no hipotetico.
+- Verificado EN VIVO contra la API publica de Bitunix (lectura, sin
+  credenciales): la semantica de `endTime` es estrictamente exclusiva sobre
+  `open_time` (`open_time < endTime`) -- la formula de paginacion existente
+  (`cursor = oldest_time - 1`) ya era correcta bajo esa semantica.
+- La causa real de las velas 1m faltantes (40-41 por simbolo, aisladas, cada
+  ~200 minutos): Bitunix, en respuestas de `limit=200` sin `startTime` (el
+  patron real de `_download_range`), a veces omite una vela real que SI esta
+  presente si se pide con una ventana chica -- confirmado en vivo, 3 veces, sin
+  poder determinar una regla exacta ni encontrar documentacion oficial sobre
+  esto. No es un bug de la formula de paginacion.
+
+**Implementado (Etapa 1, sin tocar la logica de SL/TP ni la exigencia de
+integridad -- eso es la Etapa 2, pendiente de aprobacion aparte):**
+- `app/market/ohlcv_history.py`: `find_gaps`/`fill_gaps` (reparacion con
+  pedidos estrechos, agrupando huecos contiguos) y `download_missing` llama a
+  `_verify_and_repair` al final (haya tocado la red o no) -- una cache vieja
+  con huecos se autorepara en la siguiente llamada normal. Docstring del
+  modulo actualizado con la semantica verificada y el hallazgo.
+- `scripts/repair_ohlcv_gaps.py`: repara huecos de un simbolo/intervalo/
+  price_type sobre una copia (assert de ruta).
+- **Reparados los 3 simbolos del incidente** sobre una copia de
+  `data/minerva_estabilidad.db`: 244 huecos (40 DOGEUSDT + 41 TRXUSDT + 41
+  XRPUSDT, x2 por LAST/MARK), **244 reparados, 0 sin reparar** -- verificado
+  con una consulta SQL independiente. Confirmacion de punta a punta: se
+  reconstruyo el escenario exacto (`_reconcile_trade` para TRXUSDT con la
+  ventana completa de 5,75 dias) sobre la copia ya reparada -- resultado
+  `"ABIERTA"` (reconcilio con velas, sin lanzar), en vez del `CRITICAL`
+  original.
+- **Cuantificados los huecos de las series 1h/4h/1d de la Fase 2**
+  (`data/backups/minerva_fase2_v2.db`, solo lectura): 236 huecos en 60
+  combinaciones simbolo/intervalo/price_type, concentrados en ZECUSDT (142 en
+  1h, 34 en 4h, 4 en 1d) y LINKUSDT (40 en 4h). A diferencia de los del
+  incidente, son bloques CONTIGUOS (no aislados) y de 2023 -- verificado en
+  vivo que Bitunix tampoco los devuelve hoy: son un hueco real y permanente
+  del historial del exchange, no el hallazgo de arriba. `fill_gaps` repara 0
+  de esos 236 (correctamente: no hay nada que reparar). `get_cached_or_raise`
+  (el que usa el motor de backtest) no los detecta porque solo verifica los
+  bordes del rango pedido, no la densidad interna.
+  - **Efecto estimado** (subconjunto representativo -- ZECUSDT, sus 7 celdas
+    estrategia/timeframe -- sin relanzar el backtest completo): resultados
+    "antes" y "despues" de intentar `fill_gaps` son IDENTICOS (nada reparable).
+    Esos 7 casos ya estaban fuera de los criterios de la Fase 2 por otras
+    razones ya documentadas; estos huecos no cambian ninguna conclusion de
+    `docs/FASE2_REEJECUCION.md`.
+  - Pendiente de decision, no implementado: si vale la pena que el motor de
+    backtest detecte y reporte huecos internos (no solo de borde). No se toco
+    el motor ni se corrio la grilla completa (se pidio no hacerlo sin
+    consultar).
+- Tests nuevos en `tests/unit/test_ohlcv_history.py` (13 nuevos, 29 en total
+  en el archivo): `find_gaps`/`fill_gaps` puros, y un cliente falso
+  (`FlakyRestClient`) que simula el hallazgo real para 1m/1h/4h/1d, probando
+  que `download_missing` termina sin huecos en los 4 casos y no lanza cuando
+  un hueco es genuinamente irreparable.
+- Suite completa: 457 passed, 2 skipped; `ruff check .` limpio.
+- **Pendiente (Etapa 2, solo si se aprueba):** tolerancia de reconciliacion
+  recortada (huecos residuales aislados verificados contra MARK_PRICE),
+  columna `reconciliation_failed` + `fill_source TICK_UNRECONCILED` + parametro
+  `unreliable_keys` en `ai_value_verdict`/`shadow_report.build_report`
+  (separado de `piloto_keys`), y que una sombra con reconciliacion fallida no
+  se cierre por precio en vivo (reintentos, `RECONCILE_FAILED` sin PnL tras 3
+  intentos, excluida de la medicion). No implementado todavia.
