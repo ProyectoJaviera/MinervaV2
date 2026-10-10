@@ -961,10 +961,78 @@ integridad -- eso es la Etapa 2, pendiente de aprobacion aparte):**
   que `download_missing` termina sin huecos en los 4 casos y no lanza cuando
   un hueco es genuinamente irreparable.
 - Suite completa: 457 passed, 2 skipped; `ruff check .` limpio.
-- **Pendiente (Etapa 2, solo si se aprueba):** tolerancia de reconciliacion
-  recortada (huecos residuales aislados verificados contra MARK_PRICE),
-  columna `reconciliation_failed` + `fill_source TICK_UNRECONCILED` + parametro
-  `unreliable_keys` en `ai_value_verdict`/`shadow_report.build_report`
-  (separado de `piloto_keys`), y que una sombra con reconciliacion fallida no
-  se cierre por precio en vivo (reintentos, `RECONCILE_FAILED` sin PnL tras 3
-  intentos, excluida de la medicion). No implementado todavia.
+
+**Añadido 0 (antes de la Etapa 2, pedido junto con su aprobacion):**
+`_verify_and_repair` escaneaba TODA la serie cacheada en cada llamada de
+`download_missing` -- con el generador de senales llamandola cada ciclo, un
+hueco permanente de hace años (seccion 5 de arriba) se reintentaria contra la
+API en cada ciclo, e inundaria el log con el mismo WARNING. Corregido:
+- `_verify_and_repair` ahora solo revisa la VENTANA PEDIDA (`start_time`,
+  `end_time` del llamador), no toda la serie.
+- Tabla nueva `ohlcv_unrepairable_gaps` (huecos ya confirmados irreparables,
+  con `last_attempted_at`): no se reintentan hasta pasadas
+  `GAP_RETRY_COOLDOWN_HOURS` (24h), y el WARNING de "no se pudo reparar" se
+  registra una sola vez al confirmarlo, no en cada ciclo.
+- `fill_gaps` ahora parte una racha contigua mas larga que
+  `GAP_FILL_CHUNK_BARS` (14) en varios pedidos -- antes `limit=20` la truncaba
+  en silencio y nunca reintentaba el resto.
+- `_align_up`/`_align_down` (recorte de la ventana a la grilla) se anclan a
+  `min_cached` (un dato real), no a la grilla de epoca 0 -- mismo resultado en
+  produccion (las velas reales de Bitunix SI caen en esa grilla, verificado),
+  pero no depende de ese supuesto para series que no caigan ahi.
+- Bug de fidelidad de tests encontrado y corregido en el camino (no de
+  produccion): el `BASE_MS` sintetico de `tests/unit/test_ohlcv_history.py` no
+  estaba alineado a la grilla de 4h, lo que rompia `_align_up`/`_align_down` y
+  generaba huecos falsos (y llamadas de red de mas) solo en esa prueba.
+
+**Implementado (Etapa 2, aprobada con los dos añadidos de arriba):**
+- **a. Tolerancia recortada** (`app/trading/position_monitor.py`,
+  `_residual_gaps_are_tolerable`): tras `fill_gaps`, solo se tolera un hueco
+  residual de LAST_PRICE si es AISLADO, su minuto existe en MARK_PRICE, y el
+  total no supera `max(2, 0,1 % de la ventana)`. Si se tolera, esa vela se
+  SUSTITUYE por la de MARK_PRICE para evaluar SL/TP/liquidacion, con
+  `fill_source = CANDLE_RECON_MARK_SUBSTITUTE`. Cualquier otro caso sigue
+  marcando la reconciliacion como fallida (ya no solo CRITICAL en el log).
+- **b. Marcar y excluir**: columnas `reconciliation_failed`/
+  `reconciliation_attempts` en `trades` y `shadow_trades`.
+  `shadow_repo.get_unreliable_signal_group_keys` junta los grupos con
+  reconciliacion fallida (en curso o cerrados `RECONCILE_FAILED`), y
+  `ai_value_verdict`/`shadow_report.build_report` los excluyen con el
+  parametro `unreliable_keys`, SEPARADO de `piloto_keys`.
+- **c. Comportamiento mientras esta marcada, con reintentos**: una SOMBRA se
+  CONGELA (`_evaluate` no la toca por tick) y se reintenta la reconciliacion
+  completa cada `RECONCILE_RETRY_SECONDS` (300s) y al arrancar; tras
+  `MAX_SHADOW_RECONCILE_ATTEMPTS` (3) intentos fallidos se cierra
+  administrativamente SIN PnL (`close_reason=RECONCILE_FAILED`,
+  `ShadowBook.close_unreliable`). Una posicion REAL sigue vigilada en vivo
+  indefinidamente (nunca se congela ni se cierra sola): solo queda marcada, y
+  un cierre por tick mientras lo esta usa `fill_source=TICK_UNRECONCILED` en
+  vez de `TICK` (mismo precio, misma regla de peor caso, auditable aparte).
+  Sigue contando en `compute_open_real_positions`: el LLM debe ver la
+  exposicion real aunque este marcada.
+- **d. Tests**: 8 nuevos en `tests/unit/test_position_monitor.py` (función
+  pura de tolerancia, sustitucion por MARK_PRICE, marcado en vez de solo
+  loguear, congelamiento de sombra marcada, `TICK_UNRECONCILED` en reales,
+  reintento exitoso limpia la marca, cierre sin PnL tras 3 intentos, y el caso
+  de punta a punta: reconciliacion falla -> sombra marcada y sin cierre por
+  tick -> excluida del veredicto). 2 nuevos en `tests/unit/test_ai_value.py`
+  (`unreliable_keys` excluye, y es independiente de `piloto_keys`).
+- **e. Huecos internos de la Fase 2, solo reporte** (decidido explicitamente:
+  sin cambiar comportamiento ni relanzar la grilla): `check_series_availability`
+  ahora registra INFO/WARNING con la cuenta de huecos internos de cada serie
+  cuyos bordes ya daba por completos, sin tocar su contrato de retorno --
+  `scripts/run_backtest.py` ya la llama para validar de antemano, asi que
+  queda avisado sin cambiar su codigo. `docs/FASE2_INTEGRIDAD_VELAS.md`
+  (secciones 5 y 6) deja escrito que los resultados de la Fase 2 se calcularon
+  con esas 236 velas ausentes, sin cambiar ninguna conclusion.
+- Suite completa: 467 passed, 2 skipped; `ruff check .` limpio. Commits:
+  `160c8b9` (Añadido 0), `761cd19` (columnas), `75254a5` (2a/2c), `af9d590`
+  (2b), `4c43e18` (2e + documentacion).
+- **Smoke de punta a punta** (copia de `data/minerva_estabilidad.db`, con
+  WAL/SHM, assert de ruta distinta a `settings.database_path`, red real
+  publica sin credenciales): la sombra TRXUSDT (id 2, todavia OPEN en la base
+  real) reconcilio una ventana de ~35 min desde el ultimo `monitor_last_seen_ms`
+  con outcome `"ABIERTA"` y `reconciliation_failed=False` -- sin ERROR.
+  Confirma que el camino normal (sin huecos que tolerar) sigue funcionando
+  igual con todo lo nuevo de la Etapa 2 encima.
+- Sin push todavia (pedido explicito: esperar a que se pida).
