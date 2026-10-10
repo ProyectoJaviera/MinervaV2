@@ -238,11 +238,15 @@ async def build_report(db: Database) -> str:
     totals = summarize_totals(trades_open, trades_closed)
     piloto_keys = await llm_logs_repo.get_piloto_signal_group_keys(db)
     measurement_keys = await llm_logs_repo.get_measurement_signal_group_keys(db)
+    unreliable_keys = await shadow_repo.get_unreliable_signal_group_keys(db)
     # El veredicto mira TODOS los grupos (abiertos y cerrados): el SIN_LLM se
     # cuenta sobre el total del periodo, no solo sobre las cerradas (seccion i/m).
     # `measurement_keys` descarta sombras que nunca pasaron por el LLM de esta
-    # medicion (previas a la 3.6, u otra version del prompt).
+    # medicion (previas a la 3.6, u otra version del prompt). `unreliable_keys`
+    # descarta sombras cuya reconciliacion fallo (o sigue fallando): incidente de
+    # estabilidad 2026-10-10, Etapa 2b -- su PnL no es fiable.
     verdict = ai_value_verdict(
         trades_open + trades_closed, piloto_keys=piloto_keys, measurement_keys=measurement_keys,
+        unreliable_keys=unreliable_keys,
     )
     return render_markdown(rows, totals, verdict)

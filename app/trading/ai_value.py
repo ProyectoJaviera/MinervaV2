@@ -182,6 +182,7 @@ def ai_value_verdict(
     max_sin_llm_share: float = MAX_SIN_LLM_SHARE,
     piloto_keys: set[str] | None = None,
     measurement_keys: set[str] | None = None,
+    unreliable_keys: set[str] | None = None,
 ) -> AiValueVerdict:
     """Regla de tres veredictos fijada en `docs/FASE3_6_LLM.md`, seccion (i).
     `trades` son operaciones sombra candidatas (abiertas y cerradas).
@@ -193,12 +194,20 @@ def ai_value_verdict(
       prompt, nunca llegaron a pasar por el LLM de esta medicion y no deben
       contarse como SIN_LLM de ella.
     - Si se pasa `piloto_keys` (`fase='PILOTO'`), esos grupos se excluyen.
+    - Si se pasa `unreliable_keys` (`shadow_repo.
+      get_unreliable_signal_group_keys`: incidente de estabilidad 2026-10-10,
+      Etapa 2b), esos grupos tambien se excluyen -- su reconciliacion fallo (o
+      sigue fallando), asi que su PnL no es fiable y contaminaria `Δ`. Se
+      mantiene SEPARADO de `piloto_keys` (son razones de exclusion distintas:
+      una es de fase del experimento, la otra es de confiabilidad del dato).
 
-    Ambos filtros son del llamador: esta funcion no toca la base."""
+    Los tres filtros son del llamador: esta funcion no toca la base."""
     if measurement_keys is not None:
         trades = [t for t in trades if t.signal_group_key in measurement_keys]
     if piloto_keys:
         trades = [t for t in trades if t.signal_group_key not in piloto_keys]
+    if unreliable_keys:
+        trades = [t for t in trades if t.signal_group_key not in unreliable_keys]
 
     total_groups = len(trades)
     sin_llm_count = sum(1 for t in trades if t.llm_decision == SIN_LLM)

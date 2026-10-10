@@ -237,6 +237,33 @@ def test_piloto_groups_are_excluded_before_any_calculation():
     assert verdict_excluding_piloto.total_groups == verdict_with_piloto.total_groups - 2
 
 
+# --- unreliable_keys: sombras con reconciliacion fallida no cuentan ----------
+# (incidente de estabilidad 2026-10-10, Etapa 2b)
+
+
+def test_unreliable_groups_are_excluded_before_any_calculation():
+    trades = independent_trades(5, 2.0, -1.0, margin=10.0)
+    unreliable_keys = {trades[0].signal_group_key, trades[1].signal_group_key}
+    verdict_with = ai_value_verdict(trades, min_effective_n=1)
+    verdict_excluding = ai_value_verdict(
+        trades, min_effective_n=1, unreliable_keys=unreliable_keys
+    )
+    assert verdict_excluding.total_groups == verdict_with.total_groups - 2
+
+
+def test_unreliable_keys_is_a_separate_filter_from_piloto_keys():
+    """Las dos razones de exclusion son independientes: un grupo puede estar en
+    una, en la otra, en ambas, o en ninguna, y cada una descarta lo suyo."""
+    trades = independent_trades(5, 2.0, -1.0, margin=10.0)
+    piloto_keys = {trades[0].signal_group_key}
+    unreliable_keys = {trades[1].signal_group_key}
+    verdict = ai_value_verdict(
+        trades, min_effective_n=1, piloto_keys=piloto_keys, unreliable_keys=unreliable_keys,
+    )
+    verdict_neither = ai_value_verdict(trades, min_effective_n=1)
+    assert verdict.total_groups == verdict_neither.total_groups - 2
+
+
 # --- measurement_keys: sombras sin fila en llm_logs no cuentan ----------------
 
 
