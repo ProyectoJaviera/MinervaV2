@@ -48,6 +48,8 @@ def _row_to_shadow(row) -> ShadowTrade:
         candle_close_time=datetime.fromisoformat(row["candle_close_time"]),
         llm_decision=row["llm_decision"],
         executed_in_real_account=bool(row["executed_in_real_account"]),
+        reconciliation_failed=bool(row["reconciliation_failed"]),
+        reconciliation_attempts=row["reconciliation_attempts"],
     )
 
 
@@ -143,6 +145,33 @@ async def set_llm_decision(db: Database, shadow_id: int, label: str) -> bool:
         (label, shadow_id),
     )
     return cursor.rowcount > 0
+
+
+async def update_reconciliation_state(
+    db: Database, shadow_id: int, failed: bool, attempts: int
+) -> None:
+    """Incidente de estabilidad 2026-10-10, Etapa 2: marca si la ultima
+    reconciliacion fallo y cuantos intentos van. Mientras el flag este
+    puesto, el monitor CONGELA la sombra (no la evalua por tick) -- ver
+    `_evaluate` en `app/trading/position_monitor.py`."""
+    await db.execute(
+        "UPDATE shadow_trades SET reconciliation_failed = ?, reconciliation_attempts = ? "
+        "WHERE id = ?",
+        (int(failed), attempts, shadow_id),
+    )
+
+
+async def get_unreliable_signal_group_keys(db: Database) -> set[str]:
+    """Grupos de sombras cuya reconciliacion esta (o estuvo) marcada como
+    fallida -- en curso (`reconciliation_failed = 1`) o cerradas sin PnL
+    fiable (`close_reason = 'RECONCILE_FAILED'`). Se excluyen de la medicion
+    con `ai_value_verdict(unreliable_keys=...)`, separado de `piloto_keys`
+    (subfase 3.6, Etapa 2 del incidente de estabilidad)."""
+    rows = await db.fetch_all(
+        "SELECT signal_group_key FROM shadow_trades "
+        "WHERE reconciliation_failed = 1 OR close_reason = 'RECONCILE_FAILED'"
+    )
+    return {row["signal_group_key"] for row in rows}
 
 
 async def mark_executed(db: Database, shadow_id: int) -> None:

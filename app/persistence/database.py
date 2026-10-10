@@ -506,10 +506,22 @@ _TRADES_MIGRATED_COLUMNS = {
     "slippage_entry_usdt": "REAL NOT NULL DEFAULT 0",
     "slippage_exit_usdt": "REAL NOT NULL DEFAULT 0",
     "fill_source": "TEXT",
+    # Incidente de estabilidad 2026-10-10, Etapa 2 (docs/FASE2_INTEGRIDAD_VELAS.md):
+    # una reconciliacion fallida marca la posicion en vez de cerrarla a ciegas por
+    # precio en vivo. Las REALES siguen vigiladas en vivo pero marcadas (el cierre
+    # por tick usa `fill_source='TICK_UNRECONCILED'`, auditable); las sombras se
+    # congelan (ver `_SHADOW_TRADES_MIGRATED_COLUMNS`, mismo par de columnas).
+    "reconciliation_failed": "INTEGER NOT NULL DEFAULT 0",
+    "reconciliation_attempts": "INTEGER NOT NULL DEFAULT 0",
 }
 
 _SIGNALS_MIGRATED_COLUMNS = {
     "reason": "TEXT",
+}
+
+_SHADOW_TRADES_MIGRATED_COLUMNS = {
+    "reconciliation_failed": "INTEGER NOT NULL DEFAULT 0",
+    "reconciliation_attempts": "INTEGER NOT NULL DEFAULT 0",
 }
 
 
@@ -556,6 +568,7 @@ class Database:
             await self._migrate_columns("backtest_verdicts", _BACKTEST_VERDICTS_MIGRATED_COLUMNS)
             await self._migrate_columns("trades", _TRADES_MIGRATED_COLUMNS)
             await self._migrate_columns("signals", _SIGNALS_MIGRATED_COLUMNS)
+            await self._migrate_columns("shadow_trades", _SHADOW_TRADES_MIGRATED_COLUMNS)
 
     async def _migrate_columns(self, table: str, columns: dict[str, str]) -> None:
         """`CREATE TABLE IF NOT EXISTS` no agrega columnas a una tabla que ya

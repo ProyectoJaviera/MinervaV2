@@ -57,6 +57,16 @@ class Trade(BaseModel):
     # Como se lleno el cierre: TICK (monitor, precio observado o nominal),
     # CANDLE_RECON (reconciliacion con velas) o REST_MARK (cierre manual).
     fill_source: str | None = None
+    # Incidente de estabilidad 2026-10-10 (docs/FASE2_INTEGRIDAD_VELAS.md,
+    # Etapa 2): la reconciliacion al reiniciar fallo para esta posicion al
+    # menos una vez. Reales: siguen vigiladas en vivo, pero un cierre por
+    # tick mientras este flag este puesto usa `fill_source =
+    # "TICK_UNRECONCILED"` en vez de "TICK". Sombras: se congelan (el monitor
+    # no las evalua por tick) hasta que la reconciliacion se reintente con
+    # exito o se agoten los reintentos (`close_reason = "RECONCILE_FAILED"`,
+    # sin PnL, excluida de la medicion).
+    reconciliation_failed: bool = False
+    reconciliation_attempts: int = 0
 
 
 class ShadowTrade(Trade):

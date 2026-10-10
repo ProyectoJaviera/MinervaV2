@@ -43,6 +43,8 @@ def _row_to_trade(row) -> Trade:
         slippage_entry_usdt=row["slippage_entry_usdt"],
         slippage_exit_usdt=row["slippage_exit_usdt"],
         fill_source=row["fill_source"],
+        reconciliation_failed=bool(row["reconciliation_failed"]),
+        reconciliation_attempts=row["reconciliation_attempts"],
     )
 
 
@@ -153,6 +155,20 @@ async def get_open_positions(db: Database, symbol: str | None = None) -> list[Tr
             "SELECT * FROM trades WHERE status = 'OPEN' ORDER BY opened_at DESC"
         )
     return [_row_to_trade(r) for r in rows]
+
+
+async def update_reconciliation_state(
+    db: Database, trade_id: int, failed: bool, attempts: int
+) -> None:
+    """Incidente de estabilidad 2026-10-10, Etapa 2: marca si la ultima
+    reconciliacion fallo y cuantos intentos van. Las posiciones REALES siguen
+    vigiladas en vivo igual con el flag puesto -- solo cambia el
+    `fill_source` de un cierre por tick (ver `_close` en
+    `app/trading/position_monitor.py`)."""
+    await db.execute(
+        "UPDATE trades SET reconciliation_failed = ?, reconciliation_attempts = ? WHERE id = ?",
+        (int(failed), attempts, trade_id),
+    )
 
 
 async def get_open_positions_as_of(db: Database, as_of: datetime) -> list[Trade]:
