@@ -26,13 +26,15 @@ BASE = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def trade(id_, *, opened_h, closed_h, pnl, label=APROBADA, symbol="BTCUSDT",
-          side=Side.LONG, strategies=("ema_cross_9_21",), margin=10.0, status=TradeStatus.CLOSED):
+          side=Side.LONG, strategies=("ema_cross_9_21",), margin=10.0, status=TradeStatus.CLOSED,
+          close_reason=None):
     return ShadowTrade(
         id=id_, symbol=symbol, side=side, strategy=strategies[0], status=status,
         leverage=10, margin_usdt=margin, notional_usdt=margin * 10, qty=1.0, entry_price=100.0,
         opened_at=BASE + timedelta(hours=opened_h),
         closed_at=(BASE + timedelta(hours=closed_h)) if status == TradeStatus.CLOSED else None,
         pnl_net_usdt=pnl if status == TradeStatus.CLOSED else None,
+        close_reason=close_reason,
         contributing_strategies=list(strategies),
         signal_group_key=f"{symbol}|{side.value}|{id_}",
         candle_close_time=BASE + timedelta(hours=opened_h), llm_decision=label,
@@ -333,6 +335,31 @@ def test_report_separates_single_strategy_groups_from_mixed_ones():
     assert ema.mixed_closed == 1 and ema.mixed_pnl_net == -1.0
     assert rows["donchian_breakout_20"].single_closed == 0
     assert rows["donchian_breakout_20"].mixed_closed == 1
+
+
+def test_report_excludes_reconcile_failed_shadows_from_the_aggregates():
+    """Revision de Etapa 2, correccion 3: una sombra RECONCILE_FAILED (PnL 0
+    forzado, cierre administrativo) no debe mezclarse en cerradas/winrate/PF/
+    esperanza por estrategia -- se cuenta aparte."""
+    ok = trade(1, opened_h=0, closed_h=1, pnl=2.0, strategies=("ema_cross_9_21",))
+    failed = trade(2, opened_h=5, closed_h=6, pnl=0.0, strategies=("ema_cross_9_21",),
+                   close_reason="RECONCILE_FAILED")
+    trades_closed_all = [ok, failed]
+    unreliable = [t for t in trades_closed_all if t.close_reason == "RECONCILE_FAILED"]
+    reliable = [t for t in trades_closed_all if t.close_reason != "RECONCILE_FAILED"]
+
+    rows = shadow_report.summarize_by_strategy([], reliable)
+    totals = shadow_report.summarize_totals([], reliable)
+    assert totals.closed == 1  # NO 2: la RECONCILE_FAILED no entra
+    ema = rows[0]
+    assert ema.closed == 1 and ema.groups == 1
+
+    text = shadow_report.render_markdown(
+        rows, totals, ai_value_verdict(trades_closed_all, min_effective_n=1),
+        excluded_reconcile_failed=len(unreliable),
+    )
+    assert "Excluidas por reconciliacion fallida" in text
+    assert "1" in text.split("Excluidas por reconciliacion fallida")[1].split("\n")[0]
 
 
 def test_report_shows_raw_and_effective_n_and_the_three_verdict_fields():

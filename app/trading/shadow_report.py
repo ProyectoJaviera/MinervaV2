@@ -17,6 +17,15 @@ afecta: todas entran igual.
 
 El total no suma las filas por estrategia: una operacion mixta se cuenta en cada
 contribuyente.
+
+**Exclusion de RECONCILE_FAILED (revision de Etapa 2 del incidente de
+estabilidad 2026-10-10, correccion 3):** una sombra cerrada administrativamente
+como `RECONCILE_FAILED` tiene PnL 0 forzado (no un resultado real -- la
+reconciliacion fallo demasiadas veces, ver `app/trading/position_monitor.py`).
+Si se mezclara en "cerradas"/winrate/PF/esperanza por estrategia, diluiria esas
+tasas sin ser una perdida de verdad. `build_report` la separa ANTES de calcular
+`summarize_by_strategy`/`summarize_totals` y la reporta aparte (conteo simple),
+no se le mezcla.
 """
 
 from __future__ import annotations
@@ -174,6 +183,7 @@ def _verdict_section(verdict: AiValueVerdict) -> list[str]:
 
 def render_markdown(
     rows: list[StrategyShadowRow], totals: ShadowTotals, verdict: AiValueVerdict,
+    excluded_reconcile_failed: int = 0,
 ) -> str:
     lines = [
         "## Total de operaciones sombra",
@@ -184,6 +194,9 @@ def render_markdown(
         f"- PnL neto total (sin doble conteo): {totals.pnl_net_total:.4f} USDT",
         f"- Etiquetas LLM, N bruto: {totals.by_label_raw}",
         f"- Etiquetas LLM, N efectivo: {totals.by_label_effective}",
+        f"- Excluidas por reconciliacion fallida (RECONCILE_FAILED, sin PnL, fuera de "
+        f"'Cerradas' y de todos los agregados de arriba y de abajo): "
+        f"{excluded_reconcile_failed}",
         "",
         "## Grupos de una sola estrategia (comparables con el backtest de esa estrategia)",
         "",
@@ -233,20 +246,29 @@ def render_markdown(
 
 async def build_report(db: Database) -> str:
     trades_open = await shadow_repo.get_open(db)
-    trades_closed = await shadow_repo.get_closed(db)
+    trades_closed_all = await shadow_repo.get_closed(db)
+    # Revision de Etapa 2, correccion 3: una sombra RECONCILE_FAILED tiene PnL
+    # 0 forzado (cierre administrativo, no un resultado real) -- mezclada en
+    # "cerradas"/winrate/PF/esperanza por estrategia, diluye esas tasas sin ser
+    # una perdida de verdad. Se separa de los agregados y se cuenta aparte.
+    unreliable_closed = [t for t in trades_closed_all if t.close_reason == "RECONCILE_FAILED"]
+    trades_closed = [t for t in trades_closed_all if t.close_reason != "RECONCILE_FAILED"]
     rows = summarize_by_strategy(trades_open, trades_closed)
     totals = summarize_totals(trades_open, trades_closed)
     piloto_keys = await llm_logs_repo.get_piloto_signal_group_keys(db)
     measurement_keys = await llm_logs_repo.get_measurement_signal_group_keys(db)
     unreliable_keys = await shadow_repo.get_unreliable_signal_group_keys(db)
-    # El veredicto mira TODOS los grupos (abiertos y cerrados): el SIN_LLM se
-    # cuenta sobre el total del periodo, no solo sobre las cerradas (seccion i/m).
-    # `measurement_keys` descarta sombras que nunca pasaron por el LLM de esta
-    # medicion (previas a la 3.6, u otra version del prompt). `unreliable_keys`
-    # descarta sombras cuya reconciliacion fallo (o sigue fallando): incidente de
-    # estabilidad 2026-10-10, Etapa 2b -- su PnL no es fiable.
+    # El veredicto mira TODOS los grupos (abiertos y cerrados, incluidos los
+    # RECONCILE_FAILED): el SIN_LLM se cuenta sobre el total del periodo, no
+    # solo sobre las cerradas (seccion i/m). `measurement_keys` descarta
+    # sombras que nunca pasaron por el LLM de esta medicion (previas a la 3.6,
+    # u otra version del prompt). `unreliable_keys` descarta sombras cuya
+    # reconciliacion fallo (o sigue fallando) -- incluye a las RECONCILE_FAILED
+    # por `close_reason` y a las todavia abiertas y marcadas por
+    # `reconciliation_failed`: incidente de estabilidad 2026-10-10, Etapa 2b,
+    # su PnL no es fiable.
     verdict = ai_value_verdict(
-        trades_open + trades_closed, piloto_keys=piloto_keys, measurement_keys=measurement_keys,
-        unreliable_keys=unreliable_keys,
+        trades_open + trades_closed_all, piloto_keys=piloto_keys,
+        measurement_keys=measurement_keys, unreliable_keys=unreliable_keys,
     )
-    return render_markdown(rows, totals, verdict)
+    return render_markdown(rows, totals, verdict, excluded_reconcile_failed=len(unreliable_closed))
