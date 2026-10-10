@@ -139,8 +139,85 @@ criterios de aprobación por otras razones documentadas en
 `docs/FASE2_REEJECUCION.md`; estos huecos de 2023 no cambian ninguna conclusión de
 la Fase 2 (ninguna estrategia pasa los criterios, con o sin este dato).
 
-**Pendiente de tu decisión, no implementado:** si vale la pena que
-`get_cached_or_raise`/el motor de backtest detecten y reporten huecos INTERNOS (no
-solo de borde) para que una futura corrida los muestre explícitamente en vez de
-corrér en silencio con menos velas de las esperadas. No se tocó el motor de backtest
-ni se volvió a correr la grilla completa (se pidió no hacerlo sin consultar).
+**En conclusión: los resultados de la Fase 2 (`docs/FASE2_REEJECUCION.md` y
+anteriores) se calcularon con estas 236 velas ausentes de la serie, sin que el
+motor avisara nada en su momento.** Esto no cambia ninguna conclusión de la
+Fase 2 -- el subconjunto representativo de ZECUSDT verificado arriba ya estaba
+fuera de los criterios de aprobación por otras razones documentadas, con o sin
+este dato -- pero es la razón por la que los resultados de la grilla deben
+leerse sabiendo que un puñado de celdas corrió con menos velas de las
+esperadas, sin aviso.
+
+**Etapa 2e del incidente de estabilidad (2026-10-10), solo reporte, sin
+relanzar nada:** se decidió explícitamente NO cambiar el comportamiento ni
+volver a correr la grilla completa, solo avisar. `check_series_availability`
+(`app/market/ohlcv_history.py`) ahora registra INFO ("sin huecos internos") o
+WARNING (con la cuenta de huecos) para cada serie cuyos bordes ya daba por
+completos, sin tocar su contrato de retorno (`None` o el mensaje de siempre) --
+`scripts/run_backtest.py` ya la llama para validar de antemano todas las series
+necesarias, así que una corrida futura queda avisada por este mismo canal sin
+cambiar su código.
+
+## 6. Etapa 2: tolerancia de reconciliación, marcado y reintentos
+
+Aprobada tras la Etapa 1 (ver arriba), con dos añadidos: evitar que
+`_verify_and_repair` reintentara huecos permanentes (como los de la sección 5)
+contra la API en cada ciclo del generador de señales (resuelto arriba, sección
+3: ventana acotada a lo pedido + memoria persistente de huecos irreparables
+con `GAP_RETRY_COOLDOWN_HOURS`), y lo siguiente.
+
+**a. Tolerancia recortada tras `fill_gaps`** (`app/trading/position_monitor.py`,
+`_residual_gaps_are_tolerable`). Reemplaza la tolerancia anterior (hasta 2
+velas faltantes, silenciosa, sin verificar nada) por una regla explícita: un
+hueco residual de LAST_PRICE se tolera SOLO si es AISLADO (ningún minuto
+vecino falta también), su minuto existe en MARK_PRICE, y el total no supera
+`max(2, 0,1 % de la ventana)`. Si se tolera, esa vela se SUSTITUYE por la de
+MARK_PRICE para evaluar SL/TP/liquidación, con `fill_source =
+CANDLE_RECON_MARK_SUBSTITUTE` (distinguible de `CANDLE_RECON`). Cualquier otro
+caso (hueco contiguo, no confirmado por MARK_PRICE, o por encima del tope)
+sigue marcando la reconciliación como fallida.
+
+**b. Marcar y excluir en vez de confiar en el precio en vivo**
+(`app/persistence/models.py`: columnas `reconciliation_failed`,
+`reconciliation_attempts` en `trades` y `shadow_trades`). Una reconciliación
+fallida ya NO deja la posición "a su suerte" con el próximo tick: queda
+MARCADA. `shadow_repo.get_unreliable_signal_group_keys` devuelve los
+`signal_group_key` con `reconciliation_failed = 1` o `close_reason =
+'RECONCILE_FAILED'`, y `ai_value_verdict`/`shadow_report.build_report` los
+excluyen vía el parámetro `unreliable_keys` (`app/trading/ai_value.py`),
+SEPARADO de `piloto_keys` -- son razones de exclusión distintas (fase del
+experimento vs. confiabilidad del dato).
+
+**c. Comportamiento mientras está marcada, y reintentos**
+(`app/trading/position_monitor.py`):
+- **Sombra**: se CONGELA (`_evaluate` no la evalúa por tick mientras
+  `reconciliation_failed`), no se cierra con un precio en vivo que no es
+  fiable. Se reintenta la reconciliación completa desde la apertura (al
+  arrancar, y después cada `RECONCILE_RETRY_SECONDS` = 300 s vía
+  `_retry_failed_reconciliations`, llamado en cada `tick_periodic`). Si tras
+  `MAX_SHADOW_RECONCILE_ATTEMPTS` = 3 intentos sigue fallando, se cierra
+  administrativamente SIN PnL (`ShadowBook.close_unreliable`:
+  `close_reason='RECONCILE_FAILED'`, `pnl_gross_usdt=pnl_net_usdt=0.0`,
+  `exit_price=entry_price`) y queda excluida (ver b).
+- **Real (futuro)**: sigue vigilada en vivo indefinidamente -- nunca se
+  congela ni se cierra administrativamente, porque ocultar una exposición
+  real sería peor que un precio de cierre impreciso. Queda MARCADA
+  (`reconciliation_failed`) y un cierre por tick mientras lo está usa
+  `fill_source = TICK_UNRECONCILED` en vez de `TICK` (mismo precio, misma
+  regla de peor caso, pero auditable por separado). Sigue contando en
+  `compute_open_real_positions` (features del prompt): el LLM debe ver la
+  exposición real aunque esté marcada, no una posición oculta.
+- Un reintento exitoso (en cualquier desenlace: sigue abierta, se cierra por
+  SL/TP/liquidación con vela real, o no había ventana) limpia la marca
+  (`reconciliation_failed=False`, `reconciliation_attempts=0`) tanto en la fila
+  persistida como en el objeto en memoria.
+
+**d. Pruebas**: unitarias para `_residual_gaps_are_tolerable` (aislado vs.
+contiguo, confirmado por MARK_PRICE vs. no, dentro/fuera del tope), la
+sustitución por MARK_PRICE con `fill_source` auditable, el congelamiento de
+sombras marcadas, la renombrada de `fill_source` a `TICK_UNRECONCILED` en
+reales, los reintentos (éxito limpia la marca, fallo incrementa intentos) y el
+cierre sin PnL al agotarlos; más un caso de punta a punta: reconciliación
+falla -> sombra marcada y sin cierre por tick -> excluida del veredicto de
+`ai_value_verdict`. Ver `tests/unit/test_position_monitor.py` y
+`tests/unit/test_ai_value.py`.

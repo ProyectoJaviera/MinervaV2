@@ -438,6 +438,35 @@ async def download_missing(
     )
 
 
+async def _warn_internal_gaps(
+    db: Database, symbol: str, interval: str, price_type: str, start_time: int, end_time: int,
+    step_ms: int, min_cached: int, max_cached: int,
+) -> None:
+    """Solo informa (INFO/WARNING), nunca lanza ni cambia el resultado de
+    `check_series_availability`: una serie puede tener los BORDES completos (lo
+    unico que esa funcion exige) y aun asi huecos SUELTOS adentro -- exactamente
+    lo que paso con los 236 huecos de Fase 2 (ZECUSDT/LINKUSDT, 2023, ver seccion
+    5 de docs/FASE2_INTEGRIDAD_VELAS.md), que pasaron desapercibidos porque nadie
+    miraba la densidad interna, solo la cobertura de punta a punta."""
+    lo = max(_align_up(start_time, min_cached, step_ms), min_cached)
+    hi = min(_align_down(end_time, min_cached, step_ms), max_cached)
+    if lo > hi:
+        return
+    bars = await ohlcv_repo.get_bars(db, symbol, interval, price_type, lo, hi)
+    gaps = find_gaps([b.open_time for b in bars], step_ms, lo, hi)
+    if gaps:
+        logger.warning(
+            "%s %s %s: %d hueco(s) interno(s) en [%s, %s] (bordes completos, pero faltan "
+            "velas sueltas adentro)",
+            symbol, interval, price_type, len(gaps), _fmt(lo), _fmt(hi),
+        )
+    else:
+        logger.info(
+            "%s %s %s: sin huecos internos en [%s, %s]", symbol, interval, price_type,
+            _fmt(lo), _fmt(hi),
+        )
+
+
 async def check_series_availability(
     db: Database,
     symbol: str,
@@ -480,6 +509,10 @@ async def check_series_availability(
     )
     tail_ok = max_cached >= end_time - 2 * step_ms
     if head_ok and tail_ok:
+        await _warn_internal_gaps(
+            db, symbol, interval, price_type, start_time, end_time, step_ms,
+            min_cached, max_cached,
+        )
         return None
     return (
         f"Velas incompletas para {symbol} {interval} {price_type} en rango "
