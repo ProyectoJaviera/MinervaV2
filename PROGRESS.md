@@ -1083,3 +1083,77 @@ de reiniciar el bot.**
   `shadow_report.build_report` incluye la linea de exclusion de
   RECONCILE_FAILED.
 - Push realizado (pedido explicito: "Detente y realiza el push").
+
+## Incidente de estabilidad (2026-10-11): logging no bloqueante, heartbeat, /health
+
+El bot se congelo ~4h (05:00 locales / 08:00 UTC, en medio de un ciclo) porque
+la consola quedo pausada (Tee-Object externo, fuera del repo) y el pipe de
+stderr se llamo: `logging.basicConfig` escribe SINCRONO, el `write()` del
+`StreamHandler` bloqueo, y con todo en un solo hilo (asyncio) eso bloqueo el
+event loop completo.
+
+**Implementado** (`app/core/logging.py`, `app/core/heartbeat.py`,
+`app/core/scheduler.py`, `app/api/deps.py`, `app/api/routes/health.py`,
+`app/main.py`, `app/config.py`, `scripts/check_health.py`):
+- **Logging no bloqueante**: `BoundedQueueHandler` (subclase de
+  `QueueHandler`) en el logger raiz -- `enqueue` es siempre `_nowait`, nunca
+  bloquea ni lanza. DOS `QueueListener` independientes, cada uno en su propio
+  hilo: uno a `RotatingFileHandler` en `settings.log_dir` (destino PRINCIPAL,
+  cola grande: 20.000), otro a consola (best-effort, cola chica: 1.000). Si
+  consola se traba, solo se traba SU hilo -- nunca el event loop, nunca el
+  archivo.
+- **Descarte con prioridad, no en silencio**: cola llena descarta DEBUG/INFO
+  (contado en `dropped_count`); un WARNING+ primero intenta desalojar un
+  registro viejo de baja prioridad para hacerle lugar, y solo se pierde si la
+  cola esta llena de puro WARNING+ (caso extremo). Nunca usa
+  `handleError`/stderr (podria ser el mismo pipe trabado).
+- **uvicorn**: configura sus propios handlers sincronos en `uvicorn`/
+  `uvicorn.error`/`uvicorn.access` ANTES del lifespan -- `setup_logging` se
+  los quita y los deja propagar al logger raiz, o sus logs de acceso/error
+  podrian volver a bloquear exactamente igual que el incidente original
+  (verificado en el smoke: esos tres loggers aparecen en `logs/minerva.log`
+  con el mismo formato que el resto).
+- **Apagado**: `shutdown_logging()` para el listener de archivo con join SIN
+  limite (vacia su cola antes de salir) y el de consola con join CON timeout
+  (2s) -- nunca cuelga el apagado aunque consola este trabada. Formato sin
+  cambios (`"%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"`): los
+  `Select-String`/grep existentes siguen funcionando.
+- **Heartbeat** (`app/core/heartbeat.py`, nueva clase, mismo patron
+  `run_forever`/`stop` que `Scheduler`/`PositionMonitor`): loguea cada
+  `settings.heartbeat_seconds` (default 300s) y guarda `last_beat_at` --
+  prueba que el EVENT LOOP sigue vivo, nada de logica de negocio.
+- **`Scheduler.last_cycle_at`**: distinto del heartbeat -- la ULTIMA
+  evaluacion COMPLETA del generador de senales, para notar un cuelgue del
+  CICLO de negocio aunque el loop siga vivo (p.ej. la API de Bitunix caida).
+- **`GET /health`**: `last_beat_at`, `last_cycle_at`, `status` ("stale" si
+  `last_cycle_at` es `None` o pasa de `STALE_AFTER_MINUTES`=90, constante del
+  modulo) y `log_dropped_count`. `scripts/check_health.py` (nuevo, opcional):
+  consulta `/health` con timeout de 10s, imprime OK/STALE/SIN_RESPUESTA con
+  codigo de salida (0/1/2) -- para un cron/Task Scheduler externo.
+- `Settings`: `log_dir` (default "logs") y `heartbeat_seconds` (default
+  300.0) nuevos; tamanos de cola, de rotacion y el timeout de apagado de
+  consola quedan como constantes del modulo (decision explicita).
+- Se corrigieron dos tests preexistentes (`test_universe_refresh.py`,
+  `test_analyze_risk_script.py`) que llaman `setup_logging()`/`main()` y, con
+  el cambio, empezaban a escribir de verdad en el `logs/` del repo -- ahora
+  usan `tmp_path` via `monkeypatch`.
+- Tests nuevos: `tests/unit/test_logging.py` (11 -- nunca bloquea con cola
+  llena, descarta DEBUG/INFO en silencio, prioriza WARNING+ con desalojo,
+  quita y silencia los handlers de uvicorn con uno que bloquea de verdad,
+  idempotencia, formato, archivo vacia su cola al apagar, consola nunca
+  cuelga el apagado aunque su handler este trabado para siempre), 1 en
+  `test_scheduler.py` (`last_cycle_at`), 3 en `test_heartbeat.py`, 4 en
+  `test_health_route.py` (ok/stale/sin-ciclo-nunca/justo-bajo-el-umbral).
+- Suite completa: 489 passed, 2 skipped; `ruff check .` limpio.
+- **Smoke de arranque real**: uvicorn real en el puerto 8001 (el bot real
+  sigue en 8000, PID verificado antes y despues, sin tocar), `DATABASE_PATH`
+  y `LOG_DIR` TEMPORALES (asserts de ruta distinta a la real). Confirmado en
+  vivo: `/health` con los 5 campos, `last_beat_at`/`last_cycle_at` avanzando,
+  `status="ok"`, `log_dropped_count=0`; `logs/minerva.log` con las lineas de
+  `uvicorn.error`/`uvicorn.access` en el mismo formato que el resto (prueba
+  directa de que ya no tienen su propio handler sincrono); `check_health.py`
+  devolvio OK con exit 0; apagado via CTRL_BREAK_EVENT (equivalente a
+  Ctrl+C) completo en 1,5s, sin colgarse -- `logs/minerva.log` muestra
+  "Shutting down" / "Waiting for application shutdown." de uvicorn antes de
+  que `shutdown_logging()` cerrara los listeners.
+- Sin push (pedido explicito).
