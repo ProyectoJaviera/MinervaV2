@@ -17,6 +17,7 @@ llegan a la cuenta real.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 
 from app.config import Settings
 from app.core.logging import get_logger
@@ -53,6 +54,10 @@ class Scheduler:
         self.settings = settings
         self.ws_client = ws_client
         self._stop = asyncio.Event()
+        # Incidente de estabilidad 2026-10-11: ultima evaluacion COMPLETA del
+        # generador de senales (no el heartbeat, que solo prueba que el event
+        # loop sigue vivo) -- expuesto en GET /health como `last_cycle_at`.
+        self.last_cycle_at: datetime | None = None
 
     def stop(self) -> None:
         self._stop.set()
@@ -87,6 +92,7 @@ class Scheduler:
             if shadow_trade is not None and real is not None:
                 await shadow_repo.mark_executed(self.db, shadow_trade.id)
         await self.sync_ws_subscriptions()
+        self.last_cycle_at = datetime.now(UTC)
         return candidates
 
     async def sync_ws_subscriptions(self) -> None:

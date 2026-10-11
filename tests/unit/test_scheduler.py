@@ -197,6 +197,27 @@ async def test_run_cycle_processes_every_candidate_from_the_generator(db, monkey
 
 
 @pytest.mark.asyncio
+async def test_run_cycle_records_last_cycle_at_when_it_completes(db, monkeypatch):
+    """Incidente de estabilidad 2026-10-11: `GET /health` expone esto como
+    `last_cycle_at` -- la ULTIMA evaluacion completa del generador, no el
+    heartbeat (que solo prueba que el event loop sigue vivo)."""
+    scheduler, _backend, _rest = _scheduler(db)
+    assert scheduler.last_cycle_at is None
+
+    async def fake_generation(db_arg, rest_arg, settings_arg):
+        return []
+
+    monkeypatch.setattr("app.core.scheduler.run_signal_generation_cycle", fake_generation)
+
+    before = datetime.now(UTC)
+    await scheduler.run_cycle()
+    after = datetime.now(UTC)
+
+    assert scheduler.last_cycle_at is not None
+    assert before <= scheduler.last_cycle_at <= after
+
+
+@pytest.mark.asyncio
 async def test_run_cycle_continues_after_one_candidate_errors(db, monkeypatch):
     """Un candidato que lanza una excepcion inesperada (no
     `RiskRejectedError`/`InsufficientRiskBudgetError`) no debe tumbar el

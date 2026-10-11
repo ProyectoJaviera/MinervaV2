@@ -14,7 +14,8 @@ from fastapi import FastAPI
 
 from app.api.routes import health, positions, trades
 from app.config import settings
-from app.core.logging import get_logger, setup_logging
+from app.core.heartbeat import Heartbeat
+from app.core.logging import get_logger, setup_logging, shutdown_logging
 from app.core.scheduler import Scheduler
 from app.execution.paper_backend import PaperBackend
 from app.market.bitunix_rest import BitunixRestClient
@@ -53,6 +54,7 @@ async def lifespan(app: FastAPI):
         base_url=settings.coingecko_base_url, api_key=settings.coingecko_api_key,
     )
     universe_refresher = UniverseRefresher(coingecko_client, rest_client, db, settings)
+    heartbeat = Heartbeat(settings.heartbeat_seconds)
 
     # Reconciliacion ANTES de abrir el feed y el generador: el periodo caido se
     # reproduce con velas 1m antes de que entren ticks nuevos.
@@ -70,12 +72,14 @@ async def lifespan(app: FastAPI):
     app.state.paper_backend = paper_backend
     app.state.monitor = monitor
     app.state.scheduler = scheduler
+    app.state.heartbeat = heartbeat
 
     tasks = [
         asyncio.create_task(ws_client.run_forever()),
         asyncio.create_task(monitor.run_forever()),
         asyncio.create_task(scheduler.run_forever()),
         asyncio.create_task(universe_refresher.run_forever()),
+        asyncio.create_task(heartbeat.run_forever()),
     ]
     try:
         yield
@@ -84,6 +88,7 @@ async def lifespan(app: FastAPI):
         monitor.stop()
         ws_client.stop()
         universe_refresher.stop()
+        heartbeat.stop()
         for task in tasks:
             task.cancel()
         for task in tasks:
@@ -95,6 +100,7 @@ async def lifespan(app: FastAPI):
         await coingecko_client.aclose()
         await rest_client.aclose()
         await db.close()
+        shutdown_logging()
 
 
 app = FastAPI(title="Minerva (PAPER TRADING)", lifespan=lifespan)
