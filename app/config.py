@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     env: str = Field(default="development", alias="ENV")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     report_timezone: str = Field(default="America/Santiago", alias="REPORT_TIMEZONE")
+    # Incidente de estabilidad 2026-10-11 (congelamiento del event loop por un
+    # pipe de consola trabado): ver app/core/logging.py y app/core/heartbeat.py.
+    log_dir: str = Field(default="logs", alias="LOG_DIR")
+    heartbeat_seconds: float = Field(default=300.0, alias="HEARTBEAT_SECONDS")
 
     # --- Bitunix (solo endpoints publicos en v1) ---
     bitunix_rest_base_url: str = Field(

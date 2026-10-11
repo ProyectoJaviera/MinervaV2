@@ -11,7 +11,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.config import Settings
-from app.core.logging import setup_logging
+from app.config import settings as real_settings
+from app.core.logging import setup_logging, shutdown_logging
 from app.market.coingecko_client import CoinGeckoApiError
 from app.market.universe import (
     LAST_REFRESH_ERROR_KEY,
@@ -201,6 +202,13 @@ async def test_refresher_without_any_snapshot_refreshes_immediately(db):
 # --- logging -------------------------------------------------------------------
 
 
-def test_httpx_logger_is_set_to_warning_after_setup_logging():
+def test_httpx_logger_is_set_to_warning_after_setup_logging(monkeypatch, tmp_path):
+    # `log_dir` a una carpeta temporal: `setup_logging` ahora crea un
+    # RotatingFileHandler real (incidente de estabilidad 2026-10-11) y esta
+    # prueba no debe escribir en el `logs/` real del repo.
+    monkeypatch.setattr(real_settings, "log_dir", str(tmp_path))
     setup_logging()
-    assert logging.getLogger("httpx").level == logging.WARNING
+    try:
+        assert logging.getLogger("httpx").level == logging.WARNING
+    finally:
+        shutdown_logging()

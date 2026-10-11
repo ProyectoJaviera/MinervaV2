@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 
+from app.core.logging import shutdown_logging
 from app.persistence.database import Database
 from app.persistence.models import BacktestTrade, Side
 from app.persistence.repositories import backtest_repo
@@ -61,10 +62,15 @@ async def populated_db(tmp_path, monkeypatch):
 
     report_path = tmp_path / "FASE2_RIESGO_test.md"
     monkeypatch.setattr(analyze_risk.settings, "database_path", str(db_path))
+    # `analyze_risk.main()` llama `setup_logging()`, que desde el incidente de
+    # estabilidad 2026-10-11 crea un RotatingFileHandler real -- sin esto
+    # escribiria en el `logs/` real del repo en cada corrida de esta prueba.
+    monkeypatch.setattr(analyze_risk.settings, "log_dir", str(tmp_path))
     monkeypatch.setattr(analyze_risk, "REPORT_PATH", str(report_path))
     monkeypatch.setattr(analyze_risk, "GRID_TRIALS", 20)
     monkeypatch.setattr(analyze_risk, "GRID_TRIAL_LENGTH", 10)
-    return report_path
+    yield report_path
+    shutdown_logging()
 
 
 @pytest.mark.asyncio
