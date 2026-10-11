@@ -1156,4 +1156,35 @@ event loop completo.
   Ctrl+C) completo en 1,5s, sin colgarse -- `logs/minerva.log` muestra
   "Shutting down" / "Waiting for application shutdown." de uvicorn antes de
   que `shutdown_logging()` cerrara los listeners.
+
+**Revision (misma fecha): defecto real en `test_stopping_the_console_
+listener_never_hangs_even_if_its_handler_is_stuck`, no en el codigo de
+produccion.** El handler de prueba bloqueaba `emit()` con un `Event()` NUEVO
+que jamas se ponia. `Handler.handle()` toma `self.lock` (un `RLock`) antes de
+llamar a `emit` y lo libera recien al volver -- con ese `Event()` sin liberar
+nunca, ese lock queda tomado PARA SIEMPRE. `logging.shutdown()` (registrado
+por el modulo `logging` via `atexit`, recorre TODO handler alguna vez creado
+sin importar si esta adjunto a algun logger) hace `h.acquire()` sobre ese
+mismo lock al salir del proceso: pytest ya reporta la prueba como "passed",
+pero el PROCESO ENTERO queda colgado esperando ese `acquire()` -- confirmado
+en Python 3.13 (`pytest tests/unit/test_logging.py` no terminaba solo; con
+`-k "not console_listener_never_hangs"` si). Corregido: el `Event` ahora es
+un atributo de instancia (`handler.release_event`) que el test libera en un
+`finally`, dejando que el hilo termine de verdad (y suelte el lock) antes de
+que el proceso intente salir. Verificado con `timeout` externo, 3 corridas
+seguidas, `pytest tests/unit/test_logging.py` sale solo cada vez
+(Python 3.11.15 en este entorno no llegaba a manifestar el colgado, pero el
+riesgo era real en cualquier entorno).
+
+**Caveat operativo que queda documentado, no corregido (es del mundo real,
+no de la prueba):** si la CONSOLA del bot real queda trabada de verdad al
+salir (el escenario del incidente), `logging.shutdown()` puede quedar
+esperando para siempre el lock del `StreamHandler` de consola de la misma
+manera, y el proceso necesitaria un `kill` (no un apagado limpio) para
+terminar. Es aceptable: el bot corre con `Start-Process` sin consola propia
+(sin un terminal interactivo detras, no hay pipe de Tee-Object que trabar en
+ese modo), asi que este camino especifico no deberia darse en operacion
+normal -- `shutdown_logging()` en si (el listener de consola con `join` con
+timeout) ya no se cuelga por este motivo, el riesgo residual es solo el
+`atexit` de la libreria `logging`, fuera de nuestro control.
 - Sin push (pedido explicito).

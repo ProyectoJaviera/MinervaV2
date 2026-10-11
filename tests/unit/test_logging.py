@@ -176,27 +176,51 @@ def test_stopping_the_file_listener_drains_every_queued_record_first():
 
 
 class _HangingHandler(logging.Handler):
-    """Un handler cuyo `emit` nunca retorna -- el pipe de consola trabado del
-    incidente, simulado con un `Event` que jamas se pone."""
+    """Un handler cuyo `emit` queda bloqueado hasta que el TEST libera
+    `release_event` -- simula el pipe de consola trabado del incidente SIN
+    dejar un hilo colgado para siempre. `Handler.handle()` toma `self.lock`
+    (un `RLock`) antes de llamar a `emit` y lo libera recien al volver: un
+    `Event()` nuevo que JAMAS se pone (la version anterior de esta prueba)
+    deja ese lock tomado para siempre, y `logging.shutdown()` -- registrado
+    via `atexit`, recorre TODO handler alguna vez creado, sin importar si
+    esta adjunto a algun logger -- hace `h.acquire()` sobre ese mismo lock al
+    salir del proceso: pytest ya reporto la prueba como "passed", pero el
+    PROCESO queda colgado para siempre (confirmado en Python 3.13; en algunos
+    entornos no se manifiesta, pero el riesgo es real en cualquiera)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release_event = threading.Event()
 
     def emit(self, record: logging.LogRecord) -> None:
-        threading.Event().wait()  # bloquea para siempre
+        self.release_event.wait()
 
 
 def test_stopping_the_console_listener_never_hangs_even_if_its_handler_is_stuck():
     q: queue.Queue = queue.Queue(maxsize=CONSOLE_QUEUE_MAXSIZE)
-    listener = _UniqueSentinelQueueListener(q, _HangingHandler())
+    handler = _HangingHandler()
+    listener = _UniqueSentinelQueueListener(q, handler)
     listener.start()
-    q.put_nowait(_record(logging.INFO, "esto nunca termina de escribirse"))
-    time.sleep(0.05)  # deja que el hilo entre al handler trabado
+    try:
+        q.put_nowait(_record(logging.INFO, "esto nunca termina de escribirse"))
+        time.sleep(0.05)  # deja que el hilo entre al handler trabado
 
-    start = time.monotonic()
-    _stop_listener(listener, join_timeout=0.3)
-    elapsed = time.monotonic() - start
+        start = time.monotonic()
+        _stop_listener(listener, join_timeout=0.3)
+        elapsed = time.monotonic() - start
 
-    assert elapsed < 1.0, "shutdown_logging no debe colgarse esperando a consola"
-    # El hilo (daemon) sigue vivo, trabado -- eso es aceptable, nunca bloquea
-    # el proceso. No se intenta mas join: ya se agoto el timeout.
+        assert elapsed < 1.0, "shutdown_logging no debe colgarse esperando a consola"
+        # El hilo (daemon) sigue vivo, trabado en emit() -- eso es lo que se
+        # prueba arriba (el apagado no lo espera). Pero no puede quedar asi
+        # para siempre: ver el docstring de `_HangingHandler`.
+    finally:
+        handler.release_event.set()
+        thread = listener._thread
+        if thread is not None:
+            thread.join(timeout=2.0)
+            assert not thread.is_alive(), (
+                "el hilo deberia terminar (y soltar el lock del handler) tras liberar el evento"
+            )
 
 
 @pytest.mark.parametrize("name", ["httpx"])
