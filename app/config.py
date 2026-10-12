@@ -249,6 +249,11 @@ class Settings(BaseSettings):
     # (consultado 2026-10-04); se verifican de nuevo antes de cualquier cambio de modelo.
     llm_price_input_per_mtok: float = Field(default=2.0, alias="LLM_PRICE_INPUT_PER_MTOK")
     llm_price_output_per_mtok: float = Field(default=10.0, alias="LLM_PRICE_OUTPUT_PER_MTOK")
+    # TAREA B (docs/FASE3_6_LLM.md seccion k): etiquetado en vivo de sombras
+    # durante la medicion (app/trading/shadow_live_labeler.py). APAGADO por
+    # defecto a proposito -- activarlo es una decision del usuario, no de
+    # este codigo; nunca lo cambia el propio bot ni un deploy.
+    llm_live_labeling_enabled: bool = Field(default=False, alias="LLM_LIVE_LABELING_ENABLED")
     # FRACCION 0-1 (score de confluencia, no un porcentaje de precio).
     confluence_score_threshold: float = Field(
         default=0.6, alias="CONFLUENCE_SCORE_THRESHOLD"
