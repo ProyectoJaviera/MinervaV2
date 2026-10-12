@@ -15,6 +15,7 @@ from app.config import Settings
 from app.core.scheduler import Scheduler
 from app.persistence.models import Side, TradeStatus
 from app.persistence.repositories import trades_repo
+from app.trading.shadow_book import ShadowBook
 from app.trading.signal_generator import SignalCandidate
 
 
@@ -215,6 +216,61 @@ async def test_run_cycle_records_last_cycle_at_when_it_completes(db, monkeypatch
 
     assert scheduler.last_cycle_at is not None
     assert before <= scheduler.last_cycle_at <= after
+
+
+# --- TAREA B (docs/FASE3_6_LLM.md seccion k): enganche del etiquetado en vivo --
+
+
+class FakeLiveLabeler:
+    def __init__(self) -> None:
+        self.cycle_starts = 0
+        self.labeled: list = []
+
+    def note_cycle_start(self) -> None:
+        self.cycle_starts += 1
+
+    def maybe_label(self, trade) -> None:
+        self.labeled.append(trade)
+
+
+@pytest.mark.asyncio
+async def test_run_cycle_calls_note_cycle_start_once_and_labels_each_new_shadow(
+    db, monkeypatch
+):
+    scheduler, _backend, _rest = _scheduler(db)
+    scheduler.shadow = ShadowBook(db, scheduler.settings)
+    live_labeler = FakeLiveLabeler()
+    scheduler.live_labeler = live_labeler
+    candidate = make_candidate(price_by_strategy={"ema_cross_9_21": 100.0})
+
+    async def fake_generation(db_arg, rest_arg, settings_arg):
+        return [candidate]
+
+    monkeypatch.setattr("app.core.scheduler.run_signal_generation_cycle", fake_generation)
+
+    await scheduler.run_cycle()
+
+    assert live_labeler.cycle_starts == 1
+    assert len(live_labeler.labeled) == 1
+    assert live_labeler.labeled[0].symbol == "BTCUSDT"
+
+
+@pytest.mark.asyncio
+async def test_run_cycle_without_a_live_labeler_behaves_exactly_as_before(db, monkeypatch):
+    """`live_labeler=None` (por defecto, flag apagado hoy): el ciclo no debe
+    cambiar de comportamiento ni lanzar por intentar usarlo."""
+    scheduler, _backend, _rest = _scheduler(db)
+    scheduler.shadow = ShadowBook(db, scheduler.settings)
+    assert scheduler.live_labeler is None
+    candidate = make_candidate(price_by_strategy={"ema_cross_9_21": 100.0})
+
+    async def fake_generation(db_arg, rest_arg, settings_arg):
+        return [candidate]
+
+    monkeypatch.setattr("app.core.scheduler.run_signal_generation_cycle", fake_generation)
+
+    returned = await scheduler.run_cycle()
+    assert returned == [candidate]
 
 
 @pytest.mark.asyncio
