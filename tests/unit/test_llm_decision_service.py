@@ -188,6 +188,32 @@ async def test_invalid_json_leaves_sin_llm_and_keeps_the_raw_response(db):
     assert reloaded.llm_decision == "SIN_LLM"
 
 
+@pytest.mark.asyncio
+async def test_an_overly_long_razonamiento_is_truncated_not_invalidated(db):
+    """Revision del piloto v1 (docs/FASE3_6_LLM.md seccion k): de 21
+    respuestas, la unica invalida fue un `razonamiento` > 300 caracteres con
+    `decision`/`confianza` perfectamente validos -- ya no se pierde la
+    decision entera por eso."""
+    shadow = await _open_shadow(db)
+    long_text = (
+        f'{{"decision": "APROBAR", "confianza": 0.8, "razonamiento": "{"x" * 400}"}}'
+    )
+    client = FakeLlmClient([LlmRawResponse(
+        text=long_text, input_tokens=1100, output_tokens=120, latency_ms=800,
+    )])
+    service = LlmDecisionService(db, make_settings(), client_factory=lambda s: client)
+
+    result = await service.decide_group(
+        signal_group_key=shadow.signal_group_key, shadow_trade_id=shadow.id,
+        candle_close_time=CANDLE, system_prompt="s", prompt_version="v2",
+        user_message="u", estimated_input_tokens=1200, now=CANDLE,
+    )
+
+    assert result.status == STATUS_OK and result.label == "APROBADA"
+    reloaded = await shadow_repo.get(db, shadow.id)
+    assert reloaded.llm_decision == "APROBADA"
+
+
 # --- presupuesto: sin red ni cliente real ---------------------------------------
 
 

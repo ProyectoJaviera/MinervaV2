@@ -3,10 +3,17 @@ extra, fuera de rango o texto fuera del JSON son invalidos por diseno."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
-from app.llm.schemas import DECISION_TO_LABEL, LlmDecisionOut
+from app.llm.schemas import (
+    DECISION_TO_LABEL,
+    RAZONAMIENTO_MAX_LENGTH,
+    LlmDecisionOut,
+    parse_decision,
+)
 
 
 def test_valid_json_parses():
@@ -39,3 +46,43 @@ def test_decision_maps_to_the_shadow_label():
 def test_invalid_payloads_are_rejected(raw):
     with pytest.raises(ValidationError):
         LlmDecisionOut.model_validate_json(raw)
+
+
+# --- parse_decision: revision del piloto v1 (docs/FASE3_6_LLM.md seccion k) --
+
+
+def test_parse_decision_truncates_an_overly_long_razonamiento_instead_of_rejecting_it():
+    raw = json.dumps({
+        "decision": "APROBAR", "confianza": 0.8, "razonamiento": "x" * 400,
+    })
+    out = parse_decision(raw)
+    assert out.decision == "APROBAR"
+    assert len(out.razonamiento) == RAZONAMIENTO_MAX_LENGTH
+
+
+def test_parse_decision_does_not_touch_a_razonamiento_already_within_the_limit():
+    raw = json.dumps({"decision": "RECHAZAR", "confianza": 0.3, "razonamiento": "corto"})
+    out = parse_decision(raw)
+    assert out.razonamiento == "corto"
+
+
+def test_parse_decision_still_raises_on_malformed_json():
+    with pytest.raises(json.JSONDecodeError):
+        parse_decision('{"decision": "APROBAR", "confianza": 0.8, "razonamiento": "ok"')
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        json.dumps({"decision": "APROBAR", "confianza": 0.8, "razonamiento": "x" * 400,
+                    "extra": 1}),  # campo extra: sigue invalido aunque se trunque razonamiento
+        json.dumps({"decision": "TAL_VEZ", "confianza": 0.8, "razonamiento": "x" * 400}),
+        json.dumps({"decision": "APROBAR", "confianza": 1.5, "razonamiento": "x" * 400}),
+        json.dumps({"decision": "APROBAR", "confianza": 0.8, "razonamiento": ""}),
+        'Aqui esta mi respuesta: {"decision": "APROBAR", "confianza": 0.8, "razonamiento": "ok"}',
+        '["no", "es", "un", "objeto"]',
+    ],
+)
+def test_parse_decision_still_rejects_broken_schema_even_with_a_long_razonamiento(raw):
+    with pytest.raises((ValidationError, json.JSONDecodeError)):
+        parse_decision(raw)

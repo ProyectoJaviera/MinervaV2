@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -19,7 +20,7 @@ from pydantic import ValidationError
 from app.config import Settings
 from app.llm.budget import LlmBudgetTracker
 from app.llm.client import LlmClient, LlmHttpError, LlmTimeoutError, build_anthropic_client
-from app.llm.schemas import DECISION_TO_LABEL, LlmDecisionOut
+from app.llm.schemas import DECISION_TO_LABEL, parse_decision
 from app.persistence.database import Database
 from app.persistence.repositories import llm_logs_repo, shadow_repo
 
@@ -162,8 +163,11 @@ class LlmDecisionService:
 
         real_cost = estimate_cost_usd(raw.input_tokens, raw.output_tokens, self._settings)
         try:
-            parsed = LlmDecisionOut.model_validate_json(raw.text)
-        except ValidationError as exc:
+            # `parse_decision` trunca un `razonamiento` demasiado largo en vez
+            # de invalidar la decision (revision del piloto v1, ver
+            # docs/FASE3_6_LLM.md seccion k y el docstring de app/llm/schemas.py).
+            parsed = parse_decision(raw.text)
+        except (ValidationError, json.JSONDecodeError) as exc:
             log_id = await log(
                 status=STATUS_INVALID, error=str(exc)[:500], response_raw=raw.text,
                 input_tokens=raw.input_tokens, output_tokens=raw.output_tokens,
