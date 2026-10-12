@@ -1398,3 +1398,82 @@ recalcularlo. `funding_rate_pct` no se toca (sigue como esta, en porcentaje).
   features del prompt**: la proxima revision esperada es el resultado de ESE
   piloto real, no un cambio nuevo (pedido explicito del usuario).
 - Sin push (pedido explicito).
+
+## Piloto real de signal_review_v4, CONGELAMIENTO, y TAREA B/C (2026-10-12)
+
+**Piloto real** (45 grupos, `prompt_version = "signal_review_v4"`): 45/45
+JSON valido (1 reparado por el parser tolerante de la revision de v2), 0
+campos null, 60% APROBAR (dentro de banda 15-85%), y el defecto de v3 (signo
+del funding en SHORT con funding negativo) **desaparecio por completo**:
+signo correcto en los 45/45 casos gracias a `funding_effect_on_position`
+(campo determinista, no inferido por el modelo).
+
+**PROMPT CONGELADO** (pedido explicito del usuario, docs/FASE3_6_LLM.md
+seccion k): a partir de aqui, ningun cambio de `SYSTEM_PROMPT`,
+`FEATURES_VERSION` ni `build_user_message`/features sin su aprobacion
+explicita -- cualquiera de los dos invalida la medicion.
+
+```
+PROMPT_VERSION   = "signal_review_v4"
+FEATURES_VERSION = "features_v2"
+PROMPT_SHA256    = "0fa0dd75a3fecdae36f3b77c8b7ec5d97d58a2238349283c61bfa7632188c777"
+```
+
+### TAREA B: etiquetado en vivo de sombras durante la medicion
+
+Modulo nuevo `app/trading/shadow_live_labeler.py` (`ShadowLiveLabeler`),
+plan previamente aprobado por el usuario, ahora implementado con sus 5
+ajustes:
+
+1. `FROZEN_PROMPT_SHA256` (mismo valor de arriba). Si `PROMPT_SHA256` en
+   vivo no coincide, el etiquetado NO corre (grupos quedan `SIN_LLM`),
+   WARNING en el log en CADA ciclo (no solo el primero, via `Scheduler.
+   run_cycle` -> `note_cycle_start()`), y `GET /health` expone
+   `llm_labeling.frozen_hash_ok`. Nunca se descartan filas ya escritas.
+2. Presupuesto agotado: `decide_group` ahora logea un WARNING de aplicacion
+   en el momento exacto (antes solo quedaba en `llm_logs`, sin nadie
+   mirando la consola de un etiquetado en vivo). `llm_logs_repo.
+   get_status_counts_since`/`get_first_occurrence_since` (funciones nuevas)
+   distinguen `BUDGET_EXCEEDED` de `TIMEOUT`/`ERROR_HTTP`/`INVALID`,
+   expuesto en `GET /health` (bloque `llm_labeling`) y preparado para la
+   seccion (m) del informe de sesgo por exclusion.
+3. Tests (14 casos nuevos en `tests/unit/test_shadow_live_labeler.py` + 2 en
+   `test_scheduler.py`): sin fuga de datos futuros (reusa `build_features_
+   from_shadow_trade`, ya probado); retraso > 1800s deja `SIN_LLM` sin fila
+   nueva (y justo debajo del limite si etiqueta); fallo real (`FakeLlmClient`
+   con timeout) deja `SIN_LLM`, nunca `RECHAZADA`; nunca crea ni toca un
+   trade real; flag apagado (`live_labeler=None`, el default hoy) no cambia
+   el comportamiento del ciclo. **Smoke punta a punta real** sobre una DB
+   temporal nueva, puerto 8001, confirmando ANTES y DESPUES que el bot real
+   del puerto 8000 seguia con `status: ok` sin ninguna interrupcion: cliente
+   del LLM parcheado por uno sin red (cero costo posible), `scheduler.
+   run_cycle()` real abrio una sombra via un candidato construido a mano y
+   la etiqueto `APROBADA` con una fila `llm_logs` real, `GET /health` reflejo
+   el bloque antes/despues, `trades_repo.get_open_positions` siguio vacio, y
+   el apagado limpio no dejo tareas pendientes.
+4. Tareas en un `set` con `done_callback` que logea cualquier excepcion
+   inesperada (`logger.error(..., exc_info=exc)`, nunca silenciosa); el
+   cierre limpio del bot (`live_labeler.shutdown()`, llamado desde el
+   `finally` del lifespan de `app/main.py`) cancela toda tarea pendiente y
+   espera a que terminen antes de cerrar la base.
+5. `Settings.llm_live_labeling_enabled = False` por defecto
+   (`LLM_LIVE_LABELING_ENABLED` en `.env.example`). **El flag sigue apagado
+   en el bot real -- no se activo ni se reinicio el bot real; la activacion
+   es decision del usuario.**
+
+Suite completa: 551 passed, 2 skipped; `ruff check .` limpio.
+
+### TAREA C: borde del reconcile al arrancar que no limpiaba el flag
+
+`PositionMonitor.reconcile_on_startup` limpiaba `reconciliation_failed`
+cuando un reintento PERIODICO tenia exito, pero no cuando el PRIMER intento
+al arrancar el proceso (para un trade ya marcado de una racha anterior) ya
+tenia exito de entrada -- quedaba marcado (sombra congelada / `fill_source
+TICK_UNRECONCILED` en reales) hasta el siguiente reintento periodico, hasta
+300s despues, sin necesidad. Corregido: se limpia en el momento (misma
+`_clear_reconciliation_failed`, extendida para tambien actualizar el objeto
+en memoria). Test nuevo: `test_startup_reconciliation_success_clears_a_flag_
+from_a_previous_run`. Commit `79ceb53`.
+
+- Sin push (pedido explicito). Commits pequenos para TAREA B/C y esta
+  documentacion.

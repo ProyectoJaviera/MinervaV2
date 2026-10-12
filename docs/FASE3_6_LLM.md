@@ -911,6 +911,160 @@ se verificó en seco, ver PROGRESS.md). Con esta iteración se considera
 cerrado el ciclo de ajustes de texto/features del prompt: la siguiente
 revisión esperada es el resultado de ESE piloto real, no un cambio nuevo.
 
+**Piloto real de `signal_review_v4` (2026-10-12, 45 grupos) -- CONGELAMIENTO:**
+
+| Métrica | Resultado |
+|---|---|
+| Validez del JSON | 45/45 (100 %), 1 reparado (comilla faltante, punto 1 de la revisión de v2) |
+| Campos en `null` | 0 |
+| Tasa de APROBAR | 60 % |
+| ¿Dentro de la banda 15 %-85 %? | **SÍ** |
+| Signo de `funding_effect_on_position` | correcto en los 45/45 casos |
+
+El defecto de v3 (signo del funding en SHORT con funding negativo, 2/4 casos)
+**desapareció por completo**: el campo determinista `funding_effect_on_position`
+(punto de la corrección de v4, arriba) resolvió lo que el texto explícito por
+sí solo no lograba. Con esto se da por **CONGELADO** el prompt: a partir de
+aquí, ningún cambio de texto de `SYSTEM_PROMPT` ni de
+`FEATURES_VERSION`/`build_user_message`/features se hace sin aprobación
+explícita del usuario -- cualquiera de los dos invalida la medición
+(recuento reiniciado, sección de "Congelación" arriba).
+
+**Valores congelados:**
+
+```
+PROMPT_VERSION  = "signal_review_v4"
+FEATURES_VERSION = "features_v2"
+PROMPT_SHA256   = "0fa0dd75a3fecdae36f3b77c8b7ec5d97d58a2238349283c61bfa7632188c777"
+```
+
+`FROZEN_PROMPT_SHA256` (nueva constante, `app/trading/shadow_live_labeler.py`,
+sección siguiente) guarda este mismo valor por separado de
+`app.llm.prompts.PROMPT_SHA256` -- a propósito, para poder comparar el
+congelado contra el que el código produce EN VIVO en cada ciclo, sin tocar
+`app/llm/prompts.py` (que queda intacto, ver más abajo).
+
+### TAREA B: etiquetado en vivo de sombras durante la medición
+
+**Motivo.** Hasta aquí el piloto corría "por repetición" (sección de arriba,
+`scripts/llm_pilot.py`), en lote sobre grupos ya guardados, no conectado al
+ciclo del bot. Para medir en la MEDICIÓN real hace falta que cada sombra que
+`Scheduler` abre se etiquete sola, en el momento, sin intervención manual.
+
+**Diseño (`app/trading/shadow_live_labeler.py`, clase `ShadowLiveLabeler`):**
+
+- **Fuego y olvido.** `Scheduler.run_cycle` llama `live_labeler.maybe_label(
+  shadow_trade)` justo después de que `ShadowBook.open_candidate` abre una
+  sombra nueva -- una tarea `asyncio.create_task` por sombra, sin bloquear el
+  resto del ciclo. Reusa `LlmDecisionService.decide_group` TAL CUAL existía
+  (mismo semáforo de concurrencia, mismo `LlmBudgetTracker` del presupuesto
+  diario, misma fila por llamada en `llm_logs`), con `fase='MEDICION'`.
+- **Nunca toca la cuenta real.** El módulo no importa `PaperBackend` ni
+  ninguna función de escritura de `trades_repo`: no abre ni cierra
+  posiciones reales. `AUTO_OPEN_WITHOUT_LLM` sigue en `false`.
+- **Hash congelado, sin descartes silenciosos.** `Scheduler.run_cycle` llama
+  `live_labeler.note_cycle_start()` UNA vez por ciclo (no por candidato):
+  compara `PROMPT_SHA256` actual contra `FROZEN_PROMPT_SHA256` y, si no
+  coinciden, loguea un WARNING **en cada ciclo** (no solo el primero) y
+  `maybe_label` no crea ninguna tarea nueva mientras el desajuste dure. Los
+  grupos de esos ciclos quedan `SIN_LLM` sin fila nueva en `llm_logs` --
+  nunca se descarta una fila YA escrita. `GET /health` expone
+  `llm_labeling.frozen_hash_ok` para ver esto sin mirar el log.
+- **Retraso.** Solo se etiqueta una sombra que SIGUE `OPEN` (se relee el
+  estado actual de `shadow_trades`, no el objeto en memoria del momento en
+  que se encoló) y con `decision_delay_s <= 1800 s` en el instante en que la
+  tarea de verdad corre. Si no se cumple, queda `SIN_LLM` sin fila nueva --
+  igual, por diseño, que un grupo de PILOTO nunca llamado.
+- **Fallos → `SIN_LLM`, nunca `RECHAZADA`.** Ya garantizado dentro de
+  `LlmDecisionService.decide_group` sin cambios (TIMEOUT/ERROR_HTTP/INVALID/
+  presupuesto agotado); no hizo falta lógica nueva.
+- **Presupuesto agotado, visibilidad separada.** `decide_group` ahora logea
+  un WARNING de aplicación en el momento en que el presupuesto diario se
+  agota (antes solo quedaba en la fila `llm_logs`, sin nada mirando la
+  consola de un etiquetado en vivo sin operador presente). `llm_logs_repo.
+  get_status_counts_since`/`get_first_occurrence_since` (funciones nuevas)
+  distinguen `BUDGET_EXCEEDED` de `TIMEOUT`/`ERROR_HTTP`/`INVALID` -- todas
+  terminan en `SIN_LLM`, pero por razones distintas, y la distinción queda
+  preparada para el informe de sesgo por exclusión de la sección (m).
+- **Tareas en un `set` con `done_callback`.** Cada tarea se guarda en
+  `self._tasks` y se quita sola al terminar; si falló con una excepción
+  inesperada (no las ya manejadas dentro de `decide_group`), el callback la
+  loguea con `logger.error(..., exc_info=exc)` -- nunca queda silenciosa
+  como un "Task exception was never retrieved" perdido en stderr.
+  `shutdown()` (llamado desde el `finally` del lifespan de `app/main.py`)
+  cancela toda tarea pendiente y espera a que terminen de cancelarse antes
+  de que el proceso cierre la base.
+- **Apagado por defecto.** `Settings.llm_live_labeling_enabled` (alias
+  `LLM_LIVE_LABELING_ENABLED`) es `False` por defecto, a propósito: activarlo
+  es una decisión del usuario, nunca de este código ni de un deploy.
+
+**`GET /health`, bloque `llm_labeling` nuevo:** `enabled`, `frozen_hash_ok`,
+`labeled_today`/`failed_today`/`budget_exceeded_today` (conteos del día local
+de `settings.report_timezone`, fase `MEDICION`), `budget_exhausted_at`
+(`created_at` de la primera fila `BUDGET_EXCEEDED` del día, o `null`), y
+`cost_today_usd`.
+
+**Tests nuevos (`tests/unit/test_shadow_live_labeler.py`, 14 casos):** flag
+apagado no crea ninguna tarea; hash desajustado bloquea el etiquetado y
+loguea un WARNING en cada ciclo (no solo el primero); el valor congelado de
+arriba coincide con `PROMPT_SHA256` en vivo; retraso > 1800 s deja `SIN_LLM`
+sin fila nueva (y justo por debajo del límite sí etiqueta); una sombra ya
+cerrada deja `SIN_LLM` sin fila nueva; camino feliz y camino de fallo real
+(vía `LlmDecisionService` + `FakeLlmClient`, sin red) etiquetan
+correctamente o dejan `SIN_LLM` sin tocar nunca `RECHAZADA`; nunca crea ni
+toca un trade real; una excepción inesperada en la tarea se loguea sin
+quedar silenciosa; `shutdown()` cancela tareas pendientes (incluso con cero
+tareas, sin lanzar). Más 2 casos en `tests/unit/test_scheduler.py` que
+prueban el enganche real dentro de `run_cycle` (`note_cycle_start` una vez
+por ciclo, `maybe_label` llamado por cada sombra nueva; y que
+`live_labeler=None`, el valor por defecto hoy, no cambia el comportamiento
+del ciclo). Suite completa: 551 passed, 2 skipped; `ruff check .` limpio.
+
+**Smoke punta a punta (2026-10-12, sin tocar el bot real del puerto 8000 ni
+su base).** Se confirmó primero que el bot real seguía corriendo sin
+interrupciones (`PID` en 8000, `GET /health` respondiendo `status: ok` antes
+y después del smoke). El smoke NO reusa `app/main.py::lifespan` completo
+-- ese lifespan hace el descubrimiento del universo dinámico y el backfill
+real de velas 1m contra Bitunix/CoinGecko, lento y no determinista, y no es
+parte de TAREA B -- sino que arma a mano las piezas de producción que SÍ
+tocan TAREA B (`Database` sobre una DB temporal nueva, `Scheduler` real con
+`shadow=ShadowBook` y `live_labeler=ShadowLiveLabeler` reales, el router
+real de `GET /health`), sirviéndolas con `uvicorn` en el puerto 8001. El
+cliente del LLM se parcheó por uno sin red (`build_anthropic_client`
+reemplazado ANTES de que `decision_service.py` se importara por primera
+vez, ya que lo captura como valor por defecto de un parámetro) -- cero costo
+real posible incluso si algo hubiera intentado llamar a la API de verdad.
+Con un candidato de señal construido a mano (mismo patrón que
+`test_scheduler.py`, sin red real de Bitunix), `scheduler.run_cycle()` abrió
+una sombra, la tarea de etiquetado en vivo la dejó `APROBADA` con una fila
+`llm_logs` real (`fase=MEDICION`, `status=OK`), `GET /health` reflejó el
+bloque `llm_labeling` antes (`labeled_today=0`) y después (`labeled_today=1`,
+`cost_today_usd>0`) del ciclo, ningún trade real se creó ni se tocó
+(`trades_repo.get_open_positions` vacío), y el apagado limpio (`server.
+should_exit`) canceló la tarea pendiente sin colgarse. Confirmado otra vez
+al final que el bot real en 8000 seguía con `status: ok` y su propio
+`last_cycle_at` avanzando, sin relación con el smoke.
+
+**Flag sigue en `False` en el bot real: la activación es decisión del
+usuario, no de esta tarea.**
+
+### TAREA C: borde del reconcile al arrancar que no limpiaba el flag
+
+Encontrado antes de empezar la medición (para que un trade marcado de una
+racha anterior no quede congelado innecesariamente durante ella).
+`PositionMonitor.reconcile_on_startup` (revisión de Etapa 2) ya limpiaba
+`reconciliation_failed` cuando un REINTENTO PERIÓDICO (`_attempt_reconcile_
+retry`) tenía éxito, pero no cuando el PRIMER intento, al arrancar el
+proceso, para un trade YA marcado de una racha anterior, tenía éxito de
+entrada -- ese trade quedaba marcado (sombra congelada / `fill_source
+TICK_UNRECONCILED` en reales) hasta el siguiente reintento periódico, hasta
+`RECONCILE_RETRY_SECONDS` (300 s) después, aunque el arranque ya lo hubiera
+reconciliado bien. Corregido: `reconcile_on_startup` ahora limpia el flag en
+el momento (misma función `_clear_reconciliation_failed`, extendida para
+actualizar también el objeto en memoria, no solo la fila). Test nuevo:
+`test_startup_reconciliation_success_clears_a_flag_from_a_previous_run`
+(`tests/unit/test_position_monitor.py`). Commit `79ceb53`.
+
 ---
 
 ## (l) Concurrencia, retraso de la cuenta real y plazos
