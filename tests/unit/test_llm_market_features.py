@@ -5,6 +5,8 @@ docs/FASE3_6_LLM.md seccion (a)."""
 
 from __future__ import annotations
 
+import math
+import statistics
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -72,22 +74,57 @@ def test_atr14_pct_is_none_with_fewer_than_fifteen_bars():
     assert mf.compute_atr14_pct(bars) is None
 
 
-def test_atr14_pct_is_a_small_positive_fraction_for_calm_prices():
+def test_atr14_pct_is_a_small_positive_percentage_for_calm_prices():
     bars = make_bars("BTCUSDT", rising_closes(20, start=100.0, step=0.1))
     atr = mf.compute_atr14_pct(bars)
-    assert atr is not None and 0.0 < atr < 0.01
+    assert atr is not None and 0.0 < atr < 1.0  # porcentaje, no fraccion
 
 
-def test_returns_std_is_none_with_fewer_than_required_bars():
+def test_atr14_pct_is_actually_in_percent_not_a_raw_fraction():
+    """Revision del piloto v2 (docs/FASE3_6_LLM.md seccion k): el modelo leyo
+    el ATR como si ya fuera porcentaje cuando en realidad era la fraccion
+    cruda, ~100 veces mas chica. Serie conocida: reconstruye el ATR(14) a
+    mano en FRACCION (formula original, antes del fix) y confirma que la
+    funcion devuelve exactamente esa fraccion * 100."""
+    bars = make_bars("BTCUSDT", rising_closes(20, start=100.0, step=0.1))
+    true_ranges = []
+    for i in range(1, len(bars)):
+        high, low, prev_close = bars[i].high, bars[i].low, bars[i - 1].close
+        true_ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+    atr_fraction = sum(true_ranges[-14:]) / 14 / bars[-1].close
+
+    atr_pct = mf.compute_atr14_pct(bars)
+
+    assert atr_pct == pytest.approx(atr_fraction * 100)
+
+
+def test_returns_std_pct_is_none_with_fewer_than_required_bars():
     bars = make_bars("BTCUSDT", rising_closes(10))
-    assert mf.compute_returns_std(bars, n=30) is None
+    assert mf.compute_returns_std_pct(bars, n=30) is None
 
 
-def test_returns_std_is_zero_for_a_perfectly_steady_percentage_move():
+def test_returns_std_pct_is_zero_for_a_perfectly_steady_percentage_move():
     closes = [100.0 * (1.01 ** i) for i in range(32)]  # mismo retorno cada vela
     bars = make_bars("BTCUSDT", closes)
-    std = mf.compute_returns_std(bars, n=30)
+    std = mf.compute_returns_std_pct(bars, n=30)
     assert std is not None and std == pytest.approx(0.0, abs=1e-9)
+
+
+def test_returns_std_pct_is_actually_in_percent_not_a_raw_fraction():
+    """Misma revision que el ATR: antes `returns_std_30` (sin sufijo `_pct`)
+    devolvia la desviacion de los log-retornos cruda; ahora
+    `returns_std_30_pct` es esa misma fraccion * 100."""
+    closes = [100.0 + i * 0.37 for i in range(35)]  # variacion no perfectamente lineal
+    bars = make_bars("BTCUSDT", closes)
+    raw_closes = [b.close for b in bars[-31:]]
+    returns = [
+        math.log(raw_closes[i] / raw_closes[i - 1]) for i in range(1, len(raw_closes))
+    ]
+    std_fraction = statistics.stdev(returns)
+
+    std_pct = mf.compute_returns_std_pct(bars, n=30)
+
+    assert std_pct == pytest.approx(std_fraction * 100)
 
 
 # --- contexto de tendencia en 1h (revision del piloto v1) -----------------------
@@ -277,7 +314,7 @@ async def test_leakage_future_candles_with_extreme_values_do_not_change_the_feat
     as_of_ms = await seed(db, "BTCUSDT", rising_closes(80))
     bars_before = await mf.fetch_closed_candles(db, "BTCUSDT", as_of_ms, 80)
     atr_before = mf.compute_atr14_pct(bars_before)
-    std_before = mf.compute_returns_std(bars_before, n=30)
+    std_before = mf.compute_returns_std_pct(bars_before, n=30)
     trend_before = mf.compute_trend_features(bars_before)
     assert all(v is not None for v in trend_before.values())  # si no, no probaria nada
 
@@ -291,7 +328,7 @@ async def test_leakage_future_candles_with_extreme_values_do_not_change_the_feat
 
     bars_after = await mf.fetch_closed_candles(db, "BTCUSDT", as_of_ms, 80)
     atr_after = mf.compute_atr14_pct(bars_after)
-    std_after = mf.compute_returns_std(bars_after, n=30)
+    std_after = mf.compute_returns_std_pct(bars_after, n=30)
     trend_after = mf.compute_trend_features(bars_after)
 
     assert atr_after == atr_before

@@ -81,8 +81,17 @@ def _log_returns(closes: list[float]) -> list[float]:
 
 def compute_atr14_pct(bars: list[OHLCVBar]) -> float | None:
     """ATR(14) simple (promedio de 14 rangos verdaderos; no el suavizado de
-    Wilder) relativo al ultimo cierre, como fraccion. `None` si faltan velas
-    (hacen falta 15: 14 rangos, cada uno necesita el cierre anterior)."""
+    Wilder) relativo al ultimo cierre, en PORCENTAJE (0,28 = 0,28 %).
+
+    Revision del piloto v2 (docs/FASE3_6_LLM.md seccion k): esta funcion
+    devolvia la FRACCION cruda (0,0028 = 0,28 %) pese a que su nombre --y la
+    clave `volatility_atr14_pct` del mensaje-- dicen "pct". El modelo la leyo
+    literal como porcentaje ("ATR ~0,006 %") y rechazo señales por "volatilidad
+    muy baja" cuando en realidad era ~100 veces mayor. Mismo tipo de error que
+    el funding de v1 (unidad inconsistente con el nombre del campo).
+
+    `None` si faltan velas (hacen falta 15: 14 rangos, cada uno necesita el
+    cierre anterior)."""
     if len(bars) < ATR_PERIOD + 1:
         return None
     true_ranges = []
@@ -91,19 +100,22 @@ def compute_atr14_pct(bars: list[OHLCVBar]) -> float | None:
         true_ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
     atr = sum(true_ranges[-ATR_PERIOD:]) / ATR_PERIOD
     last_close = bars[-1].close
-    return atr / last_close if last_close else None
+    return (atr / last_close) * 100 if last_close else None
 
 
-def compute_returns_std(bars: list[OHLCVBar], n: int = RETURNS_WINDOW_SHORT) -> float | None:
-    """Desviacion tipica de los ultimos `n` retornos logaritmicos. `None` si
-    faltan velas (hacen falta `n + 1` cierres para `n` retornos)."""
+def compute_returns_std_pct(bars: list[OHLCVBar], n: int = RETURNS_WINDOW_SHORT) -> float | None:
+    """Desviacion tipica de los ultimos `n` retornos logaritmicos, en
+    PORCENTAJE (misma revision del piloto v2 que `compute_atr14_pct`: antes
+    devolvia la fraccion cruda bajo la clave `returns_std_30`, sin sufijo
+    `_pct` y sin convertir -- ahora la clave es `returns_std_30_pct`). `None`
+    si faltan velas (hacen falta `n + 1` cierres para `n` retornos)."""
     if len(bars) < n + 1:
         return None
     closes = [b.close for b in bars[-(n + 1):]]
     returns = _log_returns(closes)
     if len(returns) < n:
         return None
-    return statistics.stdev(returns)
+    return statistics.stdev(returns) * 100
 
 
 def _pearson_correlation(xs: list[float], ys: list[float]) -> float | None:
@@ -252,7 +264,7 @@ async def build_market_features(
 
     return {
         "volatility_atr14_pct": compute_atr14_pct(bars_100),
-        "returns_std_30": compute_returns_std(bars_100, RETURNS_WINDOW_SHORT),
+        "returns_std_30_pct": compute_returns_std_pct(bars_100, RETURNS_WINDOW_SHORT),
         "btc_correlation_30": await compute_btc_correlation(
             db, symbol, as_of_ms, RETURNS_WINDOW_SHORT
         ),
