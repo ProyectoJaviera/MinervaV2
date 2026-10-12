@@ -1356,3 +1356,45 @@ documentadas en detalle en docs/FASE3_6_LLM.md seccion k:
   sin red ni coste con `prompt_version: signal_review_v3` y el reporte de
   nulls mostrando los nombres de campo nuevos.
 - Sin push (pedido explicito).
+
+## Piloto real de signal_review_v3 y revision a v4 (2026-10-12, ULTIMA iteracion)
+
+**Piloto real** (32 grupos, `prompt_version = "signal_review_v3"`): 100% JSON
+valido, 0 campos null, 1.986 tokens de entrada de media, 0,173 USD de coste
+real, 46,9% APROBAR. El bug de unidades del ATR (revision de v2) desaparecio.
+Leidas las 32 respuestas una por una: queda UN defecto, el signo del funding
+en SHORT con funding negativo (2/4 casos con esa combinacion: TRXUSDT SHORT
+2026-10-11 04:00 y 2026-10-12 00:00), **pese a la convencion explicita de
+texto** ya presente desde v2 -- el modelo la sigue infiriendo mal con cierta
+frecuencia aunque se le explique correctamente.
+
+**Correccion de `signal_review_v4` (ULTIMA iteracion del prompt antes de
+congelar, pedido explicito -- no se agrega nada mas despues de esto):**
+resuelto de forma DETERMINISTA en vez de con mas texto (que ya habia
+demostrado no alcanzar). Nueva feature `funding_effect_on_position`
+(`"RECIBE"`/`"PAGA"`/`"NEUTRO"`/`null`,
+`app/llm/prompts.py::_compute_funding_effect`): calcula directamente, a
+partir de `funding_rate_pct` y `side`, si ESTA posicion cobra o paga funding.
+`SYSTEM_PROMPT` le dice al modelo que use el campo tal cual, sin
+recalcularlo. `funding_rate_pct` no se toca (sigue como esta, en porcentaje).
+`FEATURES_VERSION` sube a `"features_v2"`, `PROMPT_VERSION` a
+`signal_review_v4`.
+- Tests nuevos: 6 casos puros de `_compute_funding_effect` (las 4
+  combinaciones LONG/SHORT x funding positivo/negativo -- incluido
+  exactamente el caso real TRXUSDT SHORT + funding negativo = `PAGA` que el
+  modelo leia mal --, mas `NEUTRO` en 0 y `null` sin dato), 1 de contenido
+  del prompt, y 2 de integracion con `build_features_from_shadow_trade`
+  (incluida una prueba de fuga: un evento de funding futuro de signo
+  contrario no cambia el resultado).
+- Suite completa: 534 passed, 2 skipped; `ruff check .` limpio.
+- **Smoke en seco** (base temporal nueva, nunca la de trabajo, sin tocar el
+  bot del puerto 8000): sombra TRXUSDT SHORT con funding negativo sembrado
+  a mano -- `funding_rate_pct=-0.025`, `funding_effect_on_position="PAGA"`
+  (el caso real exacto, ahora correcto por calculo, no por inferencia del
+  modelo); `SYSTEM_PROMPT` y el mensaje de usuario contienen el campo nuevo.
+- **Pendiente:** correr el piloto de `signal_review_v4` con llamadas reales
+  antes de congelar y empezar la medicion -- no se hizo en esta revision.
+  Con esta iteracion se considera **cerrado el ciclo de ajustes de texto/
+  features del prompt**: la proxima revision esperada es el resultado de ESE
+  piloto real, no un cambio nuevo (pedido explicito del usuario).
+- Sin push (pedido explicito).

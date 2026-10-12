@@ -111,9 +111,21 @@ cerrar la vela evaluada. Todo son datos hasta el instante de la decisión.
    columnas de funding dentro de `indicators_by_strategy` (de `funding_contrarian*`)
    tenían el mismo problema -- vienen en fracción cruda, no en porcentaje -- y se
    normalizan igual, renombradas con sufijo `_pct`, antes de armar el mensaje.
-5. **Volatilidad reciente:** ATR(14) relativo al precio, y desviación típica de los
-   retornos logarítmicos de las últimas 30 velas cerradas. Ambas calculadas solo con
-   velas cuyo cierre es anterior o igual a la vela evaluada.
+   **v4:** `funding_effect_on_position` (`"RECIBE"`/`"PAGA"`/`"NEUTRO"`/`null`,
+   `_compute_funding_effect` en `app/llm/prompts.py`) dice directamente si ESTA
+   posición concreta (no el mercado en general) cobra o paga funding, calculado
+   de forma determinista a partir de `funding_rate_pct` y `side` -- el modelo
+   seguía equivocando el signo del funding en SHORT con funding negativo (2/4
+   casos reales en el piloto v3) pese a la convención de texto explícita; en
+   vez de más texto, se le entrega la respuesta ya calculada y se le pide
+   usarla tal cual, sin recalcularla.
+5. **Volatilidad reciente:** ATR(14) relativo al precio, en **porcentaje**
+   (0,28 = 0,28 %, no la fracción 0,0028 -- error real encontrado y corregido
+   en el piloto v2: el nombre del campo ya decía `_pct` pero el valor era la
+   fracción cruda), y desviación típica de los retornos logarítmicos de las
+   últimas 30 velas cerradas, también en porcentaje (`returns_std_30_pct`,
+   renombrado desde `returns_std_30` en la misma revisión). Ambas calculadas
+   solo con velas cuyo cierre es anterior o igual a la vela evaluada.
 6. **Contexto de tendencia en 1h (v2):** retorno de las últimas 24h y 72h, y
    distancia porcentual del precio a su EMA(50), todo en el timeframe de referencia
    (1h). Agregado tras el piloto de v1: el modelo se quejó repetidamente de "sin
@@ -850,6 +862,54 @@ limpio. `signal_review_v2` queda en `llm_logs` con `fase = 'PILOTO'` como
 registro. **Pendiente:** correr el piloto de `signal_review_v3` con llamadas
 reales antes de congelar y empezar la medición -- no se hizo en esta revisión
 (solo se verificó en seco, ver PROGRESS.md).
+
+**Piloto real de `signal_review_v3` (2026-10-12, 32 grupos):**
+
+| Métrica | Resultado |
+|---|---|
+| Validez del JSON | 32/32 (100 %) |
+| Campos en `null` | 0 |
+| Tokens de entrada (media) | 1.986 |
+| Coste real total | 0,173 USD |
+| Tasa de APROBAR | 46,9 % |
+| ATR | ya se lee en porcentaje correctamente |
+
+El bug de unidades del ATR (punto 2 de la revisión de v2) desapareció. Se
+leyeron las 32 respuestas una por una. Queda UN defecto: el signo del
+funding en SHORT con funding negativo, en 2 de 4 casos con esa combinación
+(TRXUSDT SHORT 2026-10-11 04:00: "funding negativo a favor"; TRXUSDT SHORT
+2026-10-12 00:00: "solo apoya el funding negativo") -- **pese a la
+convención explícita de texto** ya presente en `SYSTEM_PROMPT` desde v2. El
+modelo la sigue infiriendo mal con cierta frecuencia incluso cuando se le
+explica correctamente.
+
+**Corrección de `signal_review_v4` (ÚLTIMA iteración del prompt antes de
+congelar -- pedido explícito, no se agrega nada más después de esto):**
+resuelto de forma DETERMINISTA en vez de con más texto explicativo, que ya
+había demostrado no ser suficiente. Nueva feature `funding_effect_on_position`
+(`"RECIBE"` | `"PAGA"` | `"NEUTRO"` | `null`,
+`app/llm/prompts.py::_compute_funding_effect`): calcula directamente, a partir
+de `funding_rate_pct` y `side`, si ESTA posición concreta cobra o paga
+funding -- LONG con funding negativo o SHORT con funding positivo = `RECIBE`;
+el caso contrario = `PAGA`; exactamente 0 = `NEUTRO`; sin dato = `null`.
+`SYSTEM_PROMPT` ahora le dice al modelo que use este campo directamente y que
+NO lo recalcule a partir de `funding_rate_pct` y la dirección. `funding_rate_
+pct` no cambia (sigue en porcentaje, sin tocar su signo ni su magnitud).
+`FEATURES_VERSION` sube a `"features_v2"` y `PROMPT_VERSION` a
+`signal_review_v4`.
+
+Tests nuevos: 6 casos puros de `_compute_funding_effect` (los 4 combinaciones
+LONG/SHORT × funding positivo/negativo, más `NEUTRO` en 0 y `null` sin dato),
+1 de contenido del prompt, y 2 de integración vía
+`build_features_from_shadow_trade` (incluida una prueba de fuga: un evento de
+funding FUTURO de signo contrario no cambia `funding_effect_on_position`).
+Suite completa: 534 passed, 2 skipped; `ruff check .` limpio.
+
+**Pendiente:** correr el piloto de `signal_review_v4` con llamadas reales
+antes de congelar y empezar la medición -- no se hizo en esta revisión (solo
+se verificó en seco, ver PROGRESS.md). Con esta iteración se considera
+cerrado el ciclo de ajustes de texto/features del prompt: la siguiente
+revisión esperada es el resultado de ESE piloto real, no un cambio nuevo.
 
 ---
 
