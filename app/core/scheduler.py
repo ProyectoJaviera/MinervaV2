@@ -28,6 +28,7 @@ from app.persistence.database import Database
 from app.persistence.repositories import shadow_repo, trades_repo, universe_repo
 from app.trading import risk_engine
 from app.trading.shadow_book import ShadowBook
+from app.trading.shadow_live_labeler import ShadowLiveLabeler
 from app.trading.signal_generator import (
     SignalCandidate,
     pick_representative_strategy,
@@ -46,6 +47,7 @@ class Scheduler:
         settings: Settings,
         ws_client: BitunixPublicWSClient | None = None,
         shadow: ShadowBook | None = None,
+        live_labeler: ShadowLiveLabeler | None = None,
     ) -> None:
         self.db = db
         self.shadow = shadow
@@ -53,6 +55,7 @@ class Scheduler:
         self.paper_backend = paper_backend
         self.settings = settings
         self.ws_client = ws_client
+        self.live_labeler = live_labeler
         self._stop = asyncio.Event()
         # Incidente de estabilidad 2026-10-11: ultima evaluacion COMPLETA del
         # generador de senales (no el heartbeat, que solo prueba que el event
@@ -76,6 +79,11 @@ class Scheduler:
                 pass
 
     async def run_cycle(self) -> list[SignalCandidate]:
+        if self.live_labeler is not None:
+            # Una vez por ciclo (TAREA B, docs/FASE3_6_LLM.md seccion k), no
+            # una vez por candidato: deja en cache si el hash coincide con el
+            # congelado para TODO este ciclo, con un WARNING si no.
+            self.live_labeler.note_cycle_start()
         candidates = await run_signal_generation_cycle(self.db, self.rest_client, self.settings)
         for candidate in candidates:
             shadow_trade = None
@@ -84,6 +92,9 @@ class Scheduler:
                     shadow_trade = await self.shadow.open_candidate(candidate)
                 except Exception:  # noqa: BLE001 - la sombra no debe tumbar el ciclo
                     logger.exception("Error abriendo operacion sombra en %s", candidate.symbol)
+                if shadow_trade is not None and self.live_labeler is not None:
+                    # Fuego y olvido: no bloquea el resto del ciclo (TAREA B).
+                    self.live_labeler.maybe_label(shadow_trade)
             try:
                 real = await self._process_candidate(candidate)
             except Exception:  # noqa: BLE001 - un candidato no debe tumbar el resto del ciclo

@@ -25,6 +25,7 @@ from app.market.universe import UniverseRefresher
 from app.persistence.database import Database
 from app.trading.position_monitor import PositionMonitor
 from app.trading.shadow_book import ShadowBook
+from app.trading.shadow_live_labeler import ShadowLiveLabeler, build_decision_service
 
 logger = get_logger(__name__)
 
@@ -47,8 +48,13 @@ async def lifespan(app: FastAPI):
     ws_client = BitunixPublicWSClient(
         ws_url=settings.bitunix_ws_public_url, symbols=[], on_message=monitor.handle_ws_message,
     )
+    # TAREA B (docs/FASE3_6_LLM.md seccion k): apagado por defecto
+    # (`settings.llm_live_labeling_enabled`) -- `ShadowLiveLabeler` en si
+    # decide si corre o no en cada ciclo, construirlo aqui no activa nada.
+    live_labeler = ShadowLiveLabeler(db, settings, build_decision_service(db, settings))
     scheduler = Scheduler(
         db, rest_client, paper_backend, settings, ws_client=ws_client, shadow=shadow_book,
+        live_labeler=live_labeler,
     )
     coingecko_client = CoinGeckoClient(
         base_url=settings.coingecko_base_url, api_key=settings.coingecko_api_key,
@@ -73,6 +79,7 @@ async def lifespan(app: FastAPI):
     app.state.monitor = monitor
     app.state.scheduler = scheduler
     app.state.heartbeat = heartbeat
+    app.state.live_labeler = live_labeler
 
     tasks = [
         asyncio.create_task(ws_client.run_forever()),
@@ -96,6 +103,7 @@ async def lifespan(app: FastAPI):
                 await task
             except asyncio.CancelledError:
                 pass
+        await live_labeler.shutdown()
         await monitor.shutdown()
         await coingecko_client.aclose()
         await rest_client.aclose()
