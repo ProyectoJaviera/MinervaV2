@@ -90,6 +90,60 @@ def test_returns_std_is_zero_for_a_perfectly_steady_percentage_move():
     assert std is not None and std == pytest.approx(0.0, abs=1e-9)
 
 
+# --- contexto de tendencia en 1h (revision del piloto v1) -----------------------
+
+
+def test_return_pct_is_none_without_enough_bars():
+    bars = make_bars("BTCUSDT", rising_closes(24))
+    assert mf.compute_return_pct(bars, bars_back=24) is None  # hacen falta 25
+
+
+def test_return_pct_matches_the_simple_return_between_the_two_closes():
+    bars = make_bars("BTCUSDT", rising_closes(25, start=100.0, step=1.0))
+    # Cierre de hace 24 velas: 100.0; ultimo cierre: 124.0.
+    pct = mf.compute_return_pct(bars, bars_back=24)
+    assert pct == pytest.approx((124.0 - 100.0) / 100.0 * 100)
+
+
+def test_return_pct_is_negative_for_falling_prices():
+    bars = make_bars("BTCUSDT", [200.0 - i for i in range(25)])
+    pct = mf.compute_return_pct(bars, bars_back=24)
+    assert pct is not None and pct < 0
+
+
+def test_ema_distance_pct_is_none_with_fewer_than_the_period_bars():
+    bars = make_bars("BTCUSDT", rising_closes(49))
+    assert mf.compute_ema_distance_pct(bars, period=50) is None
+
+
+def test_ema_distance_pct_is_positive_when_price_has_been_rising():
+    bars = make_bars("BTCUSDT", rising_closes(60, start=100.0, step=1.0))
+    distance = mf.compute_ema_distance_pct(bars, period=50)
+    assert distance is not None and distance > 0  # el cierre va por encima de la EMA
+
+
+def test_ema_distance_pct_is_zero_for_a_perfectly_flat_series():
+    bars = make_bars("BTCUSDT", [100.0] * 60)
+    distance = mf.compute_ema_distance_pct(bars, period=50)
+    assert distance == pytest.approx(0.0, abs=1e-9)
+
+
+def test_compute_trend_features_bundles_the_three_fields():
+    bars = make_bars("BTCUSDT", rising_closes(80, start=100.0, step=1.0))
+    trend = mf.compute_trend_features(bars)
+    assert set(trend) == {"return_24h_pct", "return_72h_pct", "distance_to_ema50_1h_pct"}
+    assert trend["return_24h_pct"] is not None  # hacen falta 25, hay 80
+    assert trend["return_72h_pct"] is not None  # hacen falta 73, hay 80
+    assert trend["distance_to_ema50_1h_pct"] is not None  # hacen falta 50, hay 80
+
+
+def test_compute_trend_features_return_72h_is_null_with_fewer_than_73_bars():
+    bars = make_bars("BTCUSDT", rising_closes(72, start=100.0, step=1.0))
+    trend = mf.compute_trend_features(bars)
+    assert trend["return_24h_pct"] is not None
+    assert trend["return_72h_pct"] is None  # hacen falta 73, hay solo 72
+
+
 # --- correlacion con BTC ---------------------------------------------------------
 
 
@@ -218,11 +272,14 @@ async def test_open_real_positions_counts_only_what_was_open_at_that_instant(db)
 
 @pytest.mark.asyncio
 async def test_leakage_future_candles_with_extreme_values_do_not_change_the_features(db):
-    as_of_ms = await seed(db, "BTCUSDT", rising_closes(40))
-    atr_before = mf.compute_atr14_pct(await mf.fetch_closed_candles(db, "BTCUSDT", as_of_ms, 40))
-    std_before = mf.compute_returns_std(
-        await mf.fetch_closed_candles(db, "BTCUSDT", as_of_ms, 40), n=30
-    )
+    # 80 velas: alcanza para que las 3 features de tendencia sean no-nulas
+    # (necesitan 25/50/73), no solo las 40 que bastaban para ATR/std.
+    as_of_ms = await seed(db, "BTCUSDT", rising_closes(80))
+    bars_before = await mf.fetch_closed_candles(db, "BTCUSDT", as_of_ms, 80)
+    atr_before = mf.compute_atr14_pct(bars_before)
+    std_before = mf.compute_returns_std(bars_before, n=30)
+    trend_before = mf.compute_trend_features(bars_before)
+    assert all(v is not None for v in trend_before.values())  # si no, no probaria nada
 
     # Velas futuras con valores extremos, DESPUES de as_of_ms.
     extreme_future = [
@@ -232,12 +289,14 @@ async def test_leakage_future_candles_with_extreme_values_do_not_change_the_feat
     ]
     await ohlcv_repo.upsert_bars(db, extreme_future)
 
-    bars_after = await mf.fetch_closed_candles(db, "BTCUSDT", as_of_ms, 40)
+    bars_after = await mf.fetch_closed_candles(db, "BTCUSDT", as_of_ms, 80)
     atr_after = mf.compute_atr14_pct(bars_after)
     std_after = mf.compute_returns_std(bars_after, n=30)
+    trend_after = mf.compute_trend_features(bars_after)
 
     assert atr_after == atr_before
     assert std_after == std_before
+    assert trend_after == trend_before
 
 
 @pytest.mark.asyncio
@@ -249,6 +308,7 @@ async def test_leakage_full_series_vs_truncated_at_close_give_the_same_result(db
     await ohlcv_repo.upsert_bars(db, make_bars("BTCUSDT", closes[:30]))
     truncated_bars = await mf.fetch_closed_candles(db, "BTCUSDT", as_of_ms, 30)
     truncated_atr = mf.compute_atr14_pct(truncated_bars)
+    truncated_trend = mf.compute_trend_features(truncated_bars)
 
     # Misma base, pero ahora con el resto de la serie "completa" (el futuro real).
     await ohlcv_repo.upsert_bars(db, make_bars("BTCUSDT", closes))
@@ -256,11 +316,15 @@ async def test_leakage_full_series_vs_truncated_at_close_give_the_same_result(db
         db, "BTCUSDT", as_of_ms, 30
     )
     full_atr_as_of_the_same_close = mf.compute_atr14_pct(full_bars_fetched_as_of_the_same_close)
+    full_trend_as_of_the_same_close = mf.compute_trend_features(
+        full_bars_fetched_as_of_the_same_close
+    )
 
     assert [b.open_time for b in truncated_bars] == [
         b.open_time for b in full_bars_fetched_as_of_the_same_close
     ]
     assert truncated_atr == full_atr_as_of_the_same_close
+    assert truncated_trend == full_trend_as_of_the_same_close
 
 
 @pytest.mark.asyncio

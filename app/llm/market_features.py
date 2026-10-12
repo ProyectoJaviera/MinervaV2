@@ -1,7 +1,9 @@
-"""Features de mercado para el prompt del LLM (subfase 3.6, fase iv).
+"""Features de mercado para el prompt del LLM (subfase 3.6, fase iv; contexto
+de tendencia agregado en la revision del piloto v1 -> signal_review_v2).
 
-ATR, volatilidad, correlacion con BTC, funding y posiciones reales abiertas --
-docs/FASE3_6_LLM.md, seccion (a), puntos 4-7. Todo se lee de la cache local
+ATR, volatilidad, correlacion con BTC, contexto de tendencia (retornos de 24h/
+72h y distancia a la EMA50, todo en 1h), funding y posiciones reales abiertas
+-- docs/FASE3_6_LLM.md, seccion (a). Todo se lee de la cache local
 (`ohlcv_cache`, `funding_cache`, `contract_specs_cache`, `trades`); este modulo
 NUNCA toca la red.
 
@@ -42,6 +44,13 @@ ATR_PERIOD = 14
 RETURNS_WINDOW_SHORT = 30
 RETURNS_WINDOW_LONG = 100
 DEFAULT_FUNDING_INTERVAL_HOURS = 8.0
+# Revision del piloto v1 (docs/FASE3_6_LLM.md seccion k): el modelo se quejo
+# de "sin datos de tendencia" en varias respuestas -- contexto de tendencia en
+# el mismo timeframe de referencia (1h), reutilizando las velas que ya se
+# piden para ATR/correlacion (RETURNS_WINDOW_LONG + 1 = 101 alcanza para las 3).
+RETURN_WINDOW_24H_BARS = 24
+RETURN_WINDOW_72H_BARS = 72
+EMA_TREND_PERIOD = 50
 
 
 async def fetch_closed_candles(
@@ -133,6 +142,48 @@ async def compute_btc_correlation(db: Database, symbol: str, as_of_ms: int, n: i
     return _pearson_correlation(own_returns, btc_returns)
 
 
+def compute_return_pct(bars: list[OHLCVBar], bars_back: int) -> float | None:
+    """Retorno simple (no logaritmico) entre el cierre de hace `bars_back`
+    velas de `REFERENCE_TIMEFRAME` (1h) y el ultimo cierre, en PORCENTAJE.
+    `None` si no hay al menos `bars_back + 1` velas."""
+    if len(bars) < bars_back + 1:
+        return None
+    previous = bars[-(bars_back + 1)].close
+    if previous == 0:
+        return None
+    latest = bars[-1].close
+    return (latest - previous) / previous * 100
+
+
+def compute_ema_distance_pct(bars: list[OHLCVBar], period: int = EMA_TREND_PERIOD) -> float | None:
+    """Distancia porcentual del ultimo cierre a su EMA(`period`) en
+    `REFERENCE_TIMEFRAME` (1h): positivo = precio por encima de la media.
+    Misma formula que `app.indicators.engine.ema` (`ewm(span=period,
+    adjust=False)`), aproximada sobre la ventana cacheada disponible -- igual
+    simplificacion documentada que el resto de este modulo (docstring de
+    arriba). `None` si no hay al menos `period` velas."""
+    if len(bars) < period:
+        return None
+    closes = [b.close for b in bars]
+    alpha = 2.0 / (period + 1)
+    ema_value = closes[0]
+    for close in closes[1:]:
+        ema_value = alpha * close + (1 - alpha) * ema_value
+    if ema_value == 0:
+        return None
+    return (closes[-1] - ema_value) / ema_value * 100
+
+
+def compute_trend_features(bars: list[OHLCVBar]) -> dict:
+    """Contexto de tendencia en 1h (seccion a, revision del piloto v1):
+    retorno de 24h y de 72h, y distancia porcentual a la EMA(50) de 1h."""
+    return {
+        "return_24h_pct": compute_return_pct(bars, RETURN_WINDOW_24H_BARS),
+        "return_72h_pct": compute_return_pct(bars, RETURN_WINDOW_72H_BARS),
+        "distance_to_ema50_1h_pct": compute_ema_distance_pct(bars),
+    }
+
+
 async def compute_funding_features(
     db: Database, symbol: str, candle_close_ms: int, funding_stale_margin_hours: float,
 ) -> dict:
@@ -208,6 +259,7 @@ async def build_market_features(
         "btc_correlation_100": await compute_btc_correlation(
             db, symbol, as_of_ms, RETURNS_WINDOW_LONG
         ),
+        **compute_trend_features(bars_100),
         **funding,
         **positions,
     }
