@@ -1,5 +1,7 @@
 """Plantilla del prompt para la decision del LLM (subfase 3.6, fases iii-A y iv;
-revisado tras el piloto v1 -> signal_review_v2, docs/FASE3_6_LLM.md seccion k).
+revisado tras los pilotos v1/v2/v3 -> signal_review_v4, docs/FASE3_6_LLM.md
+seccion k -- ULTIMA iteracion del prompt antes de congelar, por pedido
+explicito).
 
 Ver docs/FASE3_6_LLM.md, secciones (a) y (b). El mensaje de usuario lleva solo
 datos de la señal y el mercado YA DISPONIBLES en el cierre de la vela evaluada
@@ -8,12 +10,13 @@ timeframe de cada estrategia contribuyente (`signals.indicators_json`, ya
 calculados por `precompute` -- no se recalculan aqui, pero sus unidades de
 funding SI se normalizan a porcentaje aqui, ver `_normalize_funding_units`),
 niveles y riesgo planeados (incluido el precio de entrada y sus distancias
-derivadas, `_compute_entry_risk_features`), funding, volatilidad, correlacion
-con BTC, contexto de tendencia en 1h (ver `app/llm/market_features.py`), y
-posiciones REALES abiertas (nunca sombras). Un dato que falte queda en `null`
-EXPLICITO: no se inventa ni se infiere. Nunca se incluye texto externo no
-confiable (noticias, redes sociales, etc.): esa fuente no esta implementada
-en este proyecto.
+derivadas, `_compute_entry_risk_features`), funding (incluido si ESTA
+posicion cobra o paga, `_compute_funding_effect` -- calculado, no inferido
+por el modelo), volatilidad, correlacion con BTC, contexto de tendencia en 1h
+(ver `app/llm/market_features.py`), y posiciones REALES abiertas (nunca
+sombras). Un dato que falte queda en `null` EXPLICITO: no se inventa ni se
+infiere. Nunca se incluye texto externo no confiable (noticias, redes
+sociales, etc.): esa fuente no esta implementada en este proyecto.
 """
 
 from __future__ import annotations
@@ -24,10 +27,10 @@ import json
 from app.config import Settings
 from app.llm import market_features
 from app.persistence.database import Database
-from app.persistence.models import ShadowTrade
+from app.persistence.models import ShadowTrade, Side
 from app.persistence.repositories import signals_repo
 
-PROMPT_VERSION = "signal_review_v3"
+PROMPT_VERSION = "signal_review_v4"
 
 # v2 (docs/FASE3_6_LLM.md seccion k): revision tras el piloto v1 (21 grupos,
 # 90% APROBAR, fuera de la banda 15-85%). Cambios de texto: convenciones
@@ -46,6 +49,15 @@ PROMPT_VERSION = "signal_review_v3"
 # `ai_value_verdict(measurement_keys=...)` -- `PROMPT_VERSION`/
 # `FEATURES_VERSION` son solo las etiquetas legibles, independientes entre si
 # a proposito (una es del texto, la otra del mensaje).
+#
+# v4 (revision del piloto v3, misma seccion k -- ULTIMA iteracion antes de
+# congelar, pedido explicito: no agregar nada mas despues de esto). El
+# piloto v3 (32 grupos, 100% JSON valido, ATR ya correcto) seguia fallando
+# el signo del funding en 2/4 casos SHORT con funding negativo, A PESAR de
+# la convencion explicita de texto (parrafo de abajo) -- el modelo la sigue
+# infiriendo mal con cierta frecuencia. Se resuelve de forma DETERMINISTA en
+# vez de con mas texto: `funding_effect_on_position` (calculado, no inferido
+# por el modelo) dice directamente si la posicion COBRA o PAGA funding.
 SYSTEM_PROMPT = (
     "Eres un revisor de señales de trading de criptomonedas en una cuenta de "
     "PAPER TRADING (dinero simulado, nunca real). Cada posición usa apalancamiento "
@@ -69,6 +81,10 @@ SYSTEM_PROMPT = (
     "liquidación está por ENCIMA, con el SL entre la entrada y ella -- que la "
     "liquidación quede más allá del SL en esa dirección es siempre así por diseño, "
     "NUNCA una inconsistencia de los datos. "
+    "El campo `funding_effect_on_position` ya indica si ESTA posición concreta "
+    "COBRA o PAGA funding (\"RECIBE\", \"PAGA\", \"NEUTRO\" o null si no hay dato): "
+    "úsalo directamente, no lo recalcules a partir de `funding_rate_pct` y la "
+    "dirección. "
     "Al decidir, conviene sopesar: la tendencia reciente en 1h (retorno de 24h y "
     "72h, y la distancia porcentual a la media móvil de 50 velas) y la volatilidad "
     "reciente, si el funding va en contra de la dirección de la señal, la "
@@ -103,7 +119,8 @@ SYSTEM_PROMPT = (
 # letra: antes de esto, un cambio asi (como el bug de ATR en fraccion cruda
 # del piloto v2) no se reflejaba en ningun hash y measurement_keys podia
 # mezclar dos mensajes distintos bajo el mismo prompt_sha256.
-FEATURES_VERSION = "features_v1"
+# v2 (revision del piloto v3): se agrega `funding_effect_on_position`.
+FEATURES_VERSION = "features_v2"
 
 # Hash de la plantilla de sistema Y de la version de features
 # (docs/FASE3_6_LLM.md seccion c, columna `prompt_sha256` de `llm_logs`):
@@ -140,6 +157,35 @@ def _normalize_funding_units(indicators: dict | None) -> dict | None:
         if raw_key in out and out[raw_key] is not None:
             out[pct_key] = out.pop(raw_key) * 100
     return out
+
+
+RECIBE = "RECIBE"
+PAGA = "PAGA"
+NEUTRO = "NEUTRO"
+
+
+def _compute_funding_effect(side: Side, funding_rate_pct: float | None) -> str | None:
+    """Revision del piloto v3 (docs/FASE3_6_LLM.md seccion k): el modelo siguio
+    equivocando el signo del funding en SHORT con funding negativo (2/4 casos
+    en el piloto v3) A PESAR de la convencion explicita de texto en
+    SYSTEM_PROMPT -- la sigue infiriendo mal con cierta frecuencia. En vez de
+    mas texto, se resuelve de forma DETERMINISTA: esta funcion calcula
+    directamente si LA POSICION (no el mercado en general) cobra o paga
+    funding, y el prompt le pide al modelo usar este campo tal cual, sin
+    recalcularlo.
+
+    Convencion (ya verificada, ver SYSTEM_PROMPT): funding POSITIVO = LONG
+    paga a SHORT; funding NEGATIVO = SHORT paga a LONG. Por lo tanto, esta
+    posicion COBRA (`RECIBE`) cuando un LONG tiene funding < 0 o un SHORT
+    tiene funding > 0; PAGA en el caso contrario; NEUTRO si es exactamente 0.
+    `None` si no hay dato de funding (nunca se infiere ni se asume)."""
+    if funding_rate_pct is None:
+        return None
+    if funding_rate_pct == 0:
+        return NEUTRO
+    is_long = side == Side.LONG
+    pays = (is_long and funding_rate_pct > 0) or (not is_long and funding_rate_pct < 0)
+    return PAGA if pays else RECIBE
 
 
 def _compute_entry_risk_features(
@@ -211,7 +257,10 @@ async def build_features_from_shadow_trade(
       respuestas (ninguna estrategia activa lo usa hoy);
     - funding, volatilidad, correlacion con BTC, contexto de tendencia en 1h
       y posiciones REALES abiertas (`app/llm/market_features.py`, que ya
-      respeta el mismo limite de instante).
+      respeta el mismo limite de instante); mas `funding_effect_on_position`
+      (`_compute_funding_effect`, revision del piloto v3): si ESTA posicion
+      cobra o paga funding, calculado deterministicamente en vez de dejar
+      que el modelo infiera el signo (lo seguia equivocando, ver seccion k).
 
     Un dato que falte (velas insuficientes, sin funding cacheado, sin fila en
     `signals`) queda en `null` explicito -- nunca se inventa ni se infiere."""
@@ -245,6 +294,9 @@ async def build_features_from_shadow_trade(
         "sl_price": trade.sl_price,
         "tp_price": trade.tp_price,
         "liq_price_estimated": trade.liq_price,
+        "funding_effect_on_position": _compute_funding_effect(
+            trade.side, market["funding_rate_pct"]
+        ),
         **_compute_entry_risk_features(trade.entry_price, trade.sl_price, trade.tp_price),
         **market,
     }

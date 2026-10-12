@@ -13,15 +13,19 @@ import pytest
 from app.config import Settings
 from app.llm.prompts import (
     FEATURES_VERSION,
+    NEUTRO,
+    PAGA,
     PROMPT_SHA256,
     PROMPT_VERSION,
+    RECIBE,
     SYSTEM_PROMPT,
+    _compute_funding_effect,
     build_features_from_shadow_trade,
     build_user_message,
     estimate_input_tokens,
 )
 from app.persistence.models import OHLCVBar, ShadowTrade, Side, SignalRecord, TradeStatus
-from app.persistence.repositories import ohlcv_repo, signals_repo
+from app.persistence.repositories import funding_repo, ohlcv_repo, signals_repo
 
 CANDLE = datetime(2026, 1, 1, 4, tzinfo=UTC)
 HOUR_MS = 3_600_000
@@ -78,15 +82,58 @@ def test_system_prompt_mentions_trend_context_and_asks_for_250_characters():
     assert "máximo 250 caracteres" in SYSTEM_PROMPT
 
 
-def test_prompt_version_is_v3():
-    assert PROMPT_VERSION == "signal_review_v3"
+def test_system_prompt_tells_the_model_to_use_funding_effect_not_recompute_it():
+    # Revision del piloto v3: el modelo seguia errando el signo del funding
+    # en SHORT con funding negativo PESE a la convencion de texto explicita
+    # (2/4 casos) -- se resuelve con un campo calculado, no con mas texto.
+    assert "funding_effect_on_position" in SYSTEM_PROMPT
+    assert "no lo recalcules" in SYSTEM_PROMPT
+
+
+def test_prompt_version_is_v4():
+    assert PROMPT_VERSION == "signal_review_v4"
+
+
+# --- funding_effect_on_position: resuelve el signo de forma deterministica --
+# Revision del piloto v3 (docs/FASE3_6_LLM.md seccion k): el modelo seguia
+# equivocando el signo del funding en SHORT con funding negativo (2/4 casos
+# reales) pese a la convencion explicita de texto -- la convencion es: funding
+# POSITIVO = LONG paga a SHORT; funding NEGATIVO = SHORT paga a LONG.
+
+
+def test_funding_effect_long_with_negative_funding_receives():
+    assert _compute_funding_effect(Side.LONG, -0.01) == RECIBE
+
+
+def test_funding_effect_long_with_positive_funding_pays():
+    assert _compute_funding_effect(Side.LONG, 0.01) == PAGA
+
+
+def test_funding_effect_short_with_negative_funding_pays():
+    # Exactamente el caso que el modelo erro en el piloto v3 (TRXUSDT SHORT,
+    # funding negativo, dijo "a favor" cuando en realidad PAGA).
+    assert _compute_funding_effect(Side.SHORT, -0.01) == PAGA
+
+
+def test_funding_effect_short_with_positive_funding_receives():
+    assert _compute_funding_effect(Side.SHORT, 0.01) == RECIBE
+
+
+def test_funding_effect_is_neutral_at_exactly_zero():
+    assert _compute_funding_effect(Side.LONG, 0.0) == NEUTRO
+    assert _compute_funding_effect(Side.SHORT, 0.0) == NEUTRO
+
+
+def test_funding_effect_is_null_without_any_funding_data():
+    assert _compute_funding_effect(Side.LONG, None) is None
+    assert _compute_funding_effect(Side.SHORT, None) is None
 
 
 def test_features_version_is_tracked_separately_from_prompt_version():
     # Revision del piloto v2 (docs/FASE3_6_LLM.md seccion k): las dos
     # etiquetas son independientes a proposito (una es del texto del
     # sistema, la otra del mensaje/features).
-    assert FEATURES_VERSION == "features_v1"
+    assert FEATURES_VERSION == "features_v2"
 
 
 def test_prompt_sha256_covers_both_the_system_prompt_and_the_features_version():
@@ -237,10 +284,46 @@ async def test_market_features_are_null_explicit_without_any_cached_data(db):
         "funding_rate_pct", "funding_is_approximated", "volatility_atr14_pct",
         "returns_std_30_pct", "btc_correlation_30", "btc_correlation_100",
         "return_24h_pct", "return_72h_pct", "distance_to_ema50_1h_pct",
+        "funding_effect_on_position",
     ):
         assert features[key] is None, key
     # Las posiciones reales SI tienen un valor (0), no son null: no hay ninguna.
     assert features["open_real_positions_total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_funding_effect_on_position_is_wired_end_to_end_for_a_short(db):
+    """Revision del piloto v3: exactamente el caso real (TRXUSDT SHORT con
+    funding negativo) que el modelo seguia leyendo mal -- aqui se calcula,
+    no se le pide al modelo que lo infiera."""
+    funding_at = int(CANDLE.timestamp() * 1000) - HOUR_MS
+    await funding_repo.upsert_funding(db, "BTCUSDT", [(funding_at, -0.0003)])  # negativo
+    trade = _shadow_trade()
+    trade.side = Side.SHORT
+
+    features = await build_features_from_shadow_trade(db, trade, make_settings())
+
+    assert features["funding_rate_pct"] == pytest.approx(-0.03)
+    assert features["funding_effect_on_position"] == PAGA  # SHORT + funding negativo = paga
+
+
+@pytest.mark.asyncio
+async def test_funding_effect_on_position_never_uses_an_event_after_the_evaluated_candle(db):
+    """Extiende la prueba de fuga de funding (test_llm_market_features.py) a
+    esta feature derivada: un evento FUTURO (de signo contrario) no debe
+    cambiar el resultado."""
+    as_of_ms = int(CANDLE.timestamp() * 1000)
+    await funding_repo.upsert_funding(db, "BTCUSDT", [(as_of_ms - HOUR_MS, 0.0003)])  # vigente
+    await funding_repo.upsert_funding(db, "BTCUSDT", [
+        (as_of_ms + HOUR_MS, -0.0009),  # futuro, signo opuesto
+    ])
+    trade = _shadow_trade()
+    trade.side = Side.LONG
+
+    features = await build_features_from_shadow_trade(db, trade, make_settings())
+
+    assert features["funding_rate_pct"] == pytest.approx(0.03)
+    assert features["funding_effect_on_position"] == PAGA  # LONG + funding positivo = paga
 
 
 @pytest.mark.asyncio
