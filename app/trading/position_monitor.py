@@ -516,6 +516,19 @@ class PositionMonitor:
                 )
                 await self._mark_reconcile_attempt_failed(trade, now_ms, effective_last_seen)
                 outcome = "ERROR"
+            else:
+                # Correccion de borde (misma Etapa 2): un trade YA marcado de
+                # una racha anterior cuyo PRIMER intento aqui (no solo un
+                # reintento periodico) tiene exito debe limpiar el flag en el
+                # momento -- antes solo se limpiaba desde
+                # `_attempt_reconcile_retry`, y este quedaba marcado (sombra
+                # congelada / fill_source TICK_UNRECONCILED en reales) hasta
+                # el proximo reintento periodico, hasta RECONCILE_RETRY_SECONDS
+                # despues, aunque el arranque ya lo hubiera reconciliado bien.
+                if trade.reconciliation_failed:
+                    await self._clear_reconciliation_failed(
+                        trade.id, isinstance(trade, ShadowTrade)
+                    )
             outcomes.append((trade.id, outcome))
         return outcomes
 
@@ -663,13 +676,6 @@ class PositionMonitor:
             "Reintento de reconciliacion para trade=%d %s: %s", trade.id, trade.symbol, outcome,
         )
         await self._clear_reconciliation_failed(trade.id, is_shadow)
-        key = (is_shadow, trade.id)
-        current = self._trades.get(key)
-        if current is not None:
-            self._trades[key] = current.model_copy(update={
-                "reconciliation_failed": False, "reconciliation_attempts": 0,
-                "reconciliation_window_start_ms": None, "reconciliation_first_failed_at_ms": None,
-            })
 
     async def _mark_reconcile_attempt_failed(
         self, trade: Trade, now_ms: int, last_seen_ms: int | None,
@@ -734,5 +740,19 @@ class PositionMonitor:
         )
 
     async def _clear_reconciliation_failed(self, trade_id: int, is_shadow: bool) -> None:
+        """Limpia el flag en la fila Y en el objeto en memoria (si todavia
+        esta en `self._trades` -- un cierre `CERRADA_*`/`RECONCILE_FAILED` ya
+        lo quito de ahi). Se llama tanto desde un reintento periodico exitoso
+        como, desde la correccion de borde de Etapa 2, desde
+        `reconcile_on_startup` cuando el PRIMER intento ya tiene exito para un
+        trade que habia quedado marcado de una racha anterior -- antes eso
+        dejaba el flag puesto hasta el proximo reintento periodico."""
         repo = shadow_repo if is_shadow else trades_repo
         await repo.update_reconciliation_state(self.db, trade_id, False, 0, None, None)
+        key = (is_shadow, trade_id)
+        current = self._trades.get(key)
+        if current is not None:
+            self._trades[key] = current.model_copy(update={
+                "reconciliation_failed": False, "reconciliation_attempts": 0,
+                "reconciliation_window_start_ms": None, "reconciliation_first_failed_at_ms": None,
+            })

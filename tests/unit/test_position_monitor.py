@@ -591,6 +591,41 @@ async def test_retry_reconciliation_success_clears_the_failed_flag(db):
     assert cleared.reconciliation_attempts == 0
 
 
+@pytest.mark.asyncio
+async def test_startup_reconciliation_success_clears_a_flag_from_a_previous_run(db):
+    """Correccion de un borde conocido (Etapa 2): un trade que quedo marcado
+    en una corrida ANTERIOR del bot (`reconciliation_failed=True` ya
+    persistido antes de que `reconcile_on_startup` corra) y cuyo PRIMER
+    intento de esta corrida tiene exito debe limpiar el flag ahi mismo --
+    antes solo se limpiaba en `_attempt_reconcile_retry` (el proximo
+    reintento periodico, hasta RECONCILE_RETRY_SECONDS despues), dejando la
+    sombra congelada de mas (o el fill_source de un real marcado de mas)
+    aunque el arranque ya la hubiera reconciliado bien."""
+    rest, settings, backend, monitor = await _setup_with_shadow(db)
+    now = _now_ms()
+    sim = await _open_downtime_shadow(db, monitor, opened_minutes_ago=20,
+                                      last_seen_minutes_ago=10, now_ms=now,
+                                      levels=StrategyLevels(95.0, 110.0))
+    first_open, last_closed = _window(now, 20)
+    # Simula el estado que deja una corrida ANTERIOR fallida: ya marcado,
+    # con su ventana e inicio de racha persistidos (invariante de Etapa 2).
+    await shadow_repo.update_reconciliation_state(
+        db, sim.id, True, 1, window_start_ms=first_open, first_failed_at_ms=now - 600_000,
+    )
+    await _seed_1m(db, "BTCUSDT", first_open, last_closed)  # esta corrida SI tiene las velas
+
+    outcomes = await monitor.reconcile_on_startup(now_ms=now)
+
+    assert outcomes == [(sim.id, "ABIERTA")]
+    cleared = await shadow_repo.get(db, sim.id)
+    assert cleared.reconciliation_failed is False
+    assert cleared.reconciliation_attempts == 0
+    assert cleared.reconciliation_window_start_ms is None
+    # La limpieza tambien debe verse en el objeto en memoria, no solo en la fila.
+    in_memory = monitor._trades[monitor._key(sim)]
+    assert in_memory.reconciliation_failed is False
+
+
 def _irreparable_gap(db, symbol: str, first_open: int):
     """Hueco contiguo de 10 velas, siempre fuera de la tolerancia aislada de la
     Etapa 2a -- usado para forzar una falla de reconciliacion determinista."""
