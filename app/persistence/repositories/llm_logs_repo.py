@@ -60,15 +60,56 @@ async def insert(
     return cursor.lastrowid
 
 
-async def get_spend_since(db: Database, since: datetime) -> float:
+async def get_spend_since(
+    db: Database, since: datetime, fase: str | None = None
+) -> float:
     """Suma `cost_usd` de las filas con `created_at >= since` -- usada para el
     gasto del dia (seccion e); el llamador calcula el inicio del dia local con
-    `app.llm.budget.local_day_start_utc`."""
-    row = await db.fetch_one(
-        "SELECT COALESCE(SUM(cost_usd), 0) AS total FROM llm_logs WHERE created_at >= ?",
-        (since.isoformat(),),
-    )
+    `app.llm.budget.local_day_start_utc`. `LlmBudgetTracker.try_reserve` la
+    llama SIN `fase` a proposito (el presupuesto diario es global, no por
+    fase); `fase` es para TAREA B (bloque `llm_labeling` de `GET /health`)."""
+    query = "SELECT COALESCE(SUM(cost_usd), 0) AS total FROM llm_logs WHERE created_at >= ?"
+    params: list = [since.isoformat()]
+    if fase is not None:
+        query += " AND fase = ?"
+        params.append(fase)
+    row = await db.fetch_one(query, tuple(params))
     return float(row["total"]) if row else 0.0
+
+
+async def get_status_counts_since(
+    db: Database, since: datetime, fase: str | None = None
+) -> dict[str, int]:
+    """Conteo de filas por `status` desde `since` (TAREA B, docs/
+    FASE3_6_LLM.md seccion k): distingue `BUDGET_EXCEEDED` de `TIMEOUT`/
+    `ERROR_HTTP`/`INVALID` -- todas terminan en SIN_LLM, pero por razones
+    distintas. Usado por `GET /health` (bloque `llm_labeling`) y preparado
+    para la seccion (m) del informe de sesgo de exclusion."""
+    query = "SELECT status, COUNT(*) AS n FROM llm_logs WHERE created_at >= ?"
+    params: list = [since.isoformat()]
+    if fase is not None:
+        query += " AND fase = ?"
+        params.append(fase)
+    query += " GROUP BY status"
+    rows = await db.fetch_all(query, tuple(params))
+    return {row["status"]: row["n"] for row in rows}
+
+
+async def get_first_occurrence_since(
+    db: Database, since: datetime, status: str, fase: str | None = None
+) -> datetime | None:
+    """`created_at` de la PRIMERA fila con ese `status` desde `since` --
+    usado para registrar el momento en que se agoto el presupuesto diario
+    (TAREA B, `status='BUDGET_EXCEEDED'`)."""
+    query = "SELECT MIN(created_at) AS t FROM llm_logs WHERE created_at >= ? AND status = ?"
+    params: list = [since.isoformat(), status]
+    if fase is not None:
+        query += " AND fase = ?"
+        params.append(fase)
+    row = await db.fetch_one(query, tuple(params))
+    if row is None or row["t"] is None:
+        return None
+    return datetime.fromisoformat(row["t"])
 
 
 async def get_by_signal_group_key(db: Database, signal_group_key: str):
