@@ -2,10 +2,11 @@
 
 Junta el cliente del LLM, `llm_logs`, el presupuesto con reserva y el
 semaforo de concurrencia. Escribe la etiqueta en `shadow_trades` una sola vez
-(seccion d). **No esta conectado al ciclo del bot** (`app/core/scheduler.py`):
-eso es una decision aparte -- `AUTO_OPEN_WITHOUT_LLM` sigue en `false` durante
-toda la 3.6 (ver docs/FASE3_6_LLM.md, "Decisiones", punto 8).
-"""
+(seccion d). Este servicio en si **nunca** abre ni cierra posiciones reales
+-- `AUTO_OPEN_WITHOUT_LLM` sigue en `false` durante toda la 3.6 (ver
+docs/FASE3_6_LLM.md, "Decisiones", punto 8), ese camino no se toca aqui ni en
+`app/trading/shadow_live_labeler.py` (TAREA B, etiquetado en vivo de sombras
+durante la medicion, apagado por defecto -- ver seccion k)."""
 
 from __future__ import annotations
 
@@ -18,11 +19,14 @@ from datetime import UTC, datetime
 from pydantic import ValidationError
 
 from app.config import Settings
+from app.core.logging import get_logger
 from app.llm.budget import LlmBudgetTracker
 from app.llm.client import LlmClient, LlmHttpError, LlmTimeoutError, build_anthropic_client
 from app.llm.schemas import DECISION_TO_LABEL, parse_decision
 from app.persistence.database import Database
 from app.persistence.repositories import llm_logs_repo, shadow_repo
+
+logger = get_logger(__name__)
 
 STATUS_OK = "OK"
 STATUS_TIMEOUT = "TIMEOUT"
@@ -130,6 +134,17 @@ class LlmDecisionService:
         async with self._semaphore:
             reserved = await self._budget.try_reserve(self._db, self._settings, cost_max, now)
             if not reserved:
+                # TAREA B (docs/FASE3_6_LLM.md seccion k): registrado en el log de
+                # aplicacion, no solo en la fila de llm_logs -- el etiquetado en
+                # vivo no tiene una consola que un humano este mirando (a
+                # diferencia del piloto por repeticion), asi que sin esto el
+                # agotamiento del presupuesto pasaria desapercibido salvo que
+                # alguien consulte la base a mano.
+                logger.warning(
+                    "Presupuesto diario de LLM agotado (grupo=%s, fase=%s): esta senal "
+                    "queda SIN_LLM por BUDGET_EXCEEDED, no por timeout/error/JSON invalido.",
+                    signal_group_key, self.fase,
+                )
                 log_id = await _log(
                     status=STATUS_BUDGET_EXCEEDED, error="presupuesto diario agotado"
                 )
