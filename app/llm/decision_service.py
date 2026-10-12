@@ -92,13 +92,21 @@ class LlmDecisionService:
         prompt_version: str,
         user_message: str,
         estimated_input_tokens: int,
+        features_version: str | None = None,
         atr_pct: float | None = None,
         now: datetime | None = None,
     ) -> LlmDecisionResult:
         now = now or datetime.now(UTC)
         decision_delay_s = (now - candle_close_time).total_seconds()
         hour_utc = candle_close_time.astimezone(UTC).hour
-        prompt_sha256 = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
+        # PROMPT_SHA256 cubre el texto Y `features_version` (revision del
+        # piloto v2, docs/FASE3_6_LLM.md seccion k) -- misma formula que
+        # `app.llm.prompts.PROMPT_SHA256`, recalculada aqui porque el llamador
+        # puede pasar cualquier `system_prompt`/`features_version` (p.ej. en
+        # los tests).
+        prompt_sha256 = hashlib.sha256(
+            f"{system_prompt}\n---FEATURES_VERSION---\n{features_version}".encode()
+        ).hexdigest()
         model = self._settings.anthropic_sonnet_model
         full_prompt = f"{system_prompt}\n\n{user_message}"
         cost_max = estimate_cost_usd(
@@ -111,6 +119,7 @@ class LlmDecisionService:
                 "fase": self.fase, "candle_close_time": candle_close_time,
                 "decision_delay_s": decision_delay_s, "hour_utc": hour_utc, "atr_pct": atr_pct,
                 "model": model, "prompt_version": prompt_version, "prompt_sha256": prompt_sha256,
+                "features_version": features_version,
                 "prompt": full_prompt, "response_raw": None, "error": None, "decision": None,
                 "input_tokens": None, "output_tokens": None, "cost_usd": 0.0, "latency_ms": None,
                 "created_at": now,
@@ -164,8 +173,10 @@ class LlmDecisionService:
         real_cost = estimate_cost_usd(raw.input_tokens, raw.output_tokens, self._settings)
         try:
             # `parse_decision` trunca un `razonamiento` demasiado largo en vez
-            # de invalidar la decision (revision del piloto v1, ver
-            # docs/FASE3_6_LLM.md seccion k y el docstring de app/llm/schemas.py).
+            # de invalidar la decision (revision del piloto v1), e intenta un
+            # reparo MUY acotado si el JSON llega con la comilla de cierre de
+            # `razonamiento` faltante (revision del piloto v2) -- ver
+            # docs/FASE3_6_LLM.md seccion k y el docstring de app/llm/schemas.py.
             parsed = parse_decision(raw.text)
         except (ValidationError, json.JSONDecodeError) as exc:
             log_id = await log(
@@ -177,11 +188,11 @@ class LlmDecisionService:
                 STATUS_INVALID, SIN_LLM, decision_delay_s, log_id, "respuesta invalida"
             )
 
-        label = DECISION_TO_LABEL[parsed.decision]
+        label = DECISION_TO_LABEL[parsed.decision.decision]
         log_id = await log(
-            status=STATUS_OK, response_raw=raw.text, decision=parsed.decision,
+            status=STATUS_OK, response_raw=raw.text, decision=parsed.decision.decision,
             input_tokens=raw.input_tokens, output_tokens=raw.output_tokens,
-            cost_usd=real_cost, latency_ms=raw.latency_ms,
+            cost_usd=real_cost, latency_ms=raw.latency_ms, json_repaired=parsed.repaired,
         )
         if shadow_trade_id is not None:
             await shadow_repo.set_llm_decision(self._db, shadow_trade_id, label)

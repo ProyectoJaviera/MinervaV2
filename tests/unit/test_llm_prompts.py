@@ -12,6 +12,7 @@ import pytest
 
 from app.config import Settings
 from app.llm.prompts import (
+    FEATURES_VERSION,
     PROMPT_SHA256,
     PROMPT_VERSION,
     SYSTEM_PROMPT,
@@ -19,10 +20,11 @@ from app.llm.prompts import (
     build_user_message,
     estimate_input_tokens,
 )
-from app.persistence.models import ShadowTrade, Side, SignalRecord, TradeStatus
-from app.persistence.repositories import signals_repo
+from app.persistence.models import OHLCVBar, ShadowTrade, Side, SignalRecord, TradeStatus
+from app.persistence.repositories import ohlcv_repo, signals_repo
 
 CANDLE = datetime(2026, 1, 1, 4, tzinfo=UTC)
+HOUR_MS = 3_600_000
 
 
 def make_settings(**overrides) -> Settings:
@@ -76,12 +78,35 @@ def test_system_prompt_mentions_trend_context_and_asks_for_250_characters():
     assert "máximo 250 caracteres" in SYSTEM_PROMPT
 
 
-def test_prompt_version_is_v2():
-    assert PROMPT_VERSION == "signal_review_v2"
+def test_prompt_version_is_v3():
+    assert PROMPT_VERSION == "signal_review_v3"
 
 
-def test_prompt_sha256_matches_the_system_prompt():
-    assert PROMPT_SHA256 == hashlib.sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest()
+def test_features_version_is_tracked_separately_from_prompt_version():
+    # Revision del piloto v2 (docs/FASE3_6_LLM.md seccion k): las dos
+    # etiquetas son independientes a proposito (una es del texto del
+    # sistema, la otra del mensaje/features).
+    assert FEATURES_VERSION == "features_v1"
+
+
+def test_prompt_sha256_covers_both_the_system_prompt_and_the_features_version():
+    expected = hashlib.sha256(
+        f"{SYSTEM_PROMPT}\n---FEATURES_VERSION---\n{FEATURES_VERSION}".encode()
+    ).hexdigest()
+    assert PROMPT_SHA256 == expected
+
+
+def test_prompt_sha256_changes_if_features_version_changes_with_the_same_text():
+    """Revision del piloto v2: antes PROMPT_SHA256 solo hasheaba el texto, asi
+    que un cambio de unidades/campos del mensaje (features_version) no lo
+    cambiaba -- measurement_keys podia mezclar dos mensajes distintos."""
+    with_v1 = hashlib.sha256(
+        f"{SYSTEM_PROMPT}\n---FEATURES_VERSION---\nfeatures_v1".encode()
+    ).hexdigest()
+    with_v2 = hashlib.sha256(
+        f"{SYSTEM_PROMPT}\n---FEATURES_VERSION---\nfeatures_v2".encode()
+    ).hexdigest()
+    assert with_v1 != with_v2
 
 
 def test_build_user_message_is_valid_sorted_json():
@@ -210,7 +235,7 @@ async def test_market_features_are_null_explicit_without_any_cached_data(db):
     features = await build_features_from_shadow_trade(db, trade, make_settings())
     for key in (
         "funding_rate_pct", "funding_is_approximated", "volatility_atr14_pct",
-        "returns_std_30", "btc_correlation_30", "btc_correlation_100",
+        "returns_std_30_pct", "btc_correlation_30", "btc_correlation_100",
         "return_24h_pct", "return_72h_pct", "distance_to_ema50_1h_pct",
     ):
         assert features[key] is None, key
@@ -224,3 +249,52 @@ async def test_features_json_round_trips_through_build_user_message(db):
     features = await build_features_from_shadow_trade(db, trade, make_settings())
     text = build_user_message(features)
     assert json.loads(text) == features
+
+
+# --- convencion de unidades: toda clave "_pct" esta en porcentaje -----------
+# Revision del piloto v2 (docs/FASE3_6_LLM.md seccion k): `volatility_atr14_pct`
+# tenia el sufijo `_pct` pero devolvia la fraccion cruda (~100 veces mas chica);
+# el modelo la leyo literal como porcentaje. Guarda de regresion GENERAL (no
+# solo del caso puntual del ATR): con un escenario deliberadamente volatil
+# (para que ninguna feature salga null ni legitimamente cero), ninguna clave
+# "_pct" puede ser sospechosamente chica -- si alguien agrega una feature
+# nueva y se olvida de multiplicar por 100, esta prueba debe notarlo.
+_PCT_SANITY_FLOOR = 0.05  # bien por debajo de lo esperado en este escenario,
+# bien por encima de lo que daria una fraccion cruda sin convertir por error.
+
+
+@pytest.mark.asyncio
+async def test_every_pct_suffixed_feature_is_in_percent_not_a_raw_fraction(db):
+    # Velas 1h con una tendencia marcada, retornos VARIABLES (no un mismo %
+    # cada vela -- eso daria desviacion cero, ver test de abajo con ese caso
+    # a proposito) y mechas notorias: ATR, retornos y distancia a la EMA
+    # quedan todos lejos de cero en este escenario.
+    bars = []
+    as_of_ms = int(CANDLE.timestamp() * 1000)
+    price = 100.0
+    for i in range(80):
+        open_time = as_of_ms - (80 - i) * HOUR_MS
+        price *= 1.03 if i % 2 == 0 else 1.005
+        close = price
+        bars.append(OHLCVBar(
+            symbol="BTCUSDT", interval="1h", price_type="LAST_PRICE", open_time=open_time,
+            open=close * 0.99, high=close * 1.03, low=close * 0.97, close=close,
+            base_vol=1.0, quote_vol=1.0,
+        ))
+    await ohlcv_repo.upsert_bars(db, bars)
+    trade = _shadow_trade()
+    trade.candle_close_time = CANDLE
+    trade.opened_at = CANDLE
+
+    features = await build_features_from_shadow_trade(db, trade, make_settings())
+
+    checked = 0
+    for key, value in features.items():
+        if not key.endswith("_pct") or value is None:
+            continue
+        checked += 1
+        assert abs(value) > _PCT_SANITY_FLOOR, (
+            f"{key}={value!r} es sospechosamente chico para este escenario volatil -- "
+            "revisa si falta multiplicar por 100 (ver docs/FASE3_6_LLM.md seccion k)"
+        )
+    assert checked >= 6, "el escenario debe dejar varias features _pct con valor, no null"

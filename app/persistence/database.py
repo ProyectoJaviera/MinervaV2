@@ -532,6 +532,20 @@ _SHADOW_TRADES_MIGRATED_COLUMNS = {
     "reconciliation_first_failed_at_ms": "INTEGER",
 }
 
+# Revision del piloto v2 (docs/FASE3_6_LLM.md seccion k):
+# - `json_repaired`: la respuesta llego con JSON roto pero se recupero con el
+#   parser tolerante MUY acotado de app/llm/schemas.py (2/31 casos reales,
+#   razonamiento sin cerrar) -- se cuenta aparte para poder auditarla.
+# - `features_version`: PROMPT_SHA256 antes solo hasheaba SYSTEM_PROMPT; un
+#   cambio de unidades o de campos del mensaje (como el bug de ATR en pct de
+#   v2) no cambiaba ese hash y podia mezclar dos versiones del MENSAJE bajo
+#   el mismo hash en measurement_keys. Ahora PROMPT_SHA256 tambien cubre
+#   FEATURES_VERSION (ver app/llm/prompts.py), y esta columna lo deja legible.
+_LLM_LOGS_MIGRATED_COLUMNS = {
+    "json_repaired": "INTEGER NOT NULL DEFAULT 0",
+    "features_version": "TEXT",
+}
+
 
 class Database:
     """Wrapper fino sobre una conexion aiosqlite compartida.
@@ -577,6 +591,7 @@ class Database:
             await self._migrate_columns("trades", _TRADES_MIGRATED_COLUMNS)
             await self._migrate_columns("signals", _SIGNALS_MIGRATED_COLUMNS)
             await self._migrate_columns("shadow_trades", _SHADOW_TRADES_MIGRATED_COLUMNS)
+            await self._migrate_columns("llm_logs", _LLM_LOGS_MIGRATED_COLUMNS)
 
     async def _migrate_columns(self, table: str, columns: dict[str, str]) -> None:
         """`CREATE TABLE IF NOT EXISTS` no agrega columnas a una tabla que ya

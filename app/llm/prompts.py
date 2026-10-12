@@ -27,7 +27,7 @@ from app.persistence.database import Database
 from app.persistence.models import ShadowTrade
 from app.persistence.repositories import signals_repo
 
-PROMPT_VERSION = "signal_review_v2"
+PROMPT_VERSION = "signal_review_v3"
 
 # v2 (docs/FASE3_6_LLM.md seccion k): revision tras el piloto v1 (21 grupos,
 # 90% APROBAR, fuera de la banda 15-85%). Cambios de texto: convenciones
@@ -35,9 +35,17 @@ PROMPT_VERSION = "signal_review_v2"
 # tendencia y riesgo/beneficio en la lista de que sopesar, instruccion contra
 # la complacencia (sin tasa objetivo), y el limite de `razonamiento` bajado a
 # 250 caracteres (con margen bajo el tope duro de 300 del esquema, que ahora
-# trunca en vez de invalidar -- ver app/llm/schemas.py). Cambiar el texto
-# cambia PROMPT_SHA256, que es lo que de verdad evita mezclar dos versiones en
-# `ai_value_verdict(measurement_keys=...)`, no esta etiqueta legible.
+# trunca en vez de invalidar -- ver app/llm/schemas.py).
+#
+# v3 (revision del piloto v2, misma seccion k): el TEXTO de este prompt no
+# cambia, pero la congelacion debe cubrir tambien las FEATURES del mensaje
+# (`FEATURES_VERSION` abajo) -- el piloto v2 encontro un bug de unidades
+# (`volatility_atr14_pct` era una fraccion cruda, no un porcentaje) que no
+# habria cambiado este hash si solo hasheara el texto. `PROMPT_SHA256` ahora
+# cubre las dos cosas, que es lo que de verdad evita mezclar versiones en
+# `ai_value_verdict(measurement_keys=...)` -- `PROMPT_VERSION`/
+# `FEATURES_VERSION` son solo las etiquetas legibles, independientes entre si
+# a proposito (una es del texto, la otra del mensaje).
 SYSTEM_PROMPT = (
     "Eres un revisor de señales de trading de criptomonedas en una cuenta de "
     "PAPER TRADING (dinero simulado, nunca real). Cada posición usa apalancamiento "
@@ -88,12 +96,24 @@ SYSTEM_PROMPT = (
     '"razonamiento": texto de máximo 250 caracteres}.'
 )
 
-# Hash de la plantilla de sistema (docs/FASE3_6_LLM.md seccion c, columna
-# `prompt_sha256` de `llm_logs`): cualquier cambio de texto cambia este hash, y
-# es el hash -- no `PROMPT_VERSION` -- el que usa `ai_value_verdict
-# (measurement_keys=...)` para no mezclar dos versiones del prompt en el mismo
+# Version del MENSAJE (campos y unidades), separada de PROMPT_VERSION (texto
+# del sistema) -- revision del piloto v2, docs/FASE3_6_LLM.md seccion k.
+# Bumpear esto (y por lo tanto PROMPT_SHA256, ver abajo) en cualquier cambio
+# de campos o de unidades del mensaje, aunque SYSTEM_PROMPT no cambie ni una
+# letra: antes de esto, un cambio asi (como el bug de ATR en fraccion cruda
+# del piloto v2) no se reflejaba en ningun hash y measurement_keys podia
+# mezclar dos mensajes distintos bajo el mismo prompt_sha256.
+FEATURES_VERSION = "features_v1"
+
+# Hash de la plantilla de sistema Y de la version de features
+# (docs/FASE3_6_LLM.md seccion c, columna `prompt_sha256` de `llm_logs`):
+# cualquier cambio de CUALQUIERA de los dos cambia este hash, y es el hash --
+# no `PROMPT_VERSION` ni `FEATURES_VERSION` -- el que usa `ai_value_verdict
+# (measurement_keys=...)` para no mezclar versiones distintas en el mismo
 # veredicto (seccion k).
-PROMPT_SHA256 = hashlib.sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest()
+PROMPT_SHA256 = hashlib.sha256(
+    f"{SYSTEM_PROMPT}\n---FEATURES_VERSION---\n{FEATURES_VERSION}".encode()
+).hexdigest()
 
 
 # Revision del piloto v1 (docs/FASE3_6_LLM.md seccion k): las columnas de

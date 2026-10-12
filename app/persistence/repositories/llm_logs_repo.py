@@ -31,23 +31,30 @@ async def insert(
     cost_usd: float,
     latency_ms: int | None,
     created_at: datetime | None = None,
+    features_version: str | None = None,
+    json_repaired: bool = False,
 ) -> int:
     """Una fila por `signal_group_key` (UNIQUE): una sola llamada por grupo, sin
-    reintentos. Devuelve el id insertado."""
+    reintentos. Devuelve el id insertado.
+
+    `features_version`/`json_repaired`: revision del piloto v2
+    (docs/FASE3_6_LLM.md seccion k) -- ver el docstring de
+    `_LLM_LOGS_MIGRATED_COLUMNS` en app/persistence/database.py."""
     cursor = await db.execute(
         """
         INSERT INTO llm_logs (
             created_at, signal_group_key, shadow_trade_id, fase, candle_close_time,
             decision_delay_s, hour_utc, atr_pct, model, prompt_version, prompt_sha256,
             prompt, response_raw, status, error, decision, input_tokens, output_tokens,
-            cost_usd, latency_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            cost_usd, latency_ms, features_version, json_repaired
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             (created_at or datetime.now(UTC)).isoformat(), signal_group_key, shadow_trade_id,
             fase, candle_close_time.isoformat(), decision_delay_s, hour_utc, atr_pct, model,
             prompt_version, prompt_sha256, prompt, response_raw, status, error, decision,
-            input_tokens, output_tokens, cost_usd, latency_ms,
+            input_tokens, output_tokens, cost_usd, latency_ms, features_version,
+            int(json_repaired),
         ),
     )
     return cursor.lastrowid

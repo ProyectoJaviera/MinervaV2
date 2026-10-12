@@ -214,6 +214,40 @@ async def test_an_overly_long_razonamiento_is_truncated_not_invalidated(db):
     assert reloaded.llm_decision == "APROBADA"
 
 
+@pytest.mark.asyncio
+async def test_an_unterminated_razonamiento_is_repaired_and_marked_auditable(db):
+    """Revision del piloto v2 (docs/FASE3_6_LLM.md seccion k): 2/31 respuestas
+    reales fallaron con el JSON roto por una comilla de cierre faltante en
+    `razonamiento`. Texto REAL de `data/piloto_v2.db` (id=2, leido en modo
+    solo lectura), no inventado."""
+    shadow = await _open_shadow(db)
+    real_broken_text = (
+        '{"decision": "APROBAR", "confianza": 0.6, "razonamiento": "Riesgo principal: '
+        "correlación 0.90 con BTC y señal de cruce EMA débil (spread ~0.1%) en 4h. "
+        "Compensa: tendencia 1h alcista (+2.5% 24h/72h, +1.5% sobre EMA50), funding "
+        "negativo a favor del LONG, R:R 2:1, sin posiciones abiertas.}"
+    )
+    client = FakeLlmClient([LlmRawResponse(
+        text=real_broken_text, input_tokens=1900, output_tokens=140, latency_ms=2000,
+    )])
+    service = LlmDecisionService(db, make_settings(), client_factory=lambda s: client)
+
+    result = await service.decide_group(
+        signal_group_key=shadow.signal_group_key, shadow_trade_id=shadow.id,
+        candle_close_time=CANDLE, system_prompt="s", prompt_version="signal_review_v3",
+        user_message="u", estimated_input_tokens=2000, features_version="features_v1",
+        now=CANDLE,
+    )
+
+    assert result.status == STATUS_OK and result.label == "APROBADA"
+    row = await llm_logs_repo.get_by_signal_group_key(db, shadow.signal_group_key)
+    assert row["json_repaired"] == 1
+    assert row["features_version"] == "features_v1"
+    assert row["decision"] == "APROBAR"
+    reloaded = await shadow_repo.get(db, shadow.id)
+    assert reloaded.llm_decision == "APROBADA"
+
+
 # --- presupuesto: sin red ni cliente real ---------------------------------------
 
 

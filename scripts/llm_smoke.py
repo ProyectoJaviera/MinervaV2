@@ -47,6 +47,7 @@ from app.config import settings  # noqa: E402
 from app.llm.client import FakeLlmClient, LlmRawResponse, build_anthropic_client  # noqa: E402
 from app.llm.decision_service import LlmDecisionService  # noqa: E402
 from app.llm.prompts import (  # noqa: E402
+    FEATURES_VERSION,
     PROMPT_VERSION,
     SYSTEM_PROMPT,
     build_features_from_shadow_trade,
@@ -115,7 +116,7 @@ async def main(args: argparse.Namespace) -> None:
                 signal_group_key=trade.signal_group_key, shadow_trade_id=trade.id,
                 candle_close_time=trade.candle_close_time, system_prompt=SYSTEM_PROMPT,
                 prompt_version=PROMPT_VERSION, user_message=user_message,
-                estimated_input_tokens=estimated_tokens,
+                estimated_input_tokens=estimated_tokens, features_version=FEATURES_VERSION,
             )
             row = await llm_logs_repo.get_by_signal_group_key(db, trade.signal_group_key)
 

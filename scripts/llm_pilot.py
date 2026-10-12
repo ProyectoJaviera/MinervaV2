@@ -44,6 +44,7 @@ from app.config import settings  # noqa: E402
 from app.llm.client import FakeLlmClient, LlmRawResponse, build_anthropic_client  # noqa: E402
 from app.llm.decision_service import STATUS_OK, LlmDecisionService  # noqa: E402
 from app.llm.prompts import (  # noqa: E402
+    FEATURES_VERSION,
     PROMPT_VERSION,
     SYSTEM_PROMPT,
     build_features_from_shadow_trade,
@@ -132,6 +133,7 @@ async def main(args: argparse.Namespace) -> None:
         latencies: list[float] = []
         decisions: list[str] = []
         total_cost = 0.0
+        repaired_count = 0
         null_counts: dict[str, int] = {}
         indicator_slots_total = 0
         indicator_slots_null = 0
@@ -145,12 +147,14 @@ async def main(args: argparse.Namespace) -> None:
                 signal_group_key=trade.signal_group_key, shadow_trade_id=trade.id,
                 candle_close_time=trade.candle_close_time, system_prompt=SYSTEM_PROMPT,
                 prompt_version=PROMPT_VERSION, user_message=user_message,
-                estimated_input_tokens=estimated_tokens,
+                estimated_input_tokens=estimated_tokens, features_version=FEATURES_VERSION,
             )
             row = await llm_logs_repo.get_by_signal_group_key(db, trade.signal_group_key)
 
             statuses.append(result.status)
             if row is not None:
+                if row["json_repaired"]:
+                    repaired_count += 1
                 total_cost += row["cost_usd"] or 0.0
                 if row["input_tokens"] is not None:
                     input_tokens.append(row["input_tokens"])
@@ -208,6 +212,11 @@ async def main(args: argparse.Namespace) -> None:
                 )
         else:
             print("Ninguna decision valida: no se puede evaluar la banda de aprobacion.")
+        if repaired_count:
+            # Reparadas con el parser tolerante MUY acotado (revision del
+            # piloto v2, docs/FASE3_6_LLM.md seccion k): JSON roto pero
+            # recuperado, auditable via llm_logs.json_repaired = 1.
+            print(f"JSON reparado (razonamiento sin cerrar): {repaired_count}/{n}")
         print(f"Coste real total: {total_cost:.6f} USD")
 
         print()
