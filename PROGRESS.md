@@ -1276,3 +1276,83 @@ defectos CONCRETOS del prompt/features, no ruido de muestreo. Corregidos en
   conservador es correr el piloto de v2 con `--real --confirm-real`
   (pendiente, anotado en docs/FASE3_6_LLM.md seccion k).
 - Sin push (no se pidio).
+
+## Piloto real de signal_review_v2 y revision a v3 (2026-10-12)
+
+**Piloto real** (copia `data/piloto_v2.db`, 31 grupos, `prompt_version =
+"signal_review_v2"`): APROBAR 51,7% (dentro de banda 15%-85%), 0 campos
+null, 1.985 tokens de entrada de media (estimado ~2.273 -- conservador,
+sigue sobrestimando), 2,05s de latencia, 0,168 USD de coste real. Los tres
+defectos de v1 (signo del funding, geometria liquidacion/SL, unidades de
+funding) desaparecieron. Quedaron tres cosas corregidas en esta revision,
+documentadas en detalle en docs/FASE3_6_LLM.md seccion k:
+
+1. **2/31 INVALID (6,5%), mismo error de sintaxis:** el modelo omite la
+   comilla de cierre de `razonamiento` antes de la llave final
+   (`json.JSONDecodeError: "Unterminated string..."`), ambas APROBAR.
+   - Investigadas salidas estructuradas de Anthropic (`output_config.format`
+     con `json_schema`) ANTES de escribir un parser: confirmado GA para
+     `claude-sonnet-5-5` (platform.claude.com/docs/en/build-with-claude/
+     structured-outputs), pero NINGUNA pagina oficial confirma ni descarta
+     la combinacion exacta con `thinking={"type":"between_tools"}` +
+     `output_config.effort="low"` que usa este proyecto -- la pagina de
+     thinking solo restringe los campos PROPIOS de `thinking`, no
+     `output_config`. Sin una llamada real no se puede confirmar que no de
+     400, y esta revision es en seco (sin llamadas autorizadas) -- **no se
+     adopto, queda documentado como candidato futuro** que necesitaria 1-2
+     llamadas reales de verificacion antes de confiarlo.
+   - Implementado en su lugar: `app/llm/schemas.py::
+     _try_repair_unterminated_razonamiento`, un parser MUY acotado que solo
+     actua cuando el JSON estricto falla Y la forma es EXACTAMENTE
+     `decision`/`confianza` validos seguidos de `razonamiento` sin comilla de
+     cierre. Cualquier otro JSON roto sigue INVALID. `parse_decision` ahora
+     devuelve `ParsedDecision(decision, repaired: bool)`; `llm_logs.
+     json_repaired` (columna nueva) lo deja auditable, y
+     `scripts/llm_pilot.py` lo cuenta y reporta aparte ("JSON reparado").
+     Probado con las DOS respuestas reales de `data/piloto_v2.db` (leidas en
+     modo solo lectura, ids 2 y 28).
+2. **Bug de unidades, misma clase que el funding de v1:**
+   `volatility_atr14_pct` (`app/llm/market_features.py`) era la fraccion
+   cruda (0,0028 = 0,28%) pese al sufijo `_pct`; el modelo la leyo literal
+   como porcentaje y rechazo señales por "volatilidad muy baja" cuando en
+   realidad era ~100 veces mayor. `compute_atr14_pct` ahora multiplica por
+   100. `returns_std_30` (sin sufijo, mismo problema) se renombra a
+   `returns_std_30_pct` (`compute_returns_std_pct`) y tambien se multiplica
+   por 100. `llm_logs.atr_pct` nunca estuvo poblado (ningun llamador le pasa
+   `atr_pct` a `decide_group`), asi que no habia ningun valor guardado que
+   corregir ahi -- documentado como hallazgo, no como bug adicional. Tests:
+   una serie conocida reconstruye ATR/std a mano en fraccion y confirma
+   `funcion() == fraccion * 100`; una prueba general verifica que NINGUNA
+   clave `_pct` del mensaje completo sea sospechosamente chica en un
+   escenario deliberadamente volatil.
+3. **La congelacion ahora cubre tambien las features, no solo el texto:**
+   `PROMPT_SHA256` antes solo hasheaba `SYSTEM_PROMPT` -- el bug de unidades
+   del punto 2 no habria cambiado ese hash, y `measurement_keys` podria
+   haber mezclado dos mensajes distintos bajo el mismo hash. Nueva
+   `FEATURES_VERSION = "features_v1"` (constante, independiente de
+   `PROMPT_VERSION` a proposito), guardada en `llm_logs.features_version`
+   (columna nueva) y plegada DENTRO de `PROMPT_SHA256` junto con
+   `SYSTEM_PROMPT` -- `measurement_keys` no cambia su logica, pero el hash
+   que usa ahora es sensible a los dos ejes. `PROMPT_VERSION` sube a
+   `signal_review_v3` (el texto no cambio en esta revision, pero la
+   etiqueta legible avanza con la tercera generacion del experimento).
+- Tests nuevos: 6 en `test_llm_schemas.py` (reparo con las 2 cadenas reales,
+  no-reparo con JSON distinto roto, `repaired=False` en el camino normal),
+  1 de integracion en `test_llm_decision_service.py` (reparo de punta a
+  punta: `FakeLlmClient` con el texto real -> `STATUS_OK`/`APROBADA` ->
+  `llm_logs.json_repaired=1`), 6 en `test_llm_market_features.py`
+  (ATR/returns_std en fraccion a mano vs. la funcion, nombres nuevos), 1 en
+  `test_llm_prompts.py` (prueba general de unidades `_pct`) + 4 mas
+  (PROMPT_VERSION v3, FEATURES_VERSION, PROMPT_SHA256 cubre los dos ejes).
+- Suite completa: 525 passed, 2 skipped; `ruff check .` limpio.
+- **Smoke en seco** (base temporal nueva, nunca `data/piloto_v2.db` ni la de
+  trabajo, sin tocar el bot del puerto 8000): features de un trade sintetico
+  confirmaron `volatility_atr14_pct`/`returns_std_30_pct` en escala de
+  porcentaje (no fraccion) y la clave vieja `returns_std_30` ausente;
+  `LlmDecisionService.decide_group` con un `FakeLlmClient` (una respuesta
+  normal + la cadena real rota) escribio `json_repaired=0`/`1` y
+  `features_version="features_v1"` correctamente en `llm_logs`; y
+  `python scripts/llm_pilot.py --db <temporal> --max-calls 1` (dry-run) corrio
+  sin red ni coste con `prompt_version: signal_review_v3` y el reporte de
+  nulls mostrando los nombres de campo nuevos.
+- Sin push (pedido explicito).
