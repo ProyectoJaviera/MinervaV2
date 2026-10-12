@@ -95,22 +95,33 @@ cerrar la vela evaluada. Todo son datos hasta el instante de la decisión.
 2. **Indicadores de cada contribuyente**, tal como los calcula `precompute` en la
    última vela cerrada (`indicators_json` de `signals`). Por ejemplo, EMA rápida y
    lenta, RSI, banda de Bollinger, canal de Donchian, ATR.
-3. **Niveles y riesgo planeado:** SL, TP, trailing, precio de liquidación estimado y
-   `sl_margin_loss_pct` (riesgo planeado como % del margen, frente al tope de 50 %).
+3. **Niveles y riesgo planeado:** precio de entrada planeado (`entry_price_planned`,
+   agregado en v2: antes no se enviaba y el modelo no podía verificarlo), SL, TP,
+   precio de liquidación estimado, `sl_margin_loss_pct` (riesgo planeado como % del
+   margen, frente al tope de 50 %), y las distancias derivadas del precio de entrada
+   -- `sl_distance_pct`, `tp_distance_pct`, `risk_reward` (v2). `trailing_distance` se
+   quitó en v2: salía `null` en el piloto de v1 (ninguna estrategia activa lo usa hoy).
 4. **Funding:** tasa en la vela evaluada, intervalo del contrato, y si la tasa es
    aproximada (bares posteriores al último evento real, ver subfase 3.3).
    `funding_rate_pct` está en **porcentaje** (0,01 = 0,01 %), no en la fracción
    cruda que guarda `funding_cache` (0,0001) -- misma convención que
    `signals.funding_rate_pct` (`app/trading/signal_generator.py`, `* 100`). Error
    real encontrado y corregido en la fase (iv): `market_features.py` devolvía la
-   fracción cruda sin convertir, 100 veces menor que el valor real.
+   fracción cruda sin convertir, 100 veces menor que el valor real. **v2:** las
+   columnas de funding dentro de `indicators_by_strategy` (de `funding_contrarian*`)
+   tenían el mismo problema -- vienen en fracción cruda, no en porcentaje -- y se
+   normalizan igual, renombradas con sufijo `_pct`, antes de armar el mensaje.
 5. **Volatilidad reciente:** ATR(14) relativo al precio, y desviación típica de los
    retornos logarítmicos de las últimas 30 velas cerradas. Ambas calculadas solo con
    velas cuyo cierre es anterior o igual a la vela evaluada.
-6. **Correlación con BTC:** correlación de retornos de las últimas 30 y 100 velas
+6. **Contexto de tendencia en 1h (v2):** retorno de las últimas 24h y 72h, y
+   distancia porcentual del precio a su EMA(50), todo en el timeframe de referencia
+   (1h). Agregado tras el piloto de v1: el modelo se quejó repetidamente de "sin
+   datos de tendencia".
+7. **Correlación con BTC:** correlación de retornos de las últimas 30 y 100 velas
    cerradas, calculada solo con velas de BTCUSDT cuyo cierre es anterior o igual a la
    vela evaluada.
-7. **Posiciones reales abiertas en el momento de la decisión:** número y dirección de
+8. **Posiciones reales abiertas en el momento de la decisión:** número y dirección de
    las posiciones de la cuenta paper real que están abiertas, y cuántas son del mismo
    símbolo. **Las operaciones sombra no entran.** Son un instrumento del experimento,
    sin límite de cupo ni de margen; incluirlas haría que el prompt dependiera del propio
@@ -667,6 +678,76 @@ versión anterior no se mezclan con las nuevas.
 
 **Efecto del piloto en las cifras:** si los tokens reales de entrada no son 1.200, se
 recalcula la sección (e) con el valor medido.
+
+**Piloto real de `signal_review_v1` (2026-10-11, copia `data/piloto_real.db`,
+21 grupos reales):**
+
+| Métrica | Resultado |
+|---|---|
+| Validez del JSON | 20/21 (95 %) |
+| Tokens de entrada (media) | 1.389 |
+| Latencia (media) | 1,8 s |
+| Coste real total | 0,0884 USD |
+| Tasa de APROBAR | 90 % |
+| ¿Dentro de la banda 15 %-85 %? | **NO** -- fuera de banda por arriba |
+
+Fuera de la banda: por diseño (sección k), el prompt se ajusta **antes** de
+empezar la medición y se repite el piloto con `prompt_version` nueva. Se
+revisaron las 21 respuestas crudas una por una y se encontraron defectos
+concretos, no solo "el modelo aprueba mucho":
+
+1. **La única respuesta inválida** fue un `razonamiento` de más de 300
+   caracteres con `decision`/`confianza` perfectamente válidos -- se perdía
+   una decisión entera por un límite de longitud que no dice nada de la
+   calidad del juicio. Corregido: el prompt pide 250 caracteres (más margen)
+   y `parse_decision` (`app/llm/schemas.py`) TRUNCA en vez de invalidar;
+   INVALID queda solo para JSON roto o `decision`/`confianza` fuera de
+   esquema.
+2. **Dos convenciones que el modelo erró en su razonamiento:** escribió dos
+   veces "funding negativo favorece al short" (la convención correcta es la
+   inversa: funding negativo es quien paga el SHORT, no a quien favorece de
+   por sí) y rechazó un SHORT por considerar "inconsistente" que la
+   liquidación quedara más allá del SL -- eso es la geometría NORMAL de un
+   SHORT apalancado, no una inconsistencia. El prompt v2 declara ambas
+   convenciones explícitamente.
+3. **Confusión de unidades:** `funding_rate_pct` (features de mercado) está
+   en porcentaje, pero las columnas de funding dentro de
+   `indicators_by_strategy` (de `funding_contrarian*`) venían en la fracción
+   cruda de Bitunix -- 100 veces más chica. En vez de explicar la diferencia
+   en el prompt (texto que un modelo puede ignorar u olvidar), v2 NORMALIZA
+   los datos: se convierten a porcentaje y se renombran con sufijo `_pct`
+   antes de armar el mensaje (`_normalize_funding_units`,
+   `app/llm/prompts.py`).
+4. **Quejas repetidas de falta de contexto:** varias respuestas mencionaron
+   "sin datos de tendencia" o no poder verificar el precio de entrada. Antes
+   del v2, el mensaje no incluía `entry_price` en absoluto (solo SL/TP/
+   liquidación, sin el precio contra el que se miden) ni ningún dato de
+   tendencia más allá de ATR/volatilidad. v2 agrega el precio de entrada
+   planeado y sus distancias derivadas (`sl_distance_pct`, `tp_distance_pct`,
+   `risk_reward`) y contexto de tendencia en 1h (retorno de 24h/72h,
+   distancia a la EMA50) -- todo derivado solo de datos ya disponibles al
+   cierre de la vela evaluada, con las mismas pruebas de fuga que el resto
+   (`tests/unit/test_llm_market_features.py`). También se quitó
+   `trailing_distance`: salió `null` en las 21 respuestas (ninguna estrategia
+   activa lo usa hoy), así que solo agregaba ruido.
+5. **Tasa de aprobación alta (90 %) sin una causa única identificable más
+   allá de lo anterior:** se agregó una instrucción contra la complacencia
+   (sin fijar ningún porcentaje objetivo, que sigue prohibido por diseño):
+   el modelo debe nombrar el principal riesgo concreto de la operación antes
+   de decidir, y ni la mera existencia de la señal ni un chequeo que siempre
+   se cumple (SL bajo el tope, sin posición ya abierta) cuentan como
+   argumento a favor.
+
+**Por qué se pasó a v2 en vez de repetir el piloto con el mismo prompt:**
+porque los defectos encontrados son correcciones concretas y verificables
+(una convención mal explicada, una unidad inconsistente, datos faltantes),
+no ruido de muestreo -- cambiarlos y repetir el piloto es más informativo que
+repetir con el mismo texto esperando que la tasa caiga sola. `signal_review_
+v1` queda en `llm_logs` con `fase = 'PILOTO'` como registro, tal como exige
+la sección de arriba. **Pendiente:** correr el piloto de `signal_review_v2`
+con llamadas reales (`--real --confirm-real`) antes de congelar y empezar la
+medición; no se hizo en esta revisión (solo se verificó en seco que la
+validación de datos sigue funcionando, ver PROGRESS.md).
 
 ---
 

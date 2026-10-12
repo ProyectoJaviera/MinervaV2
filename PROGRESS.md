@@ -1188,3 +1188,91 @@ normal -- `shutdown_logging()` en si (el listener de consola con `join` con
 timeout) ya no se cuelga por este motivo, el riesgo residual es solo el
 `atexit` de la libreria `logging`, fuera de nuestro control.
 - Sin push (pedido explicito).
+
+## Piloto real de signal_review_v1 y revision a v2 (2026-10-11/12)
+
+**Piloto real** (copia `data/piloto_real.db`, 21 grupos, `prompt_version =
+"signal_review_v1"`): 20/21 JSON valido (95%), 1.389 tokens de entrada de
+media, 1,8s de latencia media, 0,0884 USD de coste real total, pero 90% de
+APROBAR -- fuera de la banda 15%-85% (seccion k). Se revisaron las 21
+respuestas crudas una por una (no solo el numero agregado) y se encontraron
+defectos CONCRETOS del prompt/features, no ruido de muestreo. Corregidos en
+`signal_review_v2`:
+
+- **Invalidez por longitud** (`app/llm/schemas.py`): la unica respuesta
+  invalida fue un `razonamiento` > 300 caracteres con `decision`/`confianza`
+  perfectamente validos. Nueva `parse_decision()` TRUNCA el razonamiento a
+  `RAZONAMIENTO_MAX_LENGTH` (300) antes de validar, en vez de invalidar toda
+  la decision; `decision_service.py` la usa en vez de `model_validate_json`
+  directo. INVALID sigue aplicando SOLO a JSON roto o a `decision`/
+  `confianza` fuera de esquema. El prompt ahora pide 250 caracteres (mas
+  margen bajo el tope duro).
+- **Convenciones explicitas en el prompt** (`app/llm/prompts.py`,
+  `SYSTEM_PROMPT`): (a) funding POSITIVO = LONG paga a SHORT, funding
+  NEGATIVO = SHORT paga a LONG (el modelo escribio dos veces la convencion
+  invertida); (b) en un LONG la liquidacion esta por DEBAJO de la entrada y
+  el SL entre ambas, en un SHORT por ENCIMA -- que la liquidacion quede mas
+  alla del SL es SIEMPRE asi por diseno, nunca una inconsistencia (el modelo
+  rechazo un SHORT por esto).
+- **Normalizacion de unidades, no explicacion** (`app/llm/prompts.py`,
+  `_normalize_funding_units`): las columnas de funding dentro de
+  `indicators_by_strategy` (de `funding_contrarian*`) venian en fraccion
+  cruda (0,0001 = 0,01%), distinto de `funding_rate_pct` (features de
+  mercado, ya en porcentaje) -- el modelo confundio las dos unidades. Se
+  convierten a porcentaje y se renombran con sufijo `_pct` ANTES de armar el
+  mensaje, en vez de agregar una explicacion de texto que el modelo puede
+  ignorar.
+- **Features nuevas, solo con datos ya disponibles al cierre de la vela,
+  mismas pruebas de fuga que las demas**
+  (`app/llm/prompts.py::_compute_entry_risk_features`,
+  `app/llm/market_features.py::compute_trend_features`): precio de entrada
+  planeado (`entry_price_planned`, antes NO se enviaba -- el modelo se
+  quejo de no poder verificarlo), `sl_distance_pct`, `tp_distance_pct`,
+  `risk_reward`; y contexto de tendencia en 1h (`return_24h_pct`,
+  `return_72h_pct`, `distance_to_ema50_1h_pct`, reusando las mismas 101
+  velas ya pedidas para ATR/correlacion -- el modelo se quejo varias veces
+  de "sin datos de tendencia"). Se quito `trailing_distance`: `null` en las
+  21 respuestas del piloto, ninguna estrategia activa lo usa hoy.
+- **Reduccion de complacencia, sin tasa objetivo**: nueva instruccion en el
+  prompt -- antes de decidir, nombrar el principal riesgo concreto de la
+  operacion y evaluar si la señal lo compensa; que la señal exista no es un
+  argumento a favor, y un chequeo que siempre se cumple (SL bajo el tope,
+  sin posicion abierta) tampoco cuenta. NINGUN porcentaje objetivo agregado
+  (sigue prohibido por diseno).
+- `PROMPT_VERSION = "signal_review_v2"` (nuevo hash `PROMPT_SHA256`, no
+  mezcla con la medicion de v1 -- que de todas formas nunca empezo).
+- Tests nuevos: 7 en `test_llm_schemas.py` (truncar vs. seguir rechazando
+  JSON roto/`decision`/`confianza` invalidos), 1 en
+  `test_llm_decision_service.py` (punta a punta: razonamiento largo ->
+  STATUS_OK, no INVALID), 4 en `test_llm_prompts.py` (convenciones en el
+  prompt, version, sin tasa objetivo con porcentaje) + 4 mas (entry/riesgo,
+  trailing_distance ausente, normalizacion de funding), 7 en
+  `test_llm_market_features.py` (retornos/EMA puros) + extension de las 2
+  pruebas de fuga existentes para cubrir `compute_trend_features`.
+- Suite completa: 515 passed, 2 skipped; `ruff check .` limpio.
+- **Smoke en seco** (base temporal nueva, nunca `data/piloto_real.db` ni la
+  de trabajo, sin tocar el bot del puerto 8000): 2 sombras sinteticas
+  (BTCUSDT SHORT con una estrategia de funding, ETHUSDT LONG), velas 1h
+  cacheadas para que ATR/correlacion/tendencia no salgan null. Confirmado de
+  punta a punta: indicadores de funding normalizados (`funding_rate_pct`
+  presente, `funding_rate` crudo ausente), `trailing_distance` ausente,
+  `entry_price_planned`/`sl_distance_pct`/`tp_distance_pct`/`risk_reward`
+  correctos, features de tendencia con valor. `python scripts/llm_pilot.py
+  --db <temporal> --max-calls 2` (dry-run) corrio sin red ni coste,
+  `prompt_version: signal_review_v2`, 2/2 JSON valido, dentro de banda.
+- **`estimate_input_tokens`, nuevo vs. el real esperado**: la formula
+  (caracteres/2) NO cambia -- solo crecio el contenido. `SYSTEM_PROMPT` pasa
+  de 2.155 a 3.318 caracteres (+54%, las convenciones nuevas y la
+  instruccion contra la complacencia); el mensaje de ejemplo del smoke
+  (BTCUSDT SHORT, con indicadores de funding) da 1.228 caracteres. Estimado
+  nuevo: **2.273 tokens** (vs. ~1.570 que daba la formula para v1, y vs. los
+  1.393 reales medidos en el UNICO smoke real que existe, que fue sobre
+  v1). Es un salto real (~+63% sobre esos 1.393), no un artefacto de la
+  formula: el prompt de sistema creció y el mensaje ganó 7 campos nuevos
+  (perdiendo 1, `trailing_distance`, que no pesaba nada util). Impacto en
+  presupuesto: `cost_max` por llamada (peor caso, 300 tokens de salida) sube
+  de ~0,0061 a ~0,0075 USD, un ~+23%. **No hay una medicion real de v2**
+  todavia -- la unica forma de confirmar si caracteres/2 sigue siendo
+  conservador es correr el piloto de v2 con `--real --confirm-real`
+  (pendiente, anotado en docs/FASE3_6_LLM.md seccion k).
+- Sin push (no se pidio).
