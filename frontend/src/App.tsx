@@ -1,7 +1,8 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { DashboardView } from "./DashboardView";
 import { LoginView } from "./LoginView";
-import { setUnauthorizedHandler, useMe } from "./api";
+import { clearSession, setUnauthorizedHandler, useMe } from "./api";
 
 const THEME_KEY = "minerva-theme";
 
@@ -42,22 +43,17 @@ function useDarkMode(): [boolean, () => void] {
 
 export default function App() {
   const [dark, toggleDark] = useDarkMode();
-  const [forcedLoggedOut, setForcedLoggedOut] = useState(false);
+  const queryClient = useQueryClient();
   const me = useMe();
 
+  // Un 401 (de cualquier query de datos, o del propio /me) deja "me" en null
+  // por escritura directa de la cache: no dispara ningun refetch de "me".
   useEffect(() => {
-    setUnauthorizedHandler(() => setForcedLoggedOut(true));
+    setUnauthorizedHandler(() => clearSession(queryClient));
     return () => setUnauthorizedHandler(null);
-  }, []);
+  }, [queryClient]);
 
-  // Un login nuevo exitoso (tras un 401 anterior) debe limpiar el forzado --
-  // si no, la sesion quedaria mostrando LoginView para siempre despues de
-  // reingresar.
-  useEffect(() => {
-    if (me.data?.username) setForcedLoggedOut(false);
-  }, [me.data?.username]);
-
-  const loggedIn = !forcedLoggedOut && !!me.data?.username;
+  const loggedIn = !!me.data?.username;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">

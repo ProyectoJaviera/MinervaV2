@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 // Capa de datos (Subfase D, plan pre-Fase 5 aprobado 2026-10-14): un solo
 // punto de paso (apiFetch) para la cookie httpOnly (credentials: "include")
@@ -128,12 +128,22 @@ export interface MeResponse {
 
 // --- auth ------------------------------------------------------------------
 
+// `null` = sesion cerrada/vencida (confirmada). Ante un 401 la cache de "me"
+// se escribe a mano con `clearSession` (sin refetch): un error de React Query
+// conserva el ultimo `data` valido, asi que depender del error dejaria la UI
+// con la sesion vieja.
 export function useMe() {
-  return useQuery({
+  return useQuery<MeResponse | null>({
     queryKey: ["me"],
     queryFn: () => apiFetch<MeResponse>("/api/auth/me"),
     retry: false,
+    refetchInterval: false,
   });
+}
+
+export function clearSession(queryClient: QueryClient): void {
+  queryClient.setQueryData<MeResponse | null>(["me"], null);
+  queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "me" });
 }
 
 export function useLogin() {
@@ -155,9 +165,7 @@ export function useLogout() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => apiFetch<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["me"] });
-    },
+    onSuccess: () => clearSession(queryClient),
   });
 }
 
