@@ -6,6 +6,9 @@ a `/health` -- `check_health_fn`/`send_fn` se inyectan (mismo estilo que
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -216,3 +219,88 @@ def test_default_state_file_lives_under_the_gitignored_data_directory(path_str):
 
     assert DEFAULT_STATE_FILE == path_str
     assert Path(path_str).parts[0] == "data"
+
+
+# --- robustez del archivo de estado: JSON corrupto y escritura atomica ---------
+
+
+def test_load_state_treats_corrupt_json_as_no_state(tmp_path):
+    from scripts.telegram_alert import _EMPTY_STATE, _load_state
+
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{esto no es json valido", encoding="utf-8")
+
+    assert _load_state(state_path) == _EMPTY_STATE
+
+
+def test_load_state_treats_unreadable_bytes_as_no_state(tmp_path):
+    """Bytes que ni siquiera decodifican como UTF-8 (no solo JSON invalido)
+    tambien deben tratarse como "sin estado", no tumbar el script."""
+    from scripts.telegram_alert import _EMPTY_STATE, _load_state
+
+    state_path = tmp_path / "state.json"
+    state_path.write_bytes(b"\xff\xfe\x00\x01")
+
+    assert _load_state(state_path) == _EMPTY_STATE
+
+
+def test_a_corrupt_state_file_still_lets_run_notify_as_if_it_were_a_cold_start(tmp_path):
+    (tmp_path / "state.json").write_text("{corrupto", encoding="utf-8")
+    sender = FakeSender()
+
+    ok = _run(tmp_path, STALE, sender)
+
+    assert ok is True
+    assert len(sender.calls) == 1  # se trato como arranque en frio con el bot caido -> avisa
+
+
+def test_save_state_writes_atomically_via_a_tmp_file_and_os_replace(tmp_path, monkeypatch):
+    from scripts import telegram_alert
+    from scripts.telegram_alert import _save_state
+
+    state_path = tmp_path / "state.json"
+    tmp_file_path = tmp_path / "state.json.tmp"
+    calls: list[tuple[str, str]] = []
+    original_replace = os.replace
+
+    def _tracking_replace(src, dst):
+        # En el momento del replace, el .tmp ya debe existir con el
+        # contenido final -- confirma que se escribe ANTES de reemplazar,
+        # no que `_save_state` solo simula la secuencia.
+        assert Path(src).exists()
+        calls.append((Path(src).name, Path(dst).name))
+        return original_replace(src, dst)
+
+    monkeypatch.setattr(telegram_alert.os, "replace", _tracking_replace)
+
+    _save_state(state_path, {"last_status": "OK", "down_since": None, "last_notified_at": None})
+
+    assert calls == [("state.json.tmp", "state.json")]
+    assert state_path.exists()
+    assert not tmp_file_path.exists()  # consumido por os.replace, no queda huerfano
+    assert json.loads(state_path.read_text(encoding="utf-8"))["last_status"] == "OK"
+
+
+# --- funciona sin importar el directorio de trabajo desde el que arranca -------
+
+
+def test_running_the_script_from_an_unrelated_cwd_does_not_fail_to_import(tmp_path):
+    """Reproduce el bug real (2026-10-14): el Programador de tareas de
+    Windows arranca en un directorio ajeno (tipicamente System32, no la raiz
+    del repo) -- antes de `os.chdir` al inicio del script, `sys.path.insert(
+    0, ".")` resolvia a ESE directorio y rompia el import de `app.config`/
+    `scripts.check_health` con `ModuleNotFoundError`. Corre el script de
+    verdad, por subprocess, con el cwd puesto a un directorio temporal
+    ajeno al repo -- `--help` alcanza para probar el import sin necesitar
+    TELEGRAM_BOT_TOKEN/CHAT_ID (argparse sale antes de llegar a ese chequeo)."""
+    script_path = Path(__file__).resolve().parents[2] / "scripts" / "telegram_alert.py"
+    assert script_path.exists()
+
+    result = subprocess.run(
+        [sys.executable, str(script_path), "--help"],
+        cwd=str(tmp_path), capture_output=True, text=True, timeout=30,
+    )
+
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert "ModuleNotFoundError" not in result.stderr
+    assert "--reminder-minutes" in result.stdout

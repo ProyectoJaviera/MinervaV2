@@ -1586,5 +1586,38 @@ cambios antes y despues de esta prueba.
 `@BotFather`, obtener el `chat_id` con `getUpdates`, completar `.env`, y
 programar la tarea de Windows (comando exacto en el docstring del script).
 
-- Sin push (pedido explicito del flujo de trabajo). Subfase B sigue a la
-  espera de aprobacion.
+### Revision de Subfase A (2026-10-14): 2 correcciones del usuario
+
+1. **Bug real reproducido**: el Programador de tareas de Windows arranca en
+   un directorio ajeno (tipicamente System32, no la raiz del repo) -- antes
+   de esto, `sys.path.insert(0, ".")` resolvia a ESE directorio y rompia el
+   import de `app.config`/`scripts.check_health` con `ModuleNotFoundError`
+   (y `.env`/`data/telegram_alert_state.json`, ambos relativos, tambien
+   habrian quedado mal ubicados). Corregido con
+   `os.chdir(Path(__file__).resolve().parent.parent)` al inicio del script,
+   ANTES de `sys.path.insert`/cualquier import de `app`/`scripts`. Test
+   nuevo que corre el script de verdad por `subprocess` con el cwd puesto a
+   un directorio temporal ajeno al repo (`--help`, sin necesitar
+   credenciales) -- confirma que ya NO sale `ModuleNotFoundError`. Docstring
+   del `schtasks` actualizado: ya no depende de correr desde la raiz del
+   repo para funcionar (aunque `%cd%` sigue siendo la forma mas corta de
+   armar la ruta absoluta que `/TR` exige).
+2. **Robustez del archivo de estado**: `_load_state` ahora trata un JSON
+   corrupto o bytes illegibles como "sin estado" (en vez de tumbar el
+   script) -- perder el historial de cuando empezo una caida es mucho menos
+   grave que dejar de avisar del todo. `_save_state` ahora escribe de forma
+   atomica (`archivo .tmp` + `os.replace`): si el proceso se interrumpe a
+   mitad de camino, el peor caso es un `.tmp` huerfano, nunca un
+   `state.json` truncado. 5 tests nuevos (JSON corrupto, bytes no-UTF8, que
+   un estado corrupto deja avisar igual que un arranque en frio, y que
+   `_save_state` de verdad pasa por un `.tmp` + `os.replace` antes de dejar
+   el archivo final).
+
+Suite completa: 589 passed, 2 skipped; `ruff check .` limpio. Verificado a
+mano: el script corre limpio desde `/tmp` (directorio no relacionado), y el
+bot real en el puerto 8000 sigue en `status: ok` sin cambios antes y
+despues.
+
+- Sin push (pedido explicito). Subfase B (auth backend) sigue, segun el plan
+  aprobado, contra DB temporal en el puerto 8001, sin reiniciar ni modificar
+  el bot real ni el prompt congelado.

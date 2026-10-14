@@ -34,11 +34,15 @@ Probalo primero a mano en consola:
 
     python scripts/telegram_alert.py
 
-Tarea de Windows cada 10 min, sin ventana de consola (probar primero con
-python.exe para ver errores, recien despues apuntar a pythonw.exe). Corre
-esto desde cmd.exe parado en D:\Estudio\IA\Minerva (el %cd% se expande antes
-de que schtasks lo vea, asi que el comando guardado queda con la ruta
-absoluta igual):
+El script fija su propio directorio de trabajo al arrancar (ver el
+`os.chdir` mas abajo), asi que funciona igual sin importar desde donde lo
+dispare el Programador de tareas (tipicamente System32, no la raiz del
+repo) -- lo unico que SI debe ser una ruta absoluta es el `/TR` de abajo
+(schtasks lo exige). Tarea de Windows cada 10 min, sin ventana de consola
+(probar primero con python.exe para ver errores, recien despues apuntar a
+pythonw.exe). Corre esto desde cmd.exe parado en D:\Estudio\IA\Minerva: el
+`%cd%` se expande ANTES de que schtasks lo vea (verificado), asi que el
+comando que queda guardado en la tarea ya tiene la ruta absoluta de verdad:
 
     schtasks /Create /SC MINUTE /MO 10 /TN "MinervaHealthAlert" /ST 00:00 /F ^
         /TR "%cd%\.venv\Scripts\pythonw.exe %cd%\scripts\telegram_alert.py"
@@ -50,6 +54,7 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -57,6 +62,15 @@ from pathlib import Path
 
 import httpx
 
+# El Programador de tareas de Windows arranca scripts con el directorio de
+# trabajo en System32 (o el que sea), NO en la raiz del repo -- antes de esta
+# linea, `sys.path.insert(0, ".")` resolvia a ESE directorio ajeno y rompia
+# el import de abajo con ModuleNotFoundError (reproducido 2026-10-14: el
+# unico sintoma visible era la tarea fallando en el historial del
+# Programador, sin mas detalle). Se fija el cwd a la raiz del repo (dos
+# niveles arriba de este archivo) ANTES de insertar "." en sys.path o de
+# importar nada de app/scripts, para que ese "." ya apunte a donde debe.
+os.chdir(Path(__file__).resolve().parent.parent)
 sys.path.insert(0, ".")
 
 from app.config import settings  # noqa: E402
@@ -68,15 +82,32 @@ DEFAULT_STATE_FILE = "data/telegram_alert_state.json"
 DEFAULT_REMINDER_MINUTES = 60.0
 
 
+_EMPTY_STATE = {"last_status": None, "down_since": None, "last_notified_at": None}
+
+
 def _load_state(path: Path) -> dict:
+    """Un archivo corrupto o ilegible (disco lleno a mitad de una escritura
+    anterior, edicion manual rota, lo que sea) se trata como "sin estado" en
+    vez de tumbar el script -- perder un dia de historial de cuando empezo
+    una caida es mucho menos grave que dejar de avisar del todo porque el
+    archivo de estado se daño."""
     if not path.exists():
-        return {"last_status": None, "down_since": None, "last_notified_at": None}
-    return json.loads(path.read_text(encoding="utf-8"))
+        return dict(_EMPTY_STATE)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return dict(_EMPTY_STATE)
 
 
 def _save_state(path: Path, state: dict) -> None:
+    """Escritura atomica (archivo `.tmp` + `os.replace`): si el proceso se
+    interrumpe a mitad de camino (corte de energia, kill), el peor caso es
+    que el `.tmp` quede huerfano -- `state.json` nunca queda truncado o a
+    medio escribir, que es lo que `_load_state` tendria que tolerar si no."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state), encoding="utf-8")
+    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path.write_text(json.dumps(state), encoding="utf-8")
+    os.replace(tmp_path, path)
 
 
 def _should_notify(
