@@ -213,6 +213,27 @@ def test_send_telegram_message_never_logs_the_token_or_chat_id_on_failure(capsys
     assert "chat-id-123" not in captured.out
 
 
+def test_send_telegram_message_disables_web_page_preview(monkeypatch):
+    import httpx
+
+    from scripts.telegram_alert import send_telegram_message
+
+    captured = {}
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+    def _fake_post(url, **kwargs):
+        captured["json"] = kwargs["json"]
+        return _Response()
+
+    monkeypatch.setattr(httpx, "post", _fake_post)
+
+    assert send_telegram_message("t", "c", "hola") is True
+    assert captured["json"] == {"chat_id": "c", "text": "hola", "disable_web_page_preview": True}
+
+
 @pytest.mark.parametrize("path_str", ["data/telegram_alert_state.json"])
 def test_default_state_file_lives_under_the_gitignored_data_directory(path_str):
     from scripts.telegram_alert import DEFAULT_STATE_FILE
