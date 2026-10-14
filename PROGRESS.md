@@ -1909,3 +1909,95 @@ arriba).
 - Sin push (pedido explicito). Se detiene aqui a esperar aprobacion. La
   Subfase D (dashboard React) se propone por separado, en Plan Mode, sin
   implementar todavia.
+
+## Subfase D: dashboard React (2026-10-14)
+
+Plan propuesto y aprobado en Plan Mode (`C:\Users\Renzo\.claude\plans\
+radiant-twirling-waterfall.md`), implementado de corrido segun la nueva
+seccion "Autonomia" de CLAUDE.md. Reemplaza `frontend/src/App.tsx` (el
+frontend minimo de Fase 1, sin auth ni estilo) por un dashboard que consume
+los 3 endpoints nuevos de la Subfase C mas `/health`.
+
+**Verificado antes de empezar**: Node v24.19.0 / npm 11.17.0 ya instalados en
+este PC -- sin guia de instalacion. Consultado el skill `dataviz` del
+proyecto para la pregunta de que libreria de graficos usar: los 4 visuales
+pedidos (barras hacia 300, indicador de banda 15-85%, desglose de causas,
+costo/ETA) son del tipo "stat tile/meter", no series de tiempo -- **sin
+libreria de graficos**, componentes propios en HTML+Tailwind.
+
+**Dependencias nuevas**: `tailwindcss`/`@tailwindcss/vite` v4 (setup moderno:
+un plugin de Vite + `@import "tailwindcss"` en CSS, sin `tailwind.config.js`/
+`postcss.config.js` -- v4 ya no los necesita para uso basico);
+`@tanstack/react-query` v5; `vitest`/`@testing-library/react`/`jsdom` --
+**fijados en `vitest@3.2.4`, no la ultima (5.x)**, porque `vitest@5` exige
+`vite@^6.4.0 || ^7.0.0 || ^8.0.0` y el proyecto sigue en `vite@5.4.x` (no se
+toco esa dependencia existente solo para agregar un test runner).
+**Vulnerabilidades de dev conocidas y aceptadas** (`npm audit`): 2 moderadas +
+1 alta + 2 criticas, TODAS en herramientas de test/dev (`@vitest/mocker`,
+`tinypool`, el dev server de `esbuild`/`vite`) -- nunca se empaquetan en el
+build de produccion ni quedan expuestas (proyecto local, de un solo
+desarrollador, sin servidor de desarrollo publico). `npm audit fix` sin
+`--force` no alcanza a resolverlas sin forzar `vitest@5` (mismo conflicto de
+arriba); no se aplico `--force`.
+
+**Estructura**: `App.tsx` (banner "MODO PAPER TRADING" permanente, fuera del
+gate de auth; gate de sesion via `/api/auth/me`; boton de modo oscuro/claro
+con `prefers-color-scheme` + `localStorage`) -> `LoginView` o
+`DashboardView`. `DashboardView` en 5 tarjetas (Salud, Costo del LLM, Avance
+de la medicion con `ProgressBar`/`BandIndicator` reusables, Decisiones
+recientes del LLM, Sombras recientes). `api.ts`: un solo punto de paso
+(`apiFetch`) para `credentials: "include"` y la reaccion a un 401 (vuelve a
+`LoginView` sin perder la cookie -- la maneja el navegador solo, nunca se lee
+desde JS).
+
+**La regla de integridad en el cliente**: la tarjeta de sombras recientes
+nunca calcula ni infiere PnL -- las columnas "PnL neto"/"Motivo de cierre"
+se renderizan unicamente si esos campos *estan presentes* en la respuesta
+(`"pnl_net_usdt" in row`), reflejando tal cual lo que decide el choke point
+del backend (`shadow_trade_to_public_dict`). El cliente queda agnostico del
+gate por construccion.
+
+**9 tests nuevos** (Vitest + React Testing Library): el gate de login
+(sin sesion -> `LoginView`; con sesion -> `DashboardView`; el banner de modo
+paper se ve siempre, incluso sin sesion); que las columnas de PnL/cierre
+estan AUSENTES cuando el mock de `/api/shadow-trades/recent` no las manda y
+PRESENTES cuando si (la version del lado del cliente del mismo principio del
+choke point); `ProgressBar` calcula el ancho correctamente para 0/150/450 de
+300 (nunca mas del 100% aunque el valor supere el objetivo) y siempre
+muestra el numero exacto como texto. `npm --prefix frontend run typecheck`
+(`tsc --noEmit`) y `npm --prefix frontend run build` limpios.
+
+**`app/main.py`**: mount condicional de `StaticFiles` en `/` (al final, tras
+todos los routers) sirviendo `frontend/dist` si existe -- **codigo escrito y
+probado, NO desplegado al bot real**: el unico restart de todo el plan
+pre-Fase 5 sigue pendiente, es una decision aparte que no se toma como parte
+de esta subfase (regla de Autonomia: "nunca... reiniciar el proceso del bot
+real en el puerto 8000"). Suite de Python: 643 passed, 4 skipped; `ruff
+check .` limpio (sin cambios de comportamiento para los tests existentes,
+que nunca pegan a `GET /`).
+
+**Smoke manual de punta a punta** (puerto 8001 con una copia fresca de la
+base real + `npm --prefix frontend run dev` en 5173, con el proxy de Vite
+actualizado a 8001): confirmado por HTTP (`curl`) que la pagina raiz y
+`/src/main.tsx` cargan, y que `/health` + los 3 endpoints nuevos responden
+correctamente a traves del proxy (401 sin sesion, forma esperada). **No pude
+verificar visualmente en un navegador real** -- esta sesion no tiene una
+herramienta de navegador disponible; la verificacion de que el dashboard se
+VE y FUNCIONA bien (login real, las 5 tarjetas con datos, modo oscuro,
+viewport de telefono) queda pendiente de que el usuario la haga a mano.
+**Incidente durante el smoke**: dos procesos de prueba anteriores
+(`run_dev_server.py` en 8001 de un smoke previo, y el propio `npm run dev`
+de este) quedaron corriendo de fondo despues de `TaskStop` -- confirmados
+como propios (via `Get-CimInstance`, nunca del usuario ni del bot real) y
+detenidos a mano con `Stop-Process`; el puerto 8000 se verifico intacto antes
+y despues de cada paso.
+
+**Pendiente del usuario**: abrir el dashboard de verdad en un navegador
+(`scripts/run_dev_server.py` + `npm --prefix frontend run dev`) para
+confirmar que se ve y funciona como se espera antes de decidir cuando hacer
+el unico restart real que lo pondria en produccion.
+
+- Commits pequenos, sin push (regla de Autonomia). Con esto se completa el
+  plan pre-Fase 5 completo (Subfases A, B, C, D) a nivel de codigo -- solo
+  falta el despliegue/restart real, que sigue siendo una decision aparte del
+  usuario.
