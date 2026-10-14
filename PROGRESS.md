@@ -1829,3 +1829,83 @@ real al LLM se disparo desde la copia).
 - Sin push (pedido explicito). Se detiene aqui a esperar aprobacion antes
   de la Subfase E (`StaticFiles`) y F (dashboard React), segun el plan
   aprobado.
+
+## Continuidad operativa: arranque/parada de un solo comando (2026-10-14)
+
+El PC actual es de pruebas y se apaga de tanto en tanto; esto deja arrancar
+y detener el bot real con un solo comando, de forma segura, y documenta
+como mudarlo a un PC 24/7 sin perder la medicion en curso.
+
+**`scripts/start_bot.ps1`**: arranca con las variables fijas de hoy
+(`AUTO_OPEN_WITHOUT_LLM=false`, `LOG_LEVEL=INFO`,
+`LLM_LIVE_LABELING_ENABLED=true`), REHUSA arrancar si ya hay algo
+escuchando en el puerto (evita dos procesos escribiendo la misma base), y
+espera a que `/health` responda (hasta 180s -- verificado que un arranque
+en frio con backfill de velas puede tardar mas de un minuto) antes de
+mostrar su estado. Sin consola visible: el proceso real (`pythonw.exe`) se
+envuelve en `cmd.exe /c "... >> archivo 2>&1"` porque PowerShell 5.1 no deja
+que `Start-Process` redirija stdout Y stderr al mismo archivo directo
+(verificado: error explicito). **Bug real encontrado y corregido durante la
+verificacion**: un quirk conocido de `cmd /c` -- si el argumento ya empieza
+con una ruta citada, cmd.exe lo parsea mal (sale con `ExitCode 1` sin
+siquiera crear el archivo de salida) salvo que TODO el comando quede
+envuelto en una capa extra de comillas; confirmado con pruebas aisladas
+antes de aplicar el fix. Dos logs con proposito distinto:
+`logs\medicion_out.log` (stdout+stderr crudos del proceso) y
+`logs\medicion.log` (diario operativo de este script, no del bot -- cuando
+se intento arrancar, con que PID, que respondio `/health`; el log interno
+detallado del bot sigue en `logs\minerva.log`, sin cambios).
+
+**`scripts/stop_bot.ps1`**: detiene SOLO el proceso que escucha en el
+puerto y, si todavia esta vivo, su lanzador (`cmd.exe`) -- nunca otros
+procesos python del sistema (confirmado con un proceso de Ollama,
+completamente ajeno, corriendo en paralelo durante las pruebas: nunca se
+tocó). Limite documentado explicitamente: Windows no da una señal de
+apagado cooperativo real para un proceso sin consola -- esto es un
+`TerminateProcess`, no un apagado prolijo de
+`ShadowLiveLabeler.shutdown()`. Aceptable porque SQLite en modo WAL (el que
+usa este proyecto) tolera esto por diseño (cada escritura ya hace *commit*
+de inmediato).
+
+**Tarea de arranque automatico**: comandos `Register-ScheduledTask`/
+`Unregister-ScheduledTask` verificados (se corrigio un nombre de parametro
+real: `-AllowStartIfOnBatteries`, no `-AllowStartIfOnBattery`) en
+`docs/MIGRACION_PC.md`. El registro en si dio "Acceso denegado" en el
+entorno de esta sesion (probablemente una restriccion de este sandbox, no
+necesariamente de una sesion interactiva normal) -- la sintaxis quedo
+verificada, pero el usuario deberia confirmar que el registro de verdad
+funciona en su propia terminal (con PowerShell como Administrador si hace
+falta).
+
+**`docs/MIGRACION_PC.md`** (nuevo): guia corta para mudar el bot a otro PC
+sin perder la medicion -- respaldo consistente con la API de backup de
+sqlite (nunca copiar el `.db` directo, por el WAL), mismo commit del repo
+ANTES de mover los datos (para que `PROMPT_SHA256` siga coincidiendo y
+`frozen_hash_ok` salga `true`), recrear el venv, copiar `.env` a mano,
+recrear las dos tareas (alerta + arranque), y verificar con
+`measurement_status.py` sobre una copia (nunca la base de trabajo).
+
+**Tests**: `tests/integration/test_start_stop_bot_scripts.py` (nuevo,
+marcado `slow` + gateado por `MINERVA_RUN_LIVE_TESTS=1`, mismo patron que
+`test_bitunix_live.py` -- corre el lifespan real completo, lento y contra
+la red real, nunca en CI por defecto): rehusa una segunda instancia,
+arranca, confirma `/health`, detiene, confirma el puerto libre; y que
+detener sin nada corriendo es un no-op limpio. **Corrido de verdad** (no
+solo smoke manual): 2 passed en ~3 min. Suite rapida completa: 643 passed,
+4 skipped; `ruff check .` limpio.
+
+**Smoke manual exhaustivo contra el puerto 8001** (nunca el 8000): arranque
++ rechazo de doble instancia + parada + verificacion de que no queda nada
+huerfano, repetido varias veces durante la depuracion del bug de `cmd /c`
+de arriba. Confirmado en cada paso que el bot real del puerto 8000 seguia
+en `status: ok` con `cost_today_usd` sin cambios (ninguna llamada real al
+LLM se disparo desde la copia, a pesar de que esta prueba corre con
+`LLM_LIVE_LABELING_ENABLED=true` real -- a diferencia de
+`run_dev_server.py`, que lo fuerza a `false` a proposito: este script existe
+para arrancar el bot REAL con sus settings REALES, asi que la copia de
+prueba comparte ese riesgo pequeño y aceptado durante los segundos que esta
+arriba).
+
+- Sin push (pedido explicito). Se detiene aqui a esperar aprobacion. La
+  Subfase D (dashboard React) se propone por separado, en Plan Mode, sin
+  implementar todavia.
