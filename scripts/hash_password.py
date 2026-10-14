@@ -16,11 +16,31 @@ sys.path.insert(0, ".")
 
 from app.api.security import hash_password  # noqa: E402
 
+BCRYPT_MAX_PASSWORD_BYTES = 72
+
+
+def build_hash_line(password: str, confirm: str) -> str:
+    """Linea `AUTH_PASSWORD_HASH=...` lista para pegar en `.env`; `ValueError`
+    con un mensaje claro si la contrasena no se puede hashear."""
+    if not password:
+        raise ValueError("La contrasena no puede estar vacia.")
+    if password != confirm:
+        raise ValueError("No coinciden.")
+    n_bytes = len(password.encode("utf-8"))
+    if n_bytes > BCRYPT_MAX_PASSWORD_BYTES:
+        raise ValueError(
+            f"La contrasena ocupa {n_bytes} bytes en UTF-8 y bcrypt solo acepta hasta "
+            f"{BCRYPT_MAX_PASSWORD_BYTES} (los caracteres no ASCII ocupan 2-4 bytes cada uno). "
+            "Usa una mas corta."
+        )
+    return "AUTH_PASSWORD_HASH=" + hash_password(password)
+
+
 if __name__ == "__main__":
     password = getpass.getpass("Contrasena para AUTH_PASSWORD_HASH: ")
-    if not password:
-        raise SystemExit("La contrasena no puede estar vacia.")
-    confirm = getpass.getpass("Repetila: ")
-    if password != confirm:
-        raise SystemExit("No coinciden.")
-    print("\nAUTH_PASSWORD_HASH=" + hash_password(password))
+    confirm = getpass.getpass("Repetila: ") if password else ""
+    try:
+        line = build_hash_line(password, confirm)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
+    print("\n" + line)
