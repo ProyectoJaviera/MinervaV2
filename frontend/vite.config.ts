@@ -1,16 +1,17 @@
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// Proyecto minimo de Fase 1: sin auth, sin WebSocket todavia (polling a la
-// API REST). El dashboard completo (Tailwind, graficos, tiempo real,
-// autenticacion) es Fase 5 -- ver docs/FASE0.md.
+// Subfase D (plan pre-Fase 5 aprobado 2026-10-14): desarrollo SIEMPRE contra
+// scripts/run_dev_server.py en el puerto 8001 (DB temporal) -- nunca el bot
+// real del puerto 8000. Todos los endpoints nuevos viven bajo /api/*
+// (protegidos con cookie httpOnly); /health sigue sin auth.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   server: {
     proxy: {
-      "/positions": "http://localhost:8000",
-      "/trades": "http://localhost:8000",
-      "/health": "http://localhost:8000",
+      "/api": { target: "http://localhost:8001", changeOrigin: true },
+      "/health": "http://localhost:8001",
     },
   },
 });
