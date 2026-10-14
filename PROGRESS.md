@@ -1621,3 +1621,75 @@ despues.
 - Sin push (pedido explicito). Subfase B (auth backend) sigue, segun el plan
   aprobado, contra DB temporal en el puerto 8001, sin reiniciar ni modificar
   el bot real ni el prompt congelado.
+
+## Subfase B: auth backend (2026-10-14)
+
+**Dependencias nuevas**: `bcrypt>=4.0`, `pyjwt>=2.8` en `pyproject.toml`
+(instaladas con `uv pip install --system-certs` -- el entorno necesita ese
+flag para TLS, mismo motivo por el que el proyecto ya depende de
+`truststore` para sus propias llamadas HTTP). `pip` no esta disponible en
+este venv (gestionado por `uv`); instalar con `uv pip install --python
+.venv/Scripts/python.exe --system-certs ...`.
+
+**`app/api/security.py`** (nuevo): `hash_password`/`verify_password`
+(`bcrypt` directo, no `passlib`), `verify_username` (`hmac.compare_digest`),
+`create_session_token`/`decode_session_token` (JWT HS256 via `PyJWT`, claims
+`sub`/`iat`/`exp`=+24h, sin refresh token), y `require_auth` (dependencia de
+FastAPI que lee la cookie `minerva_session`, pensada para aplicarse a nivel
+de ROUTER completo, no endpoint por endpoint). `app/api/deps.py` gana
+`get_settings(request) -> Settings` (mismo patron que
+`get_db`/`get_scheduler`); `app/main.py` fija `app.state.settings` en el
+lifespan.
+
+**`app/api/routes/auth.py`** (nuevo): `POST /api/auth/login` (cookie
+`httpOnly`, `SameSite=Strict`, sin `Secure` -- loopback HTTP plano),
+`POST /api/auth/logout`, `GET /api/auth/me` (protegido). `GET /health`
+sigue sin auth a proposito (lo usa `scripts/telegram_alert.py`, sin login).
+
+**`scripts/hash_password.py`** (nuevo): `getpass` (nunca como argumento de
+CLI), imprime solo `AUTH_PASSWORD_HASH=<hash>` para pegar en `.env`.
+
+**`scripts/run_dev_server.py`** (nuevo, seccion 6 del plan): copia una base
+real a un archivo temporal y arranca `app.main:app` en el puerto 8001,
+forzando `LLM_LIVE_LABELING_ENABLED=false`/`ANTHROPIC_API_KEY=""` SIN
+IMPORTAR lo que diga el `.env` real (que hoy tiene el flag en `true` --
+evita gasto real contra la copia). **Ajuste respecto del plan**: `--source-db`
+quedo OBLIGATORIO en vez de con default a `settings.database_path` -- leer
+esa settings ANTES de fijar las variables de entorno crearia el singleton
+`Settings()` con el entorno viejo, y el `import app.main` de mas abajo
+reusaria ese mismo objeto ya cacheado en `sys.modules`, ignorando los
+overrides. Pedir la ruta explicita evita ese problema de orden de
+importacion sin ningun truco fragil (borrar modulos de `sys.modules` a
+mano, etc.).
+
+**20 tests nuevos** (`tests/unit/test_auth.py`, primer uso de
+`fastapi.testclient.TestClient` en el repo, sobre una app FastAPI minima --
+solo el router de auth + `app.state.settings`, nunca la app real ni ningun
+puerto): hash/verify de contrasena y usuario, ida y vuelta del JWT, rechazo
+por secreto distinto/expirado/basura, login correcto/incorrecto (usuario,
+contrasena, ninguno configurado), atributos de la cookie (`HttpOnly`,
+`SameSite=Strict`, sin `Secure`), `me` sin cookie/con cookie valida/con
+cookie alterada/con secreto equivocado, logout limpiando la sesion. Suite
+completa: 609 passed, 2 skipped; `ruff check .` limpio.
+
+**Smoke de nivel 2** (`scripts/run_dev_server.py` contra un respaldo online
+fresco de `data/minerva_estabilidad.db`, puerto 8001, proceso en segundo
+plano detenido limpiamente al terminar): `/health` respondio `status: ok`
+con `llm_labeling.enabled: false` (confirma el candado de seguridad --
+`.env` real lo tiene en `true`); `POST /api/auth/login` con cualquier
+credencial devolvio 401 (`AUTH_USERNAME`/`AUTH_PASSWORD_HASH` siguen vacios
+en el `.env` real: el auth nunca abre sesion sin configurar, por diseno);
+`GET /api/auth/me` sin cookie devolvio 401. Confirmado antes y despues que
+el bot real del puerto 8000 seguia en `status: ok`, con `llm_labeling.
+enabled: true` intacto y `cost_today_usd` sin cambios (ninguna llamada real
+al LLM se disparo).
+
+**Pendiente del usuario** (fuera de Claude, por diseno): generar
+`JWT_SECRET` (`python -c "import secrets; print(secrets.token_hex(32))"`),
+correr `scripts/hash_password.py` para `AUTH_PASSWORD_HASH`, y completar
+`AUTH_USERNAME`/`AUTH_PASSWORD_HASH`/`JWT_SECRET` en `.env` -- sin esto el
+login seguira fallando siempre, por diseno (no es un bug).
+
+- Sin push (pedido explicito). Commit pequeno para esta subfase; se detiene
+  aqui a esperar aprobacion antes de la Subfase C (medicion portada a
+  async), como pidio el usuario.
