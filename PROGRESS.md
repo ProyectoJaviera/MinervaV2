@@ -1477,3 +1477,58 @@ from_a_previous_run`. Commit `79ceb53`.
 
 - Sin push (pedido explicito). Commits pequenos para TAREA B/C y esta
   documentacion.
+
+## TAREA D: scripts/measurement_status.py (avance de la medicion en vivo)
+
+Script nuevo, solo lectura, que muestra el avance de la medicion bajo el
+hash de prompt CONGELADO (`FROZEN_PROMPT_SHA256`) sin mirar PnL ni
+resultados de las operaciones (nunca lee `pnl_net_usdt`, `pnl_gross_usdt`,
+`exit_price` ni `close_reason` -- solo conteos de `llm_logs` y las marcas de
+tiempo/simbolo/direccion/etiqueta de `shadow_trades` necesarias para agrupar
+en conglomerados, mismo criterio de `app.trading.ai_value.assign_clusters`
+pero reimplementado sobre filas crudas para no tener que poblar un
+`ShadowTrade` completo con sus campos de PnL).
+
+Reporta: (1) grupos con fila OK por lado y total; (2) tasa de APROBAR y si
+cae en la banda 15-85%; (3) filas no OK por causa (TIMEOUT/ERROR_HTTP/
+INVALID/BUDGET_EXCEEDED) y su % sobre el total de filas MEDICION; (4)
+sombras posteriores a la primera fila MEDICION sin ninguna fila en
+`llm_logs` (por demora > 1800s o hash no coincidente), separado para la
+seccion (m); (5) filas con `json_repaired=1`; (6) coste acumulado y coste
+medio por fila; (7) N efectivo (conglomerados) por lado frente a
+`MIN_EFFECTIVE_N=300`, cuantos faltan, y una estimacion de dias segun el
+ritmo de los ultimos 7 dias (o todos los disponibles si hay menos) --
+anclada al dato MAS RECIENTE de la propia copia, no al reloj de pared (una
+copia de hace horas/dias no debe salir con ritmo artificialmente bajo solo
+por ser vieja).
+
+Abre la base en modo solo lectura (`sqlite3`, URI `mode=ro`, igual que
+`scripts/compare_fase2_runs.py`) -- nunca escribe, y por eso no pasa por las
+migraciones de `app.persistence.database.Database` (que si escriben).
+`--db` obligatorio, con el mismo assert de ruta que `llm_pilot.py`/
+`llm_smoke.py` (distinta de `settings.database_path`).
+
+21 tests nuevos con datos sinteticos (`tests/unit/test_measurement_status_
+script.py`): clustering por (simbolo, direccion) con solapes, un
+conglomerado con ambas etiquetas cuenta para los dos lados, simbolo o
+direccion distintos nunca se fusionan, filas bajo un hash distinto al
+congelado se ignoran, `N efectivo` solo cuenta sombras CERRADAS (una abierta
+cuenta para el punto 1 pero no para el 7), el ritmo se ancla al dato mas
+reciente de la copia (no al reloj real), y un reporte de extremo a extremo
+contra una base de archivo real (sintetica, poblada via los repos de
+produccion) reabierta en solo lectura. Suite completa: 572 passed, 2
+skipped; `ruff check .` limpio.
+
+**Verificacion contra datos reales (regla de CLAUDE.md):** respaldo online
+consistente (`sqlite3.Connection.backup`, sobre una conexion fuente en modo
+solo lectura) de `data/minerva_estabilidad.db` a `data/backups/
+measurement_status_verif.db`, y el script corrio limpio contra esa copia:
+1 fila MEDICION bajo el hash congelado (APROBADA, sombra todavia abierta por
+eso N efectivo=0 en el punto 7), 0 filas no-OK, 0 omitidas, coste acumulado
+0,005916 USD. **Nota para el usuario:** esa fila real confirma que
+`LLM_LIVE_LABELING_ENABLED` ya esta activo en el bot real (yo no lo active;
+la activacion era decision tuya, como pediste en TAREA B) y que el
+etiquetado en vivo esta funcionando en produccion.
+
+- Sin push (pedido explicito, pendiente confirmar). Commit pequeno para
+  TAREA D.
