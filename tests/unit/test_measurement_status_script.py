@@ -1,7 +1,10 @@
-"""Avance de la medicion en vivo (TAREA D, docs/FASE3_6_LLM.md seccion k):
-`scripts/measurement_status.py`. Todo con datos SINTETICOS (nunca la base
-real) -- la verificacion manual contra una copia de la base de estabilidad
-con datos reales (CLAUDE.md) se hace aparte, fuera de pytest."""
+"""Avance de la medicion en vivo (TAREA D / Subfase C del plan pre-Fase 5
+aprobado 2026-10-14, docs/FASE3_6_LLM.md seccion k):
+`app.trading.measurement_status` (logica real, compartida por el CLI
+`scripts/measurement_status.py` y los endpoints async bajo `/api/`). Todo
+con datos SINTETICOS (nunca la base real) -- la verificacion manual contra
+una copia de la base de estabilidad con datos reales (CLAUDE.md) se hace
+aparte, fuera de pytest."""
 
 from __future__ import annotations
 
@@ -13,14 +16,16 @@ import pytest
 from app.persistence.database import Database
 from app.persistence.models import ShadowTrade, Side, TradeStatus
 from app.persistence.repositories import llm_logs_repo, shadow_repo
-from scripts.measurement_status import (
+from app.trading.measurement_status import (
     APPROVAL_BAND,
     ClosedLabeledTrade,
     MeasurementStatus,
     cluster_effective_counts,
     compute_status,
-    format_report,
+    compute_status_async,
+    is_measurement_gate_open,
 )
+from scripts.measurement_status import format_report
 
 FROZEN = "hash_congelado_de_prueba"
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
@@ -409,3 +414,64 @@ async def test_format_report_with_real_data_never_raises_and_has_all_sections(ro
                     "4) Grupos omitidos", "5) Filas con JSON reparado", "6) Coste",
                     "7) Camino a MIN_EFFECTIVE_N"):
         assert heading in report
+
+
+# --- compute_status_async: mismo resultado que la variante sincrona -----------
+
+
+@pytest.mark.asyncio
+async def test_compute_status_async_matches_the_sync_version_on_identical_data(db, ro_conn):
+    """El port de sync a async fue mecanico (solo cambia el estilo de
+    llamada a la base) -- esta prueba lo confirma sembrando los MISMOS datos
+    sinteticos en ambos lados y comparando el `MeasurementStatus` completo,
+    no solo algunos campos."""
+    sync_database, db_path = ro_conn
+    for target in (db, sync_database):
+        await _seed_group(
+            target, key="g1", opened_at=T0, closed_at=T0 + timedelta(hours=1),
+            llm_decision="APROBADA", log={"decision": "APROBAR", "created_at": T0},
+        )
+        await _seed_group(
+            target, key="g2", opened_at=T0 + timedelta(hours=2),
+            closed_at=T0 + timedelta(hours=3), llm_decision="RECHAZADA",
+            log={"decision": "RECHAZAR", "created_at": T0 + timedelta(hours=2)},
+        )
+        await _seed_group(
+            target, key="g3-timeout", opened_at=T0 + timedelta(hours=4),
+            log={"status": "TIMEOUT", "decision": None,
+                 "created_at": T0 + timedelta(hours=4)},
+        )
+    await sync_database.close()
+
+    async_status = await compute_status_async(db, frozen_hash=FROZEN)
+
+    conn = _reopen_ro(db_path)
+    try:
+        sync_status = compute_status(conn, frozen_hash=FROZEN)
+    finally:
+        conn.close()
+
+    assert async_status == sync_status
+
+
+@pytest.mark.asyncio
+async def test_compute_status_async_on_an_empty_database_has_zero_rows(db):
+    status = await compute_status_async(db, frozen_hash=FROZEN)
+
+    assert status.total_medicion_rows == 0
+    assert status.n_eff_approved == 0 and status.n_eff_rejected == 0
+
+
+# --- is_measurement_gate_open: el unico punto de paso para revelar PnL --------
+
+
+def test_is_measurement_gate_open_requires_both_sides_at_or_above_min_effective_n():
+    below_both = MeasurementStatus(frozen_hash=FROZEN, n_eff_approved=299, n_eff_rejected=300)
+    below_one_side = MeasurementStatus(frozen_hash=FROZEN, n_eff_approved=300, n_eff_rejected=299)
+    exactly_both = MeasurementStatus(frozen_hash=FROZEN, n_eff_approved=300, n_eff_rejected=300)
+    above_both = MeasurementStatus(frozen_hash=FROZEN, n_eff_approved=301, n_eff_rejected=350)
+
+    assert is_measurement_gate_open(below_both) is False
+    assert is_measurement_gate_open(below_one_side) is False
+    assert is_measurement_gate_open(exactly_both) is True
+    assert is_measurement_gate_open(above_both) is True
