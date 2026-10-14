@@ -20,6 +20,12 @@ A partir de ahora, todas las respuestas, resúmenes y documentos para este proye
 - Todo script que lea la base real debe ejecutarse antes de entregarlo contra una copia temporal de esa base (ruta distinta de `settings.database_path`, verificada con un assert explícito) y confirmar que termina sin errores con sus datos reales; los tests con datos sintéticos no bastan para esto (ver el fallo real de `scripts/analyze_risk.py` que esta regla previene).
 - Mantén PROGRESS.md: estado por fase, decisiones y pendientes.
 
+## Autonomía
+- Trabaja de corrido hasta terminar la tarea completa. No pidas confirmación ni hagas preguntas intermedias: decide con criterio, anota la decisión en PROGRESS.md y sigue. Solo te detienes al terminar, o si algo exige una decisión mía irreversible.
+- Los scripts de prueba temporales van en el directorio scratchpad y se reutilizan; no crees un archivo de prueba nuevo por intento.
+- Límites absolutos aunque ningún permiso los frene: nunca detener, matar ni reiniciar el proceso del bot real en el puerto 8000; nunca modificar, mover ni borrar archivos en `data/` (en especial `data/minerva_estabilidad.db` y sus respaldos); nunca leer ni imprimir `.env`; nunca hacer `git push`; nunca tocar el prompt congelado (`SYSTEM_PROMPT`, `FEATURES_VERSION`, `FROZEN_PROMPT_SHA256`).
+- Todo desarrollo y prueba usa DB temporal y el puerto 8001.
+
 ## REGLAS DE TRABAJO
 - Trabaja por FASES. Entrega una fase, espera mi aprobación y sigue con la siguiente.
 - FASE 0 (antes de escribir código): evalúa el documento adjunto (openspec.md), dime qué reutilizas y qué descartas y por qué, y hazme las preguntas que aún necesites (máximo 10, agrupadas).
