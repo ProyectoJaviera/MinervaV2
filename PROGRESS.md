@@ -1693,3 +1693,52 @@ login seguira fallando siempre, por diseno (no es un bug).
 - Sin push (pedido explicito). Commit pequeno para esta subfase; se detiene
   aqui a esperar aprobacion antes de la Subfase C (medicion portada a
   async), como pidio el usuario.
+
+### Revision de Subfase B (2026-10-14): 4 correcciones del usuario
+
+Probadas contra la Subfase B real: ninguna de las 3 primeras daba acceso,
+pero las 3 fallaban con 500 en vez de un 401/503 limpio.
+
+1. **`JWT_SECRET` vacio o corto fallaba ABIERTO en la practica**: un
+   atacante que lo adivinara (vacio es adivinable al primer intento) podia
+   forjar un token valido para cualquier usuario, porque `jwt.decode`/
+   `jwt.encode` no rechazan una clave HMAC corta por si solos (solo
+   advierten). `jwt_secret_is_safe` (`len() >= 32`, RFC 7518 Section 3.2)
+   corta ese camino antes de firmar o verificar nada: `login` responde 503,
+   `require_auth` responde 401, y `warn_if_jwt_secret_is_unsafe` deja un
+   WARNING al arrancar (extraido como funcion propia, testeable con
+   `caplog`, en vez de un `if` suelto en `app/main.py`).
+2. **`require_auth` solo atrapaba `jwt.InvalidTokenError`**, pero
+   `jwt.InvalidKeyError` (clave HMAC malformada o vacia) es subclase DIRECTA
+   de `jwt.PyJWTError`, no de `InvalidTokenError` -- confirmado verificando
+   la jerarquia real de excepciones de PyJWT instalado, y reproducido con un
+   token bien formado decodificado contra un secreto vacio
+   (`HMAC key must not be empty.`). Corregido a `except jwt.PyJWTError`.
+   Encontre el mismo hueco en `login` (un secreto largo pero con FORMA de
+   JWK pasa el chequeo de largo pero sigue haciendo que `jwt.encode` lance
+   `InvalidKeyError`) y lo corregi igual ahi, aunque el usuario solo lo pidio
+   para `require_auth` -- mismo principio, mismo riesgo de 500.
+3. **`verify_username` comparaba `str` con `hmac.compare_digest`**, que
+   exige ASCII puro y lanza `TypeError` con cualquier otro caracter
+   (confirmado: `usuário` lo dispara) -- corregido comparando bytes UTF-8.
+   **`verify_password`** ahora atrapa el `ValueError` que `bcrypt` lanza con
+   contrasenas > 72 bytes (confirmado con el bcrypt instalado) y devuelve
+   `False` en vez de dejarlo escapar; `LoginRequest.username`/`.password`
+   ganan `max_length=128` (defensa en otra capa: no sustituye el catch
+   anterior, porque 128 caracteres Unicode pueden superar 72 bytes igual).
+4. **`scripts/run_dev_server.py`**: `shutil.copy2` reemplazado por
+   `sqlite3.Connection.backup` (conexion fuente en modo solo lectura) para
+   copiar la base viva de forma consistente -- `shutil.copy2` podria copiar
+   a mitad de una transaccion WAL y dejar la copia corrupta.
+
+16 tests nuevos en `tests/unit/test_auth.py` (37 en total), incluido un
+secreto con forma de JWK que pasa el chequeo de largo pero sigue exigiendo
+el catch amplio (prueba real del punto 2, no solo del chequeo de largo del
+punto 1). Suite completa: 626 passed, 2 skipped; `ruff check .` limpio.
+Confirmado que el bot real del puerto 8000 seguia intacto. Commit `785547b`.
+
+- Sin push (pedido explicito). Sigue la Subfase C (endpoints de solo
+  lectura bajo `/api/`: medicion, decisiones recientes, sombras recientes --
+  protegidos con `require_auth`, sin PnL de sombras hasta `MIN_EFFECTIVE_N`
+  por lado), segun el plan aprobado, mismas reglas: DB temporal, puerto
+  8001, sin reiniciar ni modificar el bot real ni el prompt congelado.
