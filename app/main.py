@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import (
     auth,
@@ -142,3 +144,14 @@ app.include_router(auth.router)
 app.include_router(measurement.router)
 app.include_router(llm_decisions.router)
 app.include_router(shadow_trades.router)
+
+# Subfase D (plan pre-Fase 5 aprobado 2026-10-14): el build estatico del
+# dashboard (`npm --prefix frontend run build`), si existe. Montado AL FINAL
+# -- Starlette resuelve rutas en el orden en que se agregan, asi que todo lo
+# de arriba (`/health`, `/api/*`) siempre gana antes de caer en este
+# catch-all. Condicional a proposito: un checkout que nunca corrio el build
+# no debe fallar al arrancar. `html=True` sirve `index.html` en `/` (unica
+# ruta de cliente real, sin router todavia).
+_FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if _FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")
