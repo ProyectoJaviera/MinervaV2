@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.routes import auth, health, positions, trades
+from app.api.security import warn_if_jwt_secret_is_unsafe
 from app.config import settings
 from app.core.heartbeat import Heartbeat
 from app.core.logging import get_logger, setup_logging, shutdown_logging
@@ -37,6 +38,7 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.warning("Minerva arrancando en MODO PAPER TRADING -- nunca se envian ordenes reales.")
+    warn_if_jwt_secret_is_unsafe(logger, settings)
 
     db = Database(settings.database_path)
     await db.connect()

@@ -37,12 +37,31 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
+import sqlite3
 import sys
 import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _backup_database(source_path: Path, dest_path: Path) -> None:
+    """Copia consistente de una base SQLite VIVA (el bot real sigue
+    escribiendo en modo WAL mientras este script corre) via la API de
+    backup de `sqlite3` (`Connection.backup`) -- a diferencia de
+    `shutil.copy2`, que copia bytes de archivo sin coordinarse con el motor
+    y podria copiar a mitad de una transaccion, dejando la copia corrupta o
+    con el WAL desincronizado del archivo principal. La conexion fuente se
+    abre en modo solo lectura: este script nunca escribe la base real."""
+    source = sqlite3.connect(f"file:{source_path.as_posix()}?mode=ro", uri=True)
+    try:
+        dest = sqlite3.connect(str(dest_path))
+        try:
+            source.backup(dest)
+        finally:
+            dest.close()
+    finally:
+        source.close()
 
 
 def main(source_db: str, port: int) -> None:
@@ -58,7 +77,7 @@ def main(source_db: str, port: int) -> None:
     assert tmp_db.resolve() != source_path, (
         "la DB temporal del dev server no puede ser la fuente real"
     )
-    shutil.copy2(source_path, tmp_db)
+    _backup_database(source_path, tmp_db)
     print(f"DB de desarrollo (copia de {source_path}): {tmp_db}")
 
     log_dir = tmp_dir / "logs"

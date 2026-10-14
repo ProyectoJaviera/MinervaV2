@@ -5,14 +5,17 @@ escritura sobre el trading)."""
 
 from __future__ import annotations
 
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.api.deps import get_settings
 from app.api.security import (
     COOKIE_NAME,
+    MAX_CREDENTIAL_LENGTH,
     SESSION_DURATION,
     create_session_token,
+    jwt_secret_is_safe,
     require_auth,
     verify_password,
     verify_username,
@@ -23,14 +26,25 @@ router = APIRouter(prefix="/api/auth")
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(max_length=MAX_CREDENTIAL_LENGTH)
+    password: str = Field(max_length=MAX_CREDENTIAL_LENGTH)
 
 
 @router.post("/login")
 async def login(
     body: LoginRequest, response: Response, settings: Settings = Depends(get_settings)
 ) -> dict:
+    if not jwt_secret_is_safe(settings.jwt_secret):
+        # JWT_SECRET vacio o corto: nunca se firma un token con una clave
+        # insegura -- un atacante que la adivine (vacio es adivinable al
+        # primer intento) podria forjar una sesion valida para cualquier
+        # usuario. Se avisa claro en vez de firmar igual o tumbar con un 500.
+        raise HTTPException(
+            status_code=503,
+            detail="JWT_SECRET no esta configurado o es muy corto (se exigen al menos "
+            "32 caracteres) -- revisa tu .env antes de iniciar sesion",
+        )
+
     valid_username = verify_username(body.username, settings.auth_username)
     valid_password = verify_password(body.password, settings.auth_password_hash)
     if not (valid_username and valid_password):
@@ -38,7 +52,17 @@ async def login(
         # "contrasena incorrecta".
         raise HTTPException(status_code=401, detail="Usuario o contrasena incorrectos")
 
-    token = create_session_token(body.username, secret=settings.jwt_secret)
+    try:
+        token = create_session_token(body.username, secret=settings.jwt_secret)
+    except jwt.PyJWTError:
+        # `jwt_secret_is_safe` solo mira el largo -- un secreto largo pero
+        # con forma de PEM/JWK sigue haciendo que `jwt.encode` lance
+        # (`InvalidKeyError`, subclase DIRECTA de `PyJWTError`, no de
+        # `InvalidTokenError`). Mismo principio que `require_auth`: nunca
+        # dejar escapar esto como un 500.
+        raise HTTPException(
+            status_code=503, detail="JWT_SECRET invalido -- revisa tu .env",
+        ) from None
     response.set_cookie(
         COOKIE_NAME, token, httponly=True, samesite="strict", secure=False,
         max_age=int(SESSION_DURATION.total_seconds()),
