@@ -1742,3 +1742,90 @@ Confirmado que el bot real del puerto 8000 seguia intacto. Commit `785547b`.
   protegidos con `require_auth`, sin PnL de sombras hasta `MIN_EFFECTIVE_N`
   por lado), segun el plan aprobado, mismas reglas: DB temporal, puerto
   8001, sin reiniciar ni modificar el bot real ni el prompt congelado.
+
+## Subfase C: endpoints de solo lectura bajo /api/ (2026-10-14)
+
+**`app/trading/measurement_status.py`** (nuevo): la logica de
+`scripts/measurement_status.py` (`ClosedLabeledTrade`, `cluster_effective_
+counts`, `MeasurementStatus`, `compute_status`) se mudo aqui, hermana de
+`ai_value.py`/`shadow_live_labeler.py`. Se agrega `compute_status_async(db:
+Database, ...)` -- MISMA logica que `compute_status`, solo cambia
+`conn.execute(...).fetchall()` por `await db.fetch_all(...)` (`aiosqlite.
+Row` soporta el mismo acceso `row["col"]`) -- y `is_measurement_gate_open
+(status) -> bool` (`n_eff_approved >= MIN_EFFECTIVE_N and n_eff_rejected >=
+MIN_EFFECTIVE_N`), la UNICA fuente de verdad sobre si ya se puede revelar un
+resultado. `scripts/measurement_status.py` queda como wrapper fino (solo
+`_connect_ro`/`format_report`/`main`/`argparse`, importando el resto desde
+el modulo nuevo) -- los 21 tests existentes siguen pasando sin cambiar sus
+aserciones (refactor puro), mas 2 tests nuevos que comparan `compute_status`
+(sync) vs `compute_status_async` (async) sobre los MISMOS datos sinteticos
+sembrados en una base `:memory:` y en un archivo temporal reabierto en modo
+solo lectura, y confirman que el `MeasurementStatus` resultante es idéntico
+campo por campo.
+
+**Funciones de repo nuevas**, mismo patron que `trades_repo.get_trades(db,
+limit=100)`: `llm_logs_repo.get_recent(db, limit=50, fase=None)` y
+`shadow_repo.get_recent(db, limit=50)` (aditiva, no toca `get_open`/
+`get_closed`, que `ai_value_verdict` sigue usando sin limite ni orden).
+
+**`app/api/serializers.py`** (nuevo) -- **el unico punto de paso** para
+revelar un resultado de sombra etiquetada: `shadow_trade_to_public_dict
+(trade, *, reveal_outcome)`. Lista BLANCA explicita (nunca `model_dump()`
+ni un atajo "todo menos lo prohibido" -- un campo nuevo en `ShadowTrade` no
+aparece hasta que alguien lo agregue a mano aqui). Con `reveal_outcome=
+False` (el gate cerrado), 5 campos quedan AUSENTES del dict, no `None`:
+`pnl_gross_usdt`, `pnl_net_usdt`, `exit_price`, `close_reason` Y
+`closed_at` (se gatean juntos a proposito -- un cierre sin PnL/motivo pero
+con fecha es un revelado parcial raro). Tambien fuera del whitelist en
+CUALQUIER caso (no son PnL explicito, pero son senales blandas de costo/
+resultado que esta vista no necesita): fees, `funding_paid_usdt`,
+slippage, `best_price`/`effective_stop`. Las rutas que lo usan NUNCA
+declaran `response_model=list[ShadowTrade]` (`ShadowTrade` si declara
+`pnl_net_usdt` como campo real -- el filtrado de `response_model` de
+FastAPI no protegeria nada ahi).
+
+**3 rutas nuevas bajo `/api/`, todas protegidas con `require_auth` a nivel
+de router** (prefijo -> ninguna ruta nueva que alguien agregue despues
+puede quedar sin auth por accidente):
+- `GET /api/measurement/status` -- `compute_status_async` + `is_
+  measurement_gate_open` ya resuelto, sin ninguna logica de velado extra
+  (`MeasurementStatus` nunca tuvo PnL por diseno del script original).
+- `GET /api/llm/decisions/recent?limit=&fase=` -- reusa `app.llm.schemas.
+  parse_decision` (el parser tolerante ya existente, sin reimplementar el
+  reparo de JSON) para extraer `confianza`/`razonamiento` de las filas
+  `status='OK'`; join liviano a `shadow_trades` para `symbol`/`side` de
+  contexto; nunca devuelve `prompt` completo ni `response_raw` crudo. Sin
+  regla de velado: la decision del LLM + su razonamiento no es un
+  "resultado de la operacion" bajo la regla del usuario.
+- `GET /api/shadow-trades/recent?limit=` -- el endpoint critico: calcula el
+  gate con `compute_status_async`/`is_measurement_gate_open` en cada
+  request (misma fuente de verdad que el endpoint de medicion, nunca un
+  segundo calculo paralelo) y pasa cada sombra por el choke point.
+
+**29 tests nuevos**: 6 en `tests/unit/test_serializers.py` (campos AUSENTES
+no `None` con el gate cerrado, presentes con el gate abierto, los siempre-
+visibles sin importar el gate, los de costo/trailing nunca incluidos, una
+sombra abierta serializa limpio, y que un campo nuevo de `ShadowTrade`
+jamas aparece sin agregarlo a mano); 8 en `tests/unit/test_
+readonly_api_routes.py` (las 3 rutas exigen auth, forma y valores de cada
+respuesta, `limit` respetado, razonamiento ausente en filas no-OK, y el
+gate abierto SI revela PnL -- forzado bajando `MIN_EFFECTIVE_N` a 1 via
+`monkeypatch` en vez de esperar 300 conglomerados reales). Suite completa:
+**643 passed, 2 skipped**; `ruff check .` limpio.
+
+**Smoke de nivel 2** (`scripts/run_dev_server.py` contra un respaldo online
+fresco de `data/minerva_estabilidad.db`, puerto 8001): las 3 rutas nuevas
+devuelven 401 sin login, confirmando que quedaron protegidas. **Hallazgo**:
+el login con credenciales de prueba devolvio 401 "Usuario o contrasena
+incorrectos" (no 503) -- a diferencia de la Subfase B, esto confirma que
+`AUTH_USERNAME`/`AUTH_PASSWORD_HASH`/`JWT_SECRET` YA estan configurados en
+el `.env` real (el usuario completo el "Pendiente del usuario" de la
+Subfase B entre medio). No hice login con credenciales reales (nunca las
+pido ni las conozco) -- el camino feliz completo ya esta cubierto por los
+tests con `TestClient`. Confirmado antes y despues que el bot real del
+puerto 8000 seguia en `status: ok`, con los mismos conteos (ninguna llamada
+real al LLM se disparo desde la copia).
+
+- Sin push (pedido explicito). Se detiene aqui a esperar aprobacion antes
+  de la Subfase E (`StaticFiles`) y F (dashboard React), segun el plan
+  aprobado.
