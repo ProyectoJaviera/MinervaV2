@@ -2001,3 +2001,13 @@ el unico restart real que lo pondria en produccion.
   plan pre-Fase 5 completo (Subfases A, B, C, D) a nivel de codigo -- solo
   falta el despliegue/restart real, que sigue siendo una decision aparte del
   usuario.
+
+## Revision de 940eb2d (2026-10-14): correcciones post-Subfase D
+
+- **Bug de sesion en App.tsx (reproducido por el usuario)**: tras "Cerrar sesion" y volver a entrar en la misma pestana (o tras vencer la sesion de 24h), `/api/auth/me` respondia 200 pero la UI quedaba en LoginView. Causa: `forcedLoggedOut` solo se limpiaba cuando cambiaba `me.data?.username`, y React Query conserva el ultimo `data` ("renzo") durante un error, asi que el valor nunca cambiaba. Decision: eliminar `forcedLoggedOut` y hacer que la cache de `["me"]` sea la unica fuente de verdad. Un 401 de cualquier query (o del propio `/me`) llama a `clearSession`, que escribe `null` en `["me"]` y borra el resto de las queries cacheadas; logout hace lo mismo. Escribir la cache no provoca refetch, asi que no hay bucle; ademas `useMe` ya no hace polling (los 401 se detectan por las queries de datos). Login sigue invalidando `["me"]`.
+- Pruebas Vitest nuevas (3, backend simulado con estado): (a) cerrar sesion y reingresar muestra el dashboard; (b) un 401 en una query de datos lleva a LoginView y reingresar muestra el dashboard; (c) un 401 de `/me` no provoca refetchs (1 sola llamada tras 300 ms). Verificado que (a) y (b) FALLAN con el codigo anterior (stash temporal del arreglo) y pasan con el nuevo.
+- `frontend/package.json`: `build` ahora es `tsc --noEmit && vite build`.
+- `docs/MIGRACION_PC.md`: paso 4 aclara que `start_bot.ps1` ignora `DATABASE_PATH` del `.env` (fija el suyo en el entorno del proceso, que tiene prioridad) y que el respaldo debe quedar como `data\minerva_estabilidad.db`; todos los comandos usan `.\.venv\Scripts\python.exe` y los `.ps1` se invocan con `powershell -NoProfile -ExecutionPolicy Bypass -File`.
+- `scripts/hash_password.py`: nueva `build_hash_line` rechaza contrasenas de mas de 72 bytes en UTF-8 (cuenta bytes, no caracteres) con mensaje claro en vez de la excepcion de bcrypt; 6 tests nuevos.
+- `scripts/telegram_alert.py`: el payload de `sendMessage` incluye `"disable_web_page_preview": true`; 1 test nuevo.
+- Verificacion: pytest 650 passed / 4 skipped, ruff limpio, Vitest 12/12, `tsc --noEmit` y `npm run build` limpios. Commits separados, sin push.
