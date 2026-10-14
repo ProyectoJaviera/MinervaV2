@@ -7,9 +7,9 @@ PC 24/7 sin perder la medición en vivo en curso.
 
 ## Arrancar y detener el bot real
 
-```
-.\scripts\start_bot.ps1
-.\scripts\stop_bot.ps1
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_bot.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop_bot.ps1
 ```
 
 `start_bot.ps1` arranca con las variables fijas de hoy (`AUTO_OPEN_WITHOUT_LLM=
@@ -76,7 +76,7 @@ importa (el código primero, los datos después).
    archivos puede dejar una copia inconsistente. Desde el PC viejo:
 
    ```powershell
-   python -c "import sqlite3; src = sqlite3.connect('file:data/minerva_estabilidad.db?mode=ro', uri=True); dst = sqlite3.connect('respaldo_migracion.db'); src.backup(dst); dst.close(); src.close()"
+   .\.venv\Scripts\python.exe -c "import sqlite3; src = sqlite3.connect('file:data/minerva_estabilidad.db?mode=ro', uri=True); dst = sqlite3.connect('respaldo_migracion.db'); src.backup(dst); dst.close(); src.close()"
    ```
 
    Llevá `respaldo_migracion.db` al PC nuevo (USB, red, lo que sea).
@@ -90,12 +90,21 @@ importa (el código primero, los datos después).
    vivo se detendría solo (por diseño, sin romper nada, pero sin medir).
 
 3. **Recrear el entorno**: `uv venv .venv` (o `python -m venv .venv` si no
-   usás `uv`), activar, instalar dependencias (`uv pip install -e .` o
-   equivalente con `pyproject.toml`).
+   usás `uv`) e instalar dependencias dentro de ese venv
+   (`.\.venv\Scripts\python.exe -m pip install -e .` o el equivalente con
+   `uv pip install -e .`). `start_bot.ps1` usa siempre
+   `.\.venv\Scripts\python.exe`, así que el venv debe llamarse `.venv` y
+   estar en la raíz del repo.
 
 4. **Copiar `.env` a mano** (nunca por git, nunca pegado en un chat): el
-   mismo `.env` del PC viejo, con `DATABASE_PATH` apuntando al nombre que le
-   pongas a `respaldo_migracion.db` en el PC nuevo.
+   mismo `.env` del PC viejo. **Ojo con la base**: `start_bot.ps1` ignora el
+   `DATABASE_PATH` del `.env` -- fija el suyo propio
+   (`data\minerva_estabilidad.db`, relativo a la raíz del repo) en el entorno
+   del proceso, y ese valor tiene prioridad sobre el archivo. Por eso el
+   respaldo debe quedar en el PC nuevo exactamente como
+   `data\minerva_estabilidad.db` (renombrá `respaldo_migracion.db` a ese
+   nombre y ponelo en `data\`); cambiar `DATABASE_PATH` en el `.env` no
+   cambia qué base abre el bot arrancado con ese script.
 
 5. **Recrear las dos tareas programadas** en el PC nuevo: la alerta de
    Telegram (`schtasks /Create`, ver `scripts/telegram_alert.py`) y el
@@ -104,7 +113,7 @@ importa (el código primero, los datos después).
 6. **Arrancar y verificar**:
 
    ```powershell
-   .\scripts\start_bot.ps1
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_bot.ps1
    ```
 
    Confirmá en la salida que `frozen_hash_ok` es `true` -- si es `false`, algo
@@ -117,8 +126,8 @@ importa (el código primero, los datos después).
    `settings.database_path`):
 
    ```powershell
-   python -c "import sqlite3; src = sqlite3.connect('file:data/minerva_estabilidad.db?mode=ro', uri=True); dst = sqlite3.connect('verif.db'); src.backup(dst); dst.close(); src.close()"
-   python scripts/measurement_status.py --db verif.db
+   .\.venv\Scripts\python.exe -c "import sqlite3; src = sqlite3.connect('file:data/minerva_estabilidad.db?mode=ro', uri=True); dst = sqlite3.connect('verif.db'); src.backup(dst); dst.close(); src.close()"
+   .\.venv\Scripts\python.exe scripts/measurement_status.py --db verif.db
    ```
 
    Los conteos deberían seguir la misma tendencia que tenías en el PC viejo
