@@ -1,5 +1,8 @@
-"""Punto de entrada FastAPI. Sin autenticacion todavia (se agrega en Fase 5
-junto al resto del dashboard) -- ver docs/FASE0.md y el plan de Fase 1.
+"""Punto de entrada FastAPI. `GET /health`/`/positions`/`/trades` siguen sin
+auth (preexistentes, nada sensible); las rutas nuevas bajo `/api/` (pre-Fase
+5, item 2 del plan aprobado 2026-10-14) exigen login -- ver
+`app/api/security.py`. El dashboard completo sigue siendo Fase 5 -- ver
+docs/FASE0.md y el plan de Fase 1.
 
 Indicador permanente de modo paper trading: ver `GET /health` y el header
 `X-Minerva-Mode` en todas las respuestas.
@@ -12,7 +15,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routes import health, positions, trades
+from app.api.routes import auth, health, positions, trades
 from app.config import settings
 from app.core.heartbeat import Heartbeat
 from app.core.logging import get_logger, setup_logging, shutdown_logging
@@ -80,6 +83,7 @@ async def lifespan(app: FastAPI):
     app.state.scheduler = scheduler
     app.state.heartbeat = heartbeat
     app.state.live_labeler = live_labeler
+    app.state.settings = settings
 
     tasks = [
         asyncio.create_task(ws_client.run_forever()),
@@ -124,3 +128,4 @@ async def add_paper_trading_header(request, call_next):
 app.include_router(health.router)
 app.include_router(positions.router)
 app.include_router(trades.router)
+app.include_router(auth.router)

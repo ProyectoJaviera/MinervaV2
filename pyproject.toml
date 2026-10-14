@@ -19,6 +19,13 @@ dependencies = [
     # SDK oficial de Anthropic (Fase 3.6: decision del LLM). 1.x usa httpx2, no
     # httpx -- paquete propio, no choca con el httpx de arriba.
     "anthropic>=1.10,<2",
+    # Auth local de un solo usuario (pre-Fase 5, item 2 del plan aprobado
+    # 2026-10-14): hash de contraseña (bcrypt directo, no passlib -- hace
+    # anios sin releases, incompatibilidades conocidas con bcrypt reciente) y
+    # JWT HS256 en una cookie httpOnly (PyJWT). Ambas MIT/BSD, sin red, sin
+    # telemetria, con wheels precompilados para Windows.
+    "bcrypt>=4.0",
+    "pyjwt>=2.8",
 ]
 
 [project.optional-dependencies]
@@ -41,6 +48,7 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.per-file-ignores]
 # Depends(...) en defaults es el patron idiomatico de FastAPI, no un bug.
 "app/api/routes/*.py" = ["B008"]
+"app/api/security.py" = ["B008"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
