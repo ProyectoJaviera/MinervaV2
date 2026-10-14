@@ -1532,3 +1532,59 @@ etiquetado en vivo esta funcionando en produccion.
 
 - Sin push (pedido explicito, pendiente confirmar). Commit pequeno para
   TAREA D.
+
+## Pre-Fase 5: plan aprobado (2026-10-14) y Subfase A (alerta Telegram)
+
+Plan de 3 items (alerta Telegram, auth + endpoints de solo lectura, dashboard
+React) propuesto en Plan Mode y aprobado por el usuario -- plan completo en
+`C:\Users\Renzo\.claude\plans\radiant-twirling-waterfall.md`. Resumen de lo
+acordado: el bot real (puerto 8000, `data/minerva_estabilidad.db`,
+`LLM_LIVE_LABELING_ENABLED=true`) no se toca salvo UN restart al final (tras
+auth + endpoints nuevos bajo `/api/` + el mount de `StaticFiles`), cronometrado
+justo despues de un cierre de vela de 4h. El dashboard nuevo NO muestra PnL ni
+resultados de sombras etiquetadas hasta `MIN_EFFECTIVE_N=300` por lado (choke
+point unico: `shadow_trade_to_public_dict`, a construir en la Subfase D).
+Subfases: A (alerta Telegram, sin restart) -> B (auth backend) -> C (medicion
+portada a async) -> D (decisiones/sombras recientes + el choke point) -> E
+(mount de `StaticFiles`) -> F (dashboard React) -> G (smoke final + el unico
+restart real). Diferido para despues del veredicto: posiciones/equity,
+controles/kill switch, noticias, memoria, bot de comandos de Telegram.
+
+### Subfase A: `scripts/telegram_alert.py`
+
+Script nuevo, reutiliza `scripts/check_health.py::main` sin duplicar su logica
+de HTTP/parseo (import calificado `from scripts.check_health import ...`, no
+uno suelto -- funciona igual corrido directo o importado desde un test).
+Avisa por Telegram en cualquier CAMBIO de estado (`ok->stale`,
+`ok->sin_respuesta`, `stale<->sin_respuesta` -- cambia la causa aunque siga
+caido --, y la recuperacion a `ok`), y mientras sigue igual y caido, un
+recordatorio cada `--reminder-minutes` (default 60). Arranque en frio (sin
+archivo de estado) con el bot ya caido avisa de inmediato; con el bot ya bien
+no avisa nada (se trata como si el ultimo estado visto fuera OK). El estado
+(`data/telegram_alert_state.json`, `data/` ya esta completo en `.gitignore`)
+solo se actualiza tras un envio exitoso a Telegram -- si falla, el proximo
+poll (10 min despues, via el Programador de tareas de Windows) reintenta el
+aviso pendiente en vez de perderlo. Token/chat_id vienen de
+`settings.telegram_bot_token`/`telegram_chat_id` (ya existian vacios); nunca
+se imprimen ni se loguean, ni siquiera en un error.
+
+Verificado en vivo (no inventado) antes de escribir el script: la API de
+Telegram (`sendMessage` solo exige `chat_id`+`text`, sin tarjeta para uso
+normal, ~1 msj/seg de limite practico) y la sintaxis real de
+`schtasks /create` en esta misma maquina.
+
+12 tests nuevos (`tests/unit/test_telegram_alert_script.py`, `check_health_fn`/
+`send_fn` inyectados, nunca una llamada real): todas las transiciones de
+estado, el reintento tras un envio fallido, y que un fallo de red nunca
+loguea el token/chat_id. Suite completa: 584 passed, 2 skipped; `ruff check .`
+limpio. Probado manualmente: sin `TELEGRAM_BOT_TOKEN`/`CHAT_ID` en `.env` el
+script se detiene con un mensaje claro (exit code 1) antes de intentar nada;
+`GET /health` contra el bot real (puerto 8000) confirmado `status: ok` sin
+cambios antes y despues de esta prueba.
+
+**Pendiente del usuario** (fuera de Claude, por diseno): crear el bot con
+`@BotFather`, obtener el `chat_id` con `getUpdates`, completar `.env`, y
+programar la tarea de Windows (comando exacto en el docstring del script).
+
+- Sin push (pedido explicito del flujo de trabajo). Subfase B sigue a la
+  espera de aprobacion.
