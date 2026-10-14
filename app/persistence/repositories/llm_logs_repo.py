@@ -118,6 +118,21 @@ async def get_by_signal_group_key(db: Database, signal_group_key: str):
     )
 
 
+async def get_recent(db: Database, limit: int = 50, fase: str | None = None):
+    """Las `limit` filas mas recientes (`ORDER BY created_at DESC`), opcional-
+    mente filtradas por `fase` -- Subfase C del plan pre-Fase 5 aprobado
+    2026-10-14 (`GET /api/llm/decisions/recent`). Mismo patron que
+    `trades_repo.get_trades(db, limit=100)`."""
+    query = "SELECT * FROM llm_logs"
+    params: list = []
+    if fase is not None:
+        query += " WHERE fase = ?"
+        params.append(fase)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
+    return await db.fetch_all(query, tuple(params))
+
+
 async def get_piloto_signal_group_keys(db: Database) -> set[str]:
     """Grupos del piloto (prompt congelado, `fase = 'PILOTO'`), excluidos de la
     medicion (subfase 3.6, seccion k). `app.trading.ai_value.ai_value_verdict`

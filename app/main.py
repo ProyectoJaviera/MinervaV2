@@ -15,7 +15,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routes import auth, health, positions, trades
+from app.api.routes import (
+    auth,
+    health,
+    llm_decisions,
+    measurement,
+    positions,
+    shadow_trades,
+    trades,
+)
 from app.api.security import warn_if_jwt_secret_is_unsafe
 from app.config import settings
 from app.core.heartbeat import Heartbeat
@@ -131,3 +139,6 @@ app.include_router(health.router)
 app.include_router(positions.router)
 app.include_router(trades.router)
 app.include_router(auth.router)
+app.include_router(measurement.router)
+app.include_router(llm_decisions.router)
+app.include_router(shadow_trades.router)

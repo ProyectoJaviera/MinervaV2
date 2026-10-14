@@ -101,6 +101,17 @@ async def get_closed(db: Database) -> list[ShadowTrade]:
     return [_row_to_shadow(r) for r in rows]
 
 
+async def get_recent(db: Database, limit: int = 50) -> list[ShadowTrade]:
+    """Las `limit` sombras mas recientes (`ORDER BY opened_at DESC`, abiertas
+    o cerradas) -- Subfase C del plan pre-Fase 5 aprobado 2026-10-14 (`GET
+    /api/shadow-trades/recent`). Aditiva: no reemplaza `get_open`/`get_closed`
+    (que `ai_value_verdict` sigue usando sin limite ni orden)."""
+    rows = await db.fetch_all(
+        "SELECT * FROM shadow_trades ORDER BY opened_at DESC LIMIT ?", (limit,)
+    )
+    return [_row_to_shadow(r) for r in rows]
+
+
 async def close(
     db: Database, shadow_id: int, exit_price: float, fee_exit_usdt: float,
     slippage_exit_usdt: float, pnl_gross_usdt: float, pnl_net_usdt: float,
