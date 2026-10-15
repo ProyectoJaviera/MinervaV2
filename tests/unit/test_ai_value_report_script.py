@@ -52,6 +52,36 @@ async def test_cli_prints_the_verdict_for_a_synthetic_database_and_does_not_writ
     assert hashlib.sha256(db_path.read_bytes()).hexdigest() == before
 
 
+async def test_cli_out_saves_the_official_record_once_and_never_overwrites(db_path, tmp_path):
+    insert_groups(db_path, scenario(300, 300, approved_ret=0.30))
+    out = tmp_path / "registro.txt"
+    flags = ("--allow-synthetic-for-tests", "--frozen-hash", SYNTHETIC_HASH)
+
+    first = run_cli("--db", str(db_path), *flags, "--out", str(out))
+    saved = out.read_text(encoding="utf-8")
+    second = run_cli("--db", str(db_path), *flags, "--out", str(out))
+
+    assert first.returncode == 0, first.stderr
+    assert "Veredicto: APORTA_VALOR" in saved and "δ = 3%" in saved
+    assert second.returncode == 5
+    assert "no sobrescribe" in second.stdout
+    assert "Veredicto:" not in second.stdout  # rechazado antes de abrir la base
+    assert out.read_text(encoding="utf-8") == saved
+
+
+async def test_cli_out_is_not_created_when_there_is_no_verdict(db_path, tmp_path):
+    insert_groups(db_path, scenario(299, 300, approved_ret=0.30))
+    out = tmp_path / "registro.txt"
+
+    proc = run_cli(
+        "--db", str(db_path), "--allow-synthetic-for-tests", "--frozen-hash", SYNTHETIC_HASH,
+        "--out", str(out),
+    )
+
+    assert proc.returncode == 3
+    assert not out.exists()
+
+
 async def test_cli_refuses_with_the_gate_closed_and_prints_only_counters(db_path):
     insert_groups(db_path, scenario(299, 300, approved_ret=0.30))
 

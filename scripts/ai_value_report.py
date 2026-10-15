@@ -12,7 +12,8 @@ las sombras no confiables y el piloto, el N efectivo limpio sigue siendo menor q
 el minimo. La logica vive en `app/trading/ai_value_report.py`.
 
 Codigos de salida: 0 = veredicto impreso; 3 = rechazado por gate cerrado o punto de
-analisis no alcanzado; 4 = bandera de pruebas rechazada (la base no es sintetica).
+analisis no alcanzado; 4 = bandera de pruebas rechazada (la base no es sintetica);
+5 = `--out` apunta a un archivo que ya existe (no se sobrescribe).
 
 Procedimiento completo (placebo antes, una sola corrida, registro de la salida):
 docs/VEREDICTO_3_6.md.
@@ -46,12 +47,16 @@ from scripts.measurement_status import _connect_ro, format_report  # noqa: E402
 EXIT_OK = 0
 EXIT_REFUSED = 3
 EXIT_SYNTHETIC_REFUSED = 4
+EXIT_OUT_EXISTS = 5
 
 
 def main(
     db_path: str, *, allow_synthetic_for_tests: bool = False,
-    frozen_hash: str = FROZEN_PROMPT_SHA256,
+    frozen_hash: str = FROZEN_PROMPT_SHA256, out_path: str | None = None,
 ) -> int:
+    if out_path is not None and Path(out_path).exists():
+        print(f"RECHAZADO: {out_path} ya existe; este script no sobrescribe un registro.")
+        return EXIT_OUT_EXISTS
     conn = _connect_ro(db_path)
     try:
         try:
@@ -64,11 +69,20 @@ def main(
     finally:
         conn.close()
 
-    print(f"Copia analizada: {Path(db_path).resolve()}")
-    print(render_report(result))
+    header = f"Copia analizada: {Path(db_path).resolve()}"
+    text = render_report(result)
+    print(header)
+    print(text)
     if not is_measurement_gate_open(result.status):
         print(format_report(result.status))
-    return EXIT_OK if result.state == STATE_VERDICT else EXIT_REFUSED
+    if result.state != STATE_VERDICT:
+        return EXIT_REFUSED
+    if out_path is not None:
+        # Modo "x": falla si el archivo aparecio entre la comprobacion y ahora.
+        with open(out_path, "x", encoding="utf-8") as fh:
+            fh.write(header + "\n" + text)
+        print(f"Registro guardado en {out_path}")
+    return EXIT_OK
 
 
 if __name__ == "__main__":
@@ -85,6 +99,11 @@ if __name__ == "__main__":
         "--frozen-hash", default=None,
         help="SOLO pruebas, junto con --allow-synthetic-for-tests: hash de la base sintetica",
     )
+    parser.add_argument(
+        "--out", default=None,
+        help="guarda el informe (UTF-8) como registro oficial; solo si hay veredicto, "
+        "y nunca sobrescribe un archivo existente",
+    )
     args = parser.parse_args()
     if args.frozen_hash is not None and not args.allow_synthetic_for_tests:
         parser.error("--frozen-hash solo se acepta junto con --allow-synthetic-for-tests")
@@ -94,5 +113,5 @@ if __name__ == "__main__":
     )
     sys.exit(main(
         args.db, allow_synthetic_for_tests=args.allow_synthetic_for_tests,
-        frozen_hash=args.frozen_hash or FROZEN_PROMPT_SHA256,
+        frozen_hash=args.frozen_hash or FROZEN_PROMPT_SHA256, out_path=args.out,
     ))
