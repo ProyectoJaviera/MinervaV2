@@ -9,7 +9,7 @@ from app.persistence.database import Database
 from app.persistence.models import ShadowTrade, Side, TradeStatus
 
 
-def _row_to_shadow(row) -> ShadowTrade:
+def row_to_shadow(row) -> ShadowTrade:
     return ShadowTrade(
         id=row["id"],
         symbol=row["symbol"],
@@ -88,17 +88,17 @@ async def insert_if_new(db: Database, trade: ShadowTrade) -> int | None:
 
 async def get(db: Database, shadow_id: int) -> ShadowTrade | None:
     row = await db.fetch_one("SELECT * FROM shadow_trades WHERE id = ?", (shadow_id,))
-    return _row_to_shadow(row) if row else None
+    return row_to_shadow(row) if row else None
 
 
 async def get_open(db: Database) -> list[ShadowTrade]:
     rows = await db.fetch_all("SELECT * FROM shadow_trades WHERE status = 'OPEN'")
-    return [_row_to_shadow(r) for r in rows]
+    return [row_to_shadow(r) for r in rows]
 
 
 async def get_closed(db: Database) -> list[ShadowTrade]:
     rows = await db.fetch_all("SELECT * FROM shadow_trades WHERE status = 'CLOSED'")
-    return [_row_to_shadow(r) for r in rows]
+    return [row_to_shadow(r) for r in rows]
 
 
 async def get_recent(db: Database, limit: int = 50) -> list[ShadowTrade]:
@@ -109,7 +109,7 @@ async def get_recent(db: Database, limit: int = 50) -> list[ShadowTrade]:
     rows = await db.fetch_all(
         "SELECT * FROM shadow_trades ORDER BY opened_at DESC LIMIT ?", (limit,)
     )
-    return [_row_to_shadow(r) for r in rows]
+    return [row_to_shadow(r) for r in rows]
 
 
 async def close(
