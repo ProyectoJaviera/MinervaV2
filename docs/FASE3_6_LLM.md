@@ -1109,6 +1109,15 @@ sesgada. Por eso el informe reporta:
    exclusión, sin mirar el intervalo de confianza (sección i). El informe muestra de
    todos modos los contadores y la distribución por causa/hora/volatilidad, para que se
    pueda investigar por qué.
+4. **Grupos omitidos sin fila en `llm_logs` (añadido el 2026-10-15):** sombras que nunca
+   tuvieron llamada al LLM, ya sea por ser **anteriores a la activación** de la medición
+   o **posteriores** (demora > 1800 s, sombra ya cerrada antes de etiquetar, hash no
+   coincidente en ese ciclo). Se declaran aparte, con su perfil por lado y estrategia, y
+   quedan **fuera del veredicto** (`measurement_keys`).
+
+**Implementado (2026-10-15):** `app/trading/ai_value_report.py` y
+`scripts/ai_value_report.py`, ver `docs/VEREDICTO_3_6.md` (procedimiento, guardia del
+gate, sensibilidad de JSON reparado y desglose solo con APORTA_VALOR).
 
 ---
 
