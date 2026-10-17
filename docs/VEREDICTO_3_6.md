@@ -24,15 +24,16 @@ al instante exacto de los 300), por eso:
 ## Pasos
 
 1. **Placebo primero** (sección f; lo exige el diseño antes de la primera decisión
-   real). Sobre una copia consistente (ver paso 2) y registrando el resultado en
-   `docs/FASE3_6_LLM.md`:
+   real). Sobre una copia consistente (paso 2), y registrando el resultado en
+   `docs/FASE3_6_LLM.md`. Ver la sección "Placebo" más abajo:
 
    ```powershell
-   .\.venv\Scripts\python.exe scripts\placebo_check.py --db <copia>
+   .\.venv\Scripts\python.exe scripts\placebo_check.py --db <copia> --out docs\PLACEBO_REGISTRO.txt
    ```
 
-   Debe decir `Calibrado (frecuencia < 5 %): SI`. Si dice NO, el criterio no se usa
-   para decidir hasta corregirlo. Puede tardar minutos.
+   Debe decir `Calibrado (frecuencia < 5%): SI` y no mostrar la advertencia de
+   "poco informativo". Si dice NO, el criterio no se usa para decidir hasta
+   corregirlo. Tarda unos 12 minutos (déjalo corriendo en segundo plano).
 
 2. **Copia consistente** con la API de backup de sqlite (nunca copiar el archivo: en
    modo WAL puede quedar inconsistente):
@@ -51,6 +52,54 @@ al instante exacto de los 300), por eso:
    (reconciliación fallida) y el piloto el N efectivo **limpio** sigue por debajo de
    300 en algún lado, el informe lo dice y no muestra nada (código 3); espera y
    repite. El archivo `--out` solo se crea cuando hay veredicto.
+
+## Placebo (`scripts/placebo_check.py`)
+
+Relabela al azar cada conglomerado con la tasa de aprobación observada y aplica la
+misma `ai_value_verdict`, 1.000 veces; si el azar da APORTA_VALOR con frecuencia
+≥ 5 %, el criterio no está calibrado (sección f). Usa **exactamente los mismos filtros
+que el veredicto** (`load_verdict_inputs`: hash congelado, sin piloto, sin sombras no
+confiables) y lee la copia en modo solo lectura. No revela nada de la IA (las
+etiquetas reales se sustituyen por azar), así que puede correrse **antes** de que el
+gate se abra, y debe registrarse antes de la primera decisión real.
+
+**Cuándo es informativo.** Una repetición solo puede dar APORTA_VALOR si el azar deja
+≥ 300 conglomerados en cada lado; con pocos conglomerados casi todas dan INCONCLUSO y
+"Calibrado: SI" no prueba nada. El script imprime la probabilidad exacta (binomial) de
+que una repetición llegue a ese punto, la tasa estimada contando solo las que llegan, y
+una ADVERTENCIA si es < 50 %. Con 300 por lado y ~50 % de aprobación (≈ 600
+conglomerados) casi nadie llega (solo X = 300 exacto): conviene correr el placebo con
+bastante más datos que el mínimo, o repetirlo cuando los haya. Con 640 conglomerados y
+50 % llegan ~90 %.
+
+**Salida y registro.** Al final imprime un bloque listo para copiar a la sección (f) de
+`docs/FASE3_6_LLM.md`. `--out` lo guarda completo en UTF-8 y no sobrescribe un archivo
+existente (código 5); no se crea si no hay nada que calibrar.
+
+**Tiempo medido** (2026-10-17, datos sintéticos, 640 conglomerados, 50 % de
+aprobación, 1.000 repeticiones × 2.000 remuestreos, un solo proceso en un PC de
+12 núcleos con otras aplicaciones abiertas): **694 s = 11,6 min** (0,69 s por
+repetición); resultado 25/1000 por azar (2,5 %, IC de Wilson [1,7 %; 3,7 %]) →
+calibrado. El costo crece con el número de conglomerados (cada repetición hace un
+bootstrap sobre todos): esperable ~1 s por repetición (~17 min) con ~1.000.
+
+| `--n-repeats` | tiempo (640 conglomerados) | IC de Wilson si la frecuencia fuera 2,5 % |
+|---|---|---|
+| 100 | ~1,1 min | [0,6 %; 7,0 %] |
+| 300 | ~3,4 min | [1,4 %; 5,2 %] |
+| 1.000 | ~11,5 min | [1,7 %; 3,7 %] |
+
+**Recomendación:** para el **registro oficial** correr las 1.000 repeticiones del
+diseño una sola vez, en segundo plano (≈ 12-20 min); con 300 el límite superior del IC
+ya roza el 5 % y no permite afirmar que está por debajo. Para pruebas rápidas o
+ensayos usar `--n-repeats 100`-`300`. **Propuesta si se quiere acelerar sin cambiar el
+cálculo** (no implementada): pre-sortear en serie las etiquetas de todas las
+repeticiones con la misma semilla (el consumo del generador es solo ese) y evaluar los
+veredictos en un pool de procesos; como cada veredicto usa su propio generador del
+bootstrap con semilla fija, el resultado sería idéntico al secuencial y el tiempo
+bajaría casi lineal con los núcleos (12 núcleos: ~1-2 min). Exige replicar el bucle de
+`placebo_calibration` (que no se toca), con una prueba de equivalencia exacta contra
+ella.
 
 ## Qué contiene el informe
 
@@ -92,10 +141,11 @@ al instante exacto de los 300), por eso:
 
 ## Códigos de salida
 
-| Código | Significado |
-|---|---|
-| 0 | veredicto impreso (y guardado si se pasó `--out`) |
-| 2 | error de uso (argparse) |
-| 3 | rechazado: gate cerrado o punto de análisis no alcanzado |
-| 4 | bandera de pruebas rechazada: la base no es sintética |
-| 5 | `--out` apunta a un archivo que ya existe |
+| Código | `ai_value_report.py` | `placebo_check.py` |
+|---|---|---|
+| 0 | veredicto impreso (y guardado si se pasó `--out`) | calibrado |
+| 2 | error de uso (argparse) | error de uso (argparse) |
+| 3 | rechazado: gate cerrado o punto de análisis no alcanzado | nada que calibrar todavía |
+| 4 | bandera de pruebas rechazada: la base no es sintética | ídem |
+| 5 | `--out` apunta a un archivo que ya existe | ídem |
+| 6 | — | NO calibrado: el criterio no se usa para decidir |

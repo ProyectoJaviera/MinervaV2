@@ -434,6 +434,15 @@ El placebo no sustituye a la regla de decisión: la calibra. Con el criterio `lo
 IC bilateral del 95 %, la probabilidad de APORTA_VALOR sin efecto real ronda el 2,5 %,
 por debajo del umbral del placebo.
 
+**Implementado (2026-10-17).** `scripts/placebo_check.py` (lógica en
+`app/trading/ai_value_placebo.py`) usa los mismos filtros que el veredicto (hash
+congelado, sin piloto, sin sombras no confiables), lee la copia en solo lectura, imprime
+al final un bloque para pegar aquí y acepta `--out`. Con pocos conglomerados casi
+ninguna repetición llega a 300 por lado y "Calibrado: SI" es vacío: el script imprime la
+probabilidad de llegar al punto de análisis y avisa si es baja. Tiempos y
+recomendaciones en `docs/VEREDICTO_3_6.md`. **Registro del placebo de la medicion real:
+pendiente** (se pega aquí el bloque que imprime el script, antes de la primera decisión).
+
 ---
 
 ## (g) La cuenta real solo abre con APROBADA y a tiempo; cómo se prueba sin red ni gasto
