@@ -732,11 +732,26 @@ def render_report(result: ReportResult) -> str:
     lines += _render_sensitivity(result)
     if result.verdict is not None and result.verdict.verdict == "APORTA_VALOR":
         lines += _render_breakdown(result)
-    lines += [
-        "Recordatorios: (1) el placebo (scripts/placebo_check.py, seccion f) debe haberse "
-        "corrido y registrado ANTES de esta decision; (2) este es el punto de analisis "
-        "unico: guarda esta salida completa como registro oficial, volver a correr con mas "
-        "datos no es un veredicto nuevo; (3) la sombra entra al precio de cierre de la vela, "
-        "sin demora ni slippage: no comparable con la cuenta real.",
-    ]
+    lines += PROCEDURE_REMINDER
     return "\n".join(lines) + "\n"
+
+
+PROCEDURE_REMINDER = [
+    "## Orden del procedimiento (decision del 2026-10-17, tomada antes de ver resultados)",
+    "",
+    "Esta salida solo vale si se obtuvo asi (docs/VEREDICTO_3_6.md):",
+    "1. Copia de la base al abrirse el gate.",
+    "2. Placebo oficial sobre ESA MISMA copia (scripts/placebo_check.py, 1.000 repeticiones).",
+    "3. Placebo NO INFORMATIVO (< 50 % de las repeticiones llega al punto de analisis): NO "
+    "se corre el veredicto; se esperan 7 dias mas de datos y se repite desde (1).",
+    "4. Placebo CALIBRADO: este informe, una sola vez, con --out y sobre la misma copia. "
+    "Guarda esta salida completa como registro oficial; volver a correr con mas datos no es "
+    "un veredicto nuevo.",
+    "5. Placebo NO calibrado: el criterio no se usa para decidir y se revisa el diseno. "
+    "Descarta esta salida.",
+    "La espera depende solo de conteos, nunca de resultados.",
+    "",
+    "Si el placebo de esta copia no salio CALIBRADO, o este informe no se corrio sobre la "
+    "misma copia, esta salida NO es el veredicto oficial. Ademas: la sombra entra al precio "
+    "de cierre de la vela, sin demora ni slippage (no comparable con la cuenta real).",
+]

@@ -197,6 +197,26 @@ async def test_full_report_reaches_a_verdict_and_never_writes_to_the_database(db
     assert hashlib.sha256(db_path.read_bytes()).hexdigest() == before
 
 
+async def test_verdict_text_reminds_the_placebo_first_procedure(db_path, small_n):
+    insert_groups(db_path, scenario(small_n, small_n, approved_ret=0.30))
+
+    text = render_report(run_report(db_path))
+
+    assert "Orden del procedimiento (decision del 2026-10-17" in text
+    assert "NO INFORMATIVO" in text and "7 dias mas de datos" in text
+    assert "ESA MISMA copia" in text and "una sola vez, con --out" in text
+    assert "NO calibrado" in text
+    assert "nunca de resultados" in text
+
+
+async def test_gate_closed_text_does_not_carry_the_procedure_reminder(db_path):
+    insert_groups(db_path, scenario(5, 5))
+
+    text = render_report(run_report(db_path))
+
+    assert "Orden del procedimiento" not in text
+
+
 async def test_real_constants_300_per_side_reach_a_verdict_in_reasonable_time(db_path):
     insert_groups(db_path, scenario(300, 300, approved_ret=0.30))
 
