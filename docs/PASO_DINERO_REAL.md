@@ -71,18 +71,19 @@ muestra la diferencia de esperanza de las elegibles con su N, solo como contexto
 
 ## Dependencia: subfase 3.9 (brazo ejecutado)
 
-El brazo ejecutado (la cuenta real simulada operando solo las `APROBADA` que pasen el motor de
-riesgo) **todavía no existe**: `real_open_allowed` (`app/llm/decision_service.py`) no está conectada,
-`AUTO_OPEN_WITHOUT_LLM=false` y la tabla `trades` está vacía. Por eso el reporte ya está construido y
-probado, pero hoy casi todos los criterios saldrían `SIN DATOS`. Antes de poder evaluar de verdad
-hace falta una **subfase 3.9, aún sin planificar**, que:
+El brazo ejecutado (la cuenta paper operando solo las `APROBADA` a tiempo, a través del motor de
+riesgo) lo implementa la **subfase 3.9** (`docs/FASE3_9_BRAZO_EJECUTADO.md`). Mientras no esté
+desplegado y no haya abierto y cerrado operaciones, la tabla `trades` está vacía y casi todos los
+criterios salen `SIN DATOS`. La 3.9:
 
-- conecte `real_open_allowed` y marque las operaciones con `decision_source='LLM_APROBADA'`;
-- persista el `signal_group_key` en `trades` (para comparar el precio de entrada ejecutado con el de
-  la sombra);
-- fije `system_state.real_arm_started_at` y `real_arm_drawdown_baseline` al activar el brazo.
+- aplica `real_open_allowed` y marca las operaciones con `decision_source='LLM_APROBADA'`;
+- guarda cada decisión (abierta u omitida, con su motivo) en `paper_execution_log`, vinculada por
+  `signal_group_key` a la sombra: de ahí salen las **omitidas por motivo** y la **entrada ejecutada vs
+  sombra** (retraso y diferencia de precio en pb) que ahora muestra la sección de riesgos operativos;
+- fija `system_state.real_arm_started_at` y `real_arm_drawdown_baseline` al activar el brazo.
 
-Se planifica aparte, con tu aprobación, y por lógica solo después de un veredicto `APORTA_VALOR`.
+Los resultados de esa cuenta (PnL, balance, equity, PF) están **ocultos por API y Telegram hasta el
+registro oficial del veredicto**, igual que los de las sombras.
 
 ## Riesgos operativos de pasar a dinero real
 

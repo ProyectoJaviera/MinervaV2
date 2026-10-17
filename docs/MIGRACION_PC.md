@@ -32,6 +32,12 @@ pedida por Telegram (`/pause`, `/kill`) **persiste en la base**: si tras mudarte
 reiniciar el bot ves el estado `stale` sin causa, revisa `GET /health` → `control.paused`
 y reanuda con `/resume`.
 
+Igual con `PAPER_EXECUTION_ENABLED=true` (el brazo ejecutado de la cuenta paper, subfase 3.9;
+ver `docs/FASE3_9_BRAZO_EJECUTADO.md`): `start_bot.ps1` lo activa **solo con el puerto 8000** y
+`GET /health` lo informa en `paper_execution`. En un PC nuevo, el primer arranque crea la tabla
+`paper_execution_log` y fija una sola vez `real_arm_started_at`; si migras la base, esas marcas
+viajan con ella (no se reinician solas).
+
 **Límite conocido**: Windows no da una señal de apagado cooperativo real para
 un proceso sin consola -- `stop_bot.ps1` termina el proceso directo
 (`TerminateProcess`), no espera a que `ShadowLiveLabeler.shutdown()` corra de

@@ -11,9 +11,9 @@ Código en `app/telegram/` (`client.py`, `bot.py`, `commands.py`, `confirmation.
 
 | Comando | Qué responde |
 |---|---|
-| `/status` | capital, balance y equity de la **cuenta real simulada**, posiciones, kill switch, **pausa**, circuit breaker, stop por drawdown, gasto de LLM de hoy vs tope, último ciclo de señales, `frozen_hash_ok`/etiquetado, y una línea de avance de la medición |
-| `/positions` | posiciones abiertas de la cuenta real simulada con PnL flotante (usa los marks del monitor, sin red) |
-| `/balance` | capital inicial, balance realizado y equity de la cuenta real simulada |
+| `/status` | capital, balance y equity de la **cuenta real simulada**, posiciones, kill switch, **pausa**, circuit breaker, stop por drawdown, gasto de LLM de hoy vs tope, último ciclo de señales, `frozen_hash_ok`/etiquetado, el brazo ejecutado (estado y conteos del día) y una línea de avance de la medición. *Balance y equity solo con el registro oficial del veredicto (subfase 3.9).* |
+| `/positions` | posiciones abiertas de la cuenta real simulada con PnL flotante (usa los marks del monitor, sin red). *Sin el registro oficial: estructura y niveles, sin PnL flotante.* |
+| `/balance` | capital inicial, balance realizado y equity de la cuenta real simulada. *Sin el registro oficial: solo capital inicial y posiciones abiertas.* |
 | `/metrics` | **solo avance** de la medición (x/300 por lado, tasa de aprobación y banda, no-OK, costo, ritmo/ETA **por calendario y EN MARCHA**, con el porcentaje de tiempo en marcha) + métricas de la cuenta real; **con el gate cerrado y también abierto** (decisión del 2026-10-17). Gate abierto añade el puntero a `docs/VEREDICTO_3_6.md` |
 | `/pause` | pausa el scheduler (persistente) |
 | `/kill` | kill switch **y** pausa del scheduler |

@@ -468,6 +468,13 @@ imprime el script, antes de la primera decisión).
 
 ## (g) La cuenta real solo abre con APROBADA y a tiempo; cómo se prueba sin red ni gasto
 
+> **Actualización de la subfase 3.9 (2026-10-17):** esta regla se implementó como un brazo
+> ejecutado de la cuenta **paper** (`app/trading/paper_execution.py`, `docs/FASE3_9_BRAZO_EJECUTADO.md`).
+> La condición 1 (`AUTO_OPEN_WITHOUT_LLM = true`) se reemplazó por un interruptor propio,
+> `PAPER_EXECUTION_ENABLED` (solo el puerto 8000): `AUTO_OPEN_WITHOUT_LLM` sigue en `false` para
+> siempre y, si ambos están en `true`, el brazo se niega a activarse. Las condiciones 2 y 3 se aplican
+> tal cual.
+
 **Regla de apertura real:** una señal abre posición en la cuenta real solo si:
 
 1. `AUTO_OPEN_WITHOUT_LLM = true`,
