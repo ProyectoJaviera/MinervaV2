@@ -36,6 +36,7 @@ from app.market.bitunix_rest import BitunixRestClient
 from app.market.bitunix_ws import BitunixPublicWSClient
 from app.market.coingecko_client import CoinGeckoClient
 from app.market.universe import UniverseRefresher
+from app.news.runtime import maybe_start_news_collector
 from app.persistence.database import Database
 from app.telegram.commands import BotContext
 from app.telegram.runtime import maybe_start_telegram_bot
@@ -131,9 +132,15 @@ async def lifespan(app: FastAPI):
         ),
         tasks,
     )
+    # Fase 4: recoleccion de noticias, apagada por defecto, en su PROPIA tarea y sin costo de
+    # Anthropic (docs/FASE4_PLAN.md). Nunca lanza ni impide arrancar el resto.
+    news_collector = maybe_start_news_collector(settings, db, tasks)
+    app.state.news_collector = news_collector
     try:
         yield
     finally:
+        if news_collector is not None:
+            news_collector.stop()
         if telegram_bot is not None:
             telegram_bot.stop()
         scheduler.stop()
@@ -150,6 +157,8 @@ async def lifespan(app: FastAPI):
                 pass
         await live_labeler.shutdown()
         await paper_arm.shutdown()
+        if news_collector is not None:
+            await news_collector.aclose()
         await monitor.shutdown()
         await coingecko_client.aclose()
         await rest_client.aclose()

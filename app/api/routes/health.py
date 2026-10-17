@@ -19,7 +19,11 @@ eso, el etiquetado NO esta corriendo (aunque `enabled` sea `true`) -- ver
 
 El bloque `paper_execution` (subfase 3.9) informa el brazo ejecutado de la cuenta paper:
 `enabled` es el interruptor, `active` que quedo armado al arrancar, `armed_since` desde
-cuando y las aperturas/omisiones del dia. Nunca trae PnL ni resultados."""
+cuando y las aperturas/omisiones del dia. Nunca trae PnL ni resultados.
+
+El bloque `news` (Fase 4) informa la recoleccion de noticias: interruptor, si el colector quedo
+armado, salud por fuente (`data_source_health`) y titulares de 24 h, con la atribucion de cada
+fuente. Es solo informativo: ninguna operacion depende de las noticias."""
 
 from __future__ import annotations
 
@@ -27,7 +31,14 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_db, get_heartbeat, get_live_labeler, get_paper_arm, get_scheduler
+from app.api.deps import (
+    get_db,
+    get_heartbeat,
+    get_live_labeler,
+    get_news_collector,
+    get_paper_arm,
+    get_scheduler,
+)
 from app.core.heartbeat import Heartbeat
 from app.core.logging import get_dropped_log_count
 from app.core.scheduler import Scheduler
@@ -40,6 +51,8 @@ from app.llm.decision_service import (
     STATUS_OK,
     STATUS_TIMEOUT,
 )
+from app.news.collector import NewsCollector
+from app.news.health import news_health_block
 from app.persistence.database import Database
 from app.persistence.repositories import llm_logs_repo
 from app.trading import control_state, risk_engine
@@ -62,6 +75,7 @@ async def health(
     live_labeler: ShadowLiveLabeler = Depends(get_live_labeler),
     db: Database = Depends(get_db),
     paper_arm: PaperExecutionArm | None = Depends(get_paper_arm),
+    news_collector: NewsCollector | None = Depends(get_news_collector),
 ) -> dict:
     last_cycle_at = scheduler.last_cycle_at
     stale = (
@@ -106,5 +120,9 @@ async def health(
         },
         "paper_execution": (
             await paper_arm.health_block() if paper_arm is not None else NO_PAPER_EXECUTION
+        ),
+        # Fase 4: salud de la recoleccion de noticias (informativa; no bloquea nada).
+        "news": await news_health_block(
+            db, live_labeler.settings, active=news_collector is not None
         ),
     }

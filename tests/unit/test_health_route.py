@@ -40,7 +40,7 @@ async def test_health_is_ok_with_a_recent_cycle(db):
 
     result = await health(
         heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db,
-        paper_arm=None,
+        paper_arm=None, news_collector=None,
     )
 
     assert result["status"] == "ok"
@@ -49,6 +49,9 @@ async def test_health_is_ok_with_a_recent_cycle(db):
         "enabled": False, "active": False, "armed_since": None, "opened_today": 0,
         "skipped_today": 0,
     }
+    news = result["news"]
+    assert news["enabled"] is False and news["active"] is False
+    assert news["sources"] == {} and news["items_24h"] == 0
     assert result["last_beat_at"] == now.isoformat()
     assert result["last_cycle_at"] == now.isoformat()
     assert result["log_dropped_count"] == 0
@@ -65,7 +68,7 @@ async def test_health_is_stale_when_last_cycle_at_is_too_old(db):
 
     result = await health(
         heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db,
-        paper_arm=None,
+        paper_arm=None, news_collector=None,
     )
 
     assert result["status"] == "stale"
@@ -80,7 +83,7 @@ async def test_health_is_stale_when_no_cycle_has_ever_completed(db):
 
     result = await health(
         heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db,
-        paper_arm=None,
+        paper_arm=None, news_collector=None,
     )
 
     assert result["status"] == "stale"
@@ -96,7 +99,7 @@ async def test_health_is_not_stale_just_under_the_threshold(db):
 
     result = await health(
         heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db,
-        paper_arm=None,
+        paper_arm=None, news_collector=None,
     )
 
     assert result["status"] == "ok"

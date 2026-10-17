@@ -34,6 +34,31 @@ async def record_failure(db: Database, source: str, error: str) -> None:
     )
 
 
+async def get_health_rows(db: Database, prefix: str) -> list[dict]:
+    """Filas de `data_source_health` cuya fuente empieza por `prefix` (p.ej. `news:`)."""
+    rows = await db.fetch_all(
+        "SELECT source, last_success_at, last_error, consecutive_failures "
+        "FROM data_source_health WHERE source LIKE ? ORDER BY source",
+        (prefix + "%",),
+    )
+    return [
+        {
+            "source": r["source"],
+            "last_success_at": r["last_success_at"],
+            "last_error": r["last_error"],
+            "consecutive_failures": r["consecutive_failures"],
+        }
+        for r in rows
+    ]
+
+
+async def get_consecutive_failures(db: Database, source: str) -> int:
+    row = await db.fetch_one(
+        "SELECT consecutive_failures FROM data_source_health WHERE source = ?", (source,)
+    )
+    return row["consecutive_failures"] if row else 0
+
+
 async def get_last_success(db: Database, source: str) -> datetime | None:
     row = await db.fetch_one(
         "SELECT last_success_at FROM data_source_health WHERE source = ?", (source,)

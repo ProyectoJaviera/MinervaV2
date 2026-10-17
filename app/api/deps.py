@@ -5,6 +5,7 @@ from fastapi import Request
 from app.config import Settings
 from app.core.heartbeat import Heartbeat
 from app.core.scheduler import Scheduler
+from app.news.collector import NewsCollector
 from app.persistence.database import Database
 from app.trading.paper_execution import PaperExecutionArm
 from app.trading.shadow_live_labeler import ShadowLiveLabeler
@@ -28,6 +29,11 @@ def get_scheduler(request: Request) -> Scheduler:
 
 def get_live_labeler(request: Request) -> ShadowLiveLabeler:
     return request.app.state.live_labeler
+
+
+def get_news_collector(request: Request) -> NewsCollector | None:
+    """El colector de noticias (Fase 4); `None` si esta apagado o no se construyo."""
+    return getattr(request.app.state, "news_collector", None)
 
 
 def get_paper_arm(request: Request) -> PaperExecutionArm | None:
