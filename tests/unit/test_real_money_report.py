@@ -408,9 +408,9 @@ def no_result_reads(monkeypatch):
     def boom(*args, **kwargs):
         raise AssertionError("se leyeron resultados antes de permitir el reveal")
 
-    for name in ("_load_executed_trades", "_load_arm_state", "_load_decision_delays",
-                 "_load_signal_hours", "_load_universe_specs", "load_verdict_inputs",
-                 "compute_breakdown"):
+    for name in ("_load_executed_trades", "_load_arm_state", "_load_arm_log",
+                 "_load_decision_delays", "_load_signal_hours", "_load_universe_specs",
+                 "load_verdict_inputs", "compute_breakdown"):
         monkeypatch.setattr(rmr, name, boom)
 
 
@@ -611,6 +611,71 @@ async def test_full_evaluation_with_an_executed_arm_and_operational_metrics(db_p
     ):
         assert expected in text, expected
     assert rmr.DISCLAIMER in text
+
+
+def arm_log_row(key, outcome, *, reason=None, details="{}", symbol="BTCUSDT"):
+    return (
+        "INSERT INTO paper_execution_log (signal_group_key, created_at, symbol, side, strategy, "
+        "decision_delay_s, outcome, reason, details_json) VALUES (?, '2026-11-01T12:00:00+00:00', "
+        "?, 'LONG', 'ema_cross_9_21', 25.0, ?, ?, ?)",
+        (key, symbol, outcome, reason, details),
+    )
+
+
+async def test_the_report_summarizes_the_arm_log_and_measures_the_executed_entry_vs_the_shadow(
+    db_path, docs,
+):
+    insert_groups(db_path, scenario(300, 300, approved_ret=0.30))
+    write_record(docs, "APORTA_VALOR")
+    run_sql(db_path, [
+        arm_log_row("o1", "OPENED", details='{"entry_delay_s": 30.0, "adverse_gap_bps": 4.0}'),
+        arm_log_row("o2", "OPENED", details='{"entry_delay_s": 50.0, "adverse_gap_bps": -2.0}'),
+        arm_log_row("o3", "OPENED", details='{"entry_delay_s": 40.0, "adverse_gap_bps": 10.0}'),
+        arm_log_row("s1", "SKIPPED", reason="RISK_STRATEGY_NOT_ELIGIBLE"),
+        arm_log_row("s2", "SKIPPED", reason="RISK_STRATEGY_NOT_ELIGIBLE"),
+        arm_log_row("s3", "SKIPPED", reason="BELOW_MIN_ORDER", symbol="TRXUSDT"),
+        arm_log_row("p1", "PENDING"),
+    ])
+
+    report = build(db_path, docs)
+
+    arm = report.operational.arm_log
+    assert (arm.considered, arm.opened, arm.pending) == (7, 3, 1)
+    assert arm.skipped_by_reason == {"RISK_STRATEGY_NOT_ELIGIBLE": 2, "BELOW_MIN_ORDER": 1}
+    assert arm.entry_delay_s.median == 40.0 and arm.entry_delay_s.max == 50.0
+    assert arm.adverse_gap_bps.median == 4.0 and arm.adverse_gap_bps.max == 10.0
+    text = rmr.render_report(report, settings)
+    assert "Brazo ejecutado: 7 decisiones APROBADA consideradas: 3 abiertas, 3 omitidas" in text
+    assert "RISK_STRATEGY_NOT_ELIGIBLE 2" in text and "BELOW_MIN_ORDER 1" in text
+    assert "1 pendientes" in text
+    assert "Entrada ejecutada vs sombra (n=3): diferencia de precio mediana +4.0 pb" in text
+    assert "positivo = peor que la sombra" in text
+    assert "mediana 40.0 s" in text
+    assert "SIN DATOS (el brazo ejecutado todavia no abrio operaciones)" not in text
+
+
+async def test_without_opened_rows_the_entry_comparison_stays_sin_datos(db_path, docs):
+    insert_groups(db_path, scenario(300, 300, approved_ret=0.30))
+    write_record(docs, "APORTA_VALOR")
+    run_sql(db_path, [arm_log_row("s1", "SKIPPED", reason="LATE_DECISION")])
+
+    report = build(db_path, docs)
+
+    assert report.operational.arm_log.opened == 0
+    text = rmr.render_report(report, settings)
+    assert "1 decisiones APROBADA consideradas: 0 abiertas, 1 omitidas (LATE_DECISION 1)" in text
+    assert "Precio de entrada ejecutado vs sombra: SIN DATOS" in text
+
+
+async def test_a_copy_without_the_arm_table_is_handled(db_path, docs):
+    insert_groups(db_path, scenario(300, 300, approved_ret=0.30))
+    write_record(docs, "APORTA_VALOR")
+    run_sql(db_path, [("DROP TABLE paper_execution_log", ())])  # copia anterior a la 3.9
+
+    report = build(db_path, docs)
+
+    assert report.operational.arm_log is None
+    assert "Precio de entrada ejecutado vs sombra: SIN DATOS" in rmr.render_report(report, settings)
 
 
 async def test_transfer_section_drops_strategies_the_real_account_cannot_trade(db_path, docs):

@@ -25,6 +25,7 @@ inferior del IC 95 % del PF > 1,0 (bootstrap por conglomerados)."""
 
 from __future__ import annotations
 
+import json
 import math
 import random
 import sqlite3
@@ -124,8 +125,30 @@ class StressedPf:
     pf: float | None
 
 
+@dataclass(frozen=True)
+class DistStats:
+    n: int
+    median: float
+    p95: float
+    max: float
+
+
+@dataclass(frozen=True)
+class ArmLogSummary:
+    """Resumen de `paper_execution_log` (subfase 3.9): solo decisiones de ejecucion y calidad
+    de la entrada, nunca el resultado de las operaciones."""
+
+    considered: int
+    opened: int
+    pending: int
+    skipped_by_reason: dict[str, int]
+    entry_delay_s: DistStats | None
+    adverse_gap_bps: DistStats | None
+
+
 @dataclass
 class OperationalMetrics:
+    arm_log: ArmLogSummary | None = None
     delays: DelayStats | None = None
     executability: list[SymbolExecutability] = field(default_factory=list)
     groups_in_non_executable_symbols: int = 0
@@ -196,6 +219,53 @@ def _load_decision_delays(conn: sqlite3.Connection, frozen_hash: str) -> list[fl
         (frozen_hash,),
     ).fetchall()
     return [float(r["decision_delay_s"]) for r in rows]
+
+
+def _load_arm_log(conn: sqlite3.Connection) -> list[dict]:
+    """Filas de `paper_execution_log` (resultado de ejecucion y detalles de la entrada, sin PnL).
+    Una copia anterior a la 3.9 no tiene la tabla: lista vacia."""
+    table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'paper_execution_log'"
+    ).fetchone()
+    if table is None:
+        return []
+    return [
+        {"outcome": r["outcome"], "reason": r["reason"],
+         "details": json.loads(r["details_json"] or "{}")}
+        for r in conn.execute("SELECT outcome, reason, details_json FROM paper_execution_log")
+    ]
+
+
+def _dist(values: list[float]) -> DistStats | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    return DistStats(
+        n=len(ordered), median=ordered[len(ordered) // 2] if len(ordered) % 2 else
+        (ordered[len(ordered) // 2 - 1] + ordered[len(ordered) // 2]) / 2,
+        p95=ordered[int(round(0.95 * (len(ordered) - 1)))], max=ordered[-1],
+    )
+
+
+def compute_arm_log_summary(rows: list[dict]) -> ArmLogSummary | None:
+    if not rows:
+        return None
+    reasons: dict[str, int] = {}
+    delays: list[float] = []
+    gaps: list[float] = []
+    for r in rows:
+        if r["outcome"] == "SKIPPED":
+            reasons[r["reason"]] = reasons.get(r["reason"], 0) + 1
+        elif r["outcome"] == "OPENED":
+            if r["details"].get("entry_delay_s") is not None:
+                delays.append(float(r["details"]["entry_delay_s"]))
+            if r["details"].get("adverse_gap_bps") is not None:
+                gaps.append(float(r["details"]["adverse_gap_bps"]))
+    return ArmLogSummary(
+        considered=len(rows), opened=sum(1 for r in rows if r["outcome"] == "OPENED"),
+        pending=sum(1 for r in rows if r["outcome"] == "PENDING"), skipped_by_reason=reasons,
+        entry_delay_s=_dist(delays), adverse_gap_bps=_dist(gaps),
+    )
 
 
 def _load_signal_hours(conn: sqlite3.Connection, since: datetime) -> list[datetime]:
@@ -549,6 +619,7 @@ def build_report(
 
     inputs = load_verdict_inputs(conn, frozen_hash)
     operational = OperationalMetrics()
+    operational.arm_log = compute_arm_log_summary(_load_arm_log(conn))
     operational.delays = compute_delay_stats(
         _load_decision_delays(conn, frozen_hash), settings.llm_real_max_delay_seconds
     )
@@ -581,9 +652,9 @@ def build_report(
     notes = []
     if not trades:
         notes.append(
-            "El brazo ejecutado (cuenta real simulada operando solo APROBADAS) todavia no "
-            "existe: lo conecta la subfase 3.9. Hasta entonces los criterios de rentabilidad "
-            "quedan SIN DATOS."
+            "El brazo ejecutado de la subfase 3.9 (cuenta paper operando solo APROBADAS a "
+            "tiempo) todavia no tiene operaciones: los criterios de rentabilidad quedan SIN "
+            "DATOS hasta que abra y cierre las suyas (ver scripts/paper_execution_status.py)."
         )
     return RealMoneyReport(
         state=STATE_EVALUATED, frozen_hash=frozen_hash, status=status, record=record,
@@ -644,10 +715,30 @@ def _render_operational(op: OperationalMetrics, settings: Settings) -> list[str]
         )
     else:
         lines.append("- PF estresado, comisiones y funding: SIN DATOS (brazo ejecutado vacio).")
-    lines.append(
-        "- Precio de entrada ejecutado vs sombra: SIN DATOS (requiere 3.9: "
-        "signal_group_key en las operaciones ejecutadas)."
-    )
+    arm = op.arm_log
+    if arm is not None:
+        skipped = sum(arm.skipped_by_reason.values())
+        by_reason = ", ".join(
+            f"{k} {v}" for k, v in sorted(arm.skipped_by_reason.items(), key=lambda kv: -kv[1])
+        )
+        lines.append(
+            f"- Brazo ejecutado: {arm.considered} decisiones APROBADA consideradas: "
+            f"{arm.opened} abiertas, {skipped} omitidas" + (f" ({by_reason})" if by_reason else "")
+            + (f", {arm.pending} pendientes" if arm.pending else "")
+        )
+    if arm is not None and arm.adverse_gap_bps is not None and arm.entry_delay_s is not None:
+        g, e = arm.adverse_gap_bps, arm.entry_delay_s
+        lines.append(
+            f"- Entrada ejecutada vs sombra (n={g.n}): diferencia de precio mediana "
+            f"{g.median:+.1f} pb, p95 {g.p95:+.1f} pb, max {g.max:+.1f} pb (positivo = peor que "
+            f"la sombra); retraso cierre de vela -> apertura mediana {e.median:.1f} s, "
+            f"p95 {e.p95:.1f} s, max {e.max:.1f} s"
+        )
+    else:
+        lines.append(
+            "- Precio de entrada ejecutado vs sombra: SIN DATOS (el brazo ejecutado todavia no "
+            "abrio operaciones)."
+        )
     return lines + [""]
 
 

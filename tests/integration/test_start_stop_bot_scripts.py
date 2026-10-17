@@ -98,6 +98,15 @@ def test_start_refuses_a_second_instance_then_stop_frees_the_port(real_db_copy_f
     assert health is not None, "/health nunca respondio"
     assert health["status"] == "ok"
     assert health["mode"] == "PAPER_TRADING"
+    # Solo el bot real (8000) arma el brazo ejecutado de la cuenta paper (subfase 3.9): en el
+    # 8001 el interruptor queda apagado y no se escribe ninguna marca de activacion.
+    assert health["paper_execution"] == {
+        "enabled": False, "active": False, "armed_since": None, "opened_today": 0,
+        "skipped_today": 0,
+    }
+    assert health["llm_labeling"]["enabled"] is False
+    diary = (log_dir / "medicion.log").read_text(encoding="utf-8")
+    assert "PAPER_EXECUTION_ENABLED=false" in diary
 
     second = _run_ps1(
         "start_bot.ps1", "-Port", str(PORT), "-DatabasePath", str(db_copy),
