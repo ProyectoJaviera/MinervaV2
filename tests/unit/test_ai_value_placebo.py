@@ -10,10 +10,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.trading.ai_value import MIN_EFFECTIVE_N
+from app.trading.ai_value import MIN_EFFECTIVE_N, PlaceboResult
 from app.trading.ai_value_placebo import (
+    CALIBRATED,
+    NOT_CALIBRATED,
+    NOT_INFORMATIVE,
     PlaceboRun,
     build_placebo,
+    classify_calibration,
     prob_both_sides_reach,
     render_placebo,
 )
@@ -66,12 +70,14 @@ async def test_no_real_effect_at_300_plus_per_side_is_calibrated(db_path):
 
     assert MIN_EFFECTIVE_N == 300
     assert run.n_closed_clusters == 620 and run.approval_rate == pytest.approx(0.5)
-    assert run.result.calibrated
+    assert run.calibration == CALIBRATED
     assert run.result.frequency < 0.05
-    assert run.expected_valid_probability > 0.5 and run.informative
+    assert run.expected_valid_probability > 0.5
+    assert run.conditional_rate is not None and run.conditional_rate < 0.05
     text = render_placebo(run, run_at=RUN_AT)
-    assert "Calibrado (frecuencia < 5%): SI" in text
-    assert "ADVERTENCIA" not in text
+    assert "Calibrado: SI" in text
+    assert "[informativo] Frecuencia bruta" in text and "[informativo] IC 95 % de Wilson" in text
+    assert "NO INFORMATIVO" not in text
 
 
 async def test_no_real_effect_with_many_repeats_is_calibrated_at_small_n(db_path, small_n):
@@ -79,7 +85,7 @@ async def test_no_real_effect_with_many_repeats_is_calibrated_at_small_n(db_path
 
     run = run_placebo(db_path, n_repeats=100)
 
-    assert run.result.calibrated, (run.result.aporta_valor_count, run.result.n_repeats)
+    assert run.calibration == CALIBRATED, (run.result.aporta_valor_count, run.result.n_repeats)
 
 
 # --- (b) los filtros del veredicto ----------------------------------------------------------
@@ -149,14 +155,71 @@ def test_prob_both_sides_reach_edge_cases():
 # --- poco informativo, nada que calibrar, guardias -------------------------------------------
 
 
-async def test_few_clusters_are_flagged_as_not_informative(db_path, small_n):
+async def test_few_clusters_are_not_informative_and_say_to_wait(db_path, small_n):
     insert_groups(db_path, scenario(small_n, small_n, approved_ret=0.0, rejected_ret=0.0))
 
     run = run_placebo(db_path, n_repeats=5)  # 80 conglomerados: solo X = 40 llega
 
-    assert run.expected_valid_probability < 0.5 and not run.informative
+    assert run.expected_valid_probability < 0.5
+    assert run.calibration == NOT_INFORMATIVE and run.conditional_rate is None
     text = render_placebo(run, run_at=RUN_AT)
-    assert "ADVERTENCIA" in text and "poco informativo" in text
+    assert "Calibrado: NO INFORMATIVO" in text
+    assert "NO correr el veredicto" in text and "7 dias" in text
+    assert "Calibrado: SI" not in text
+
+
+# --- regla de calibracion (decision del 2026-10-17) -----------------------------------------------
+
+
+def test_classify_calibrated_when_conditional_rate_is_low_and_probability_high():
+    state, conditional = classify_calibration(0.02, 0.9)
+
+    assert state == CALIBRATED
+    assert conditional == pytest.approx(0.02 / 0.9)
+
+
+def test_classify_not_calibrated_when_raw_frequency_is_low_but_conditional_is_not():
+    # frecuencia bruta 4,8 % < 5 %, pero solo el 80 % de las repeticiones llega al
+    # punto de analisis: tasa condicional 6 % >= 5 %.
+    state, conditional = classify_calibration(0.048, 0.8)
+
+    assert state == NOT_CALIBRATED
+    assert conditional == pytest.approx(0.06)
+
+
+def test_classify_not_informative_below_half_regardless_of_frequency():
+    assert classify_calibration(0.0, 0.49) == (NOT_INFORMATIVE, None)
+    assert classify_calibration(0.30, 0.0) == (NOT_INFORMATIVE, None)
+    assert classify_calibration(0.0, 0.5)[0] == CALIBRATED  # el 50 % ya es informativo
+
+
+def test_classify_threshold_is_strict_and_conditional_rate_is_capped():
+    assert classify_calibration(0.05, 1.0)[0] == NOT_CALIBRATED  # 5 % exacto no es < 5 %
+    assert classify_calibration(0.9, 0.6)[1] == 1.0
+
+
+def _crafted_run(frequency: float, valid: float, calibrated_raw: bool) -> PlaceboRun:
+    result = PlaceboResult(
+        n_repeats=1000, aporta_valor_count=round(frequency * 1000), frequency=frequency,
+        ci_low=0.036, ci_high=0.063, calibrated=calibrated_raw,
+    )
+    return PlaceboRun(
+        frozen_hash="h", n_repeats=1000, groups_after_filters=700, excluded_piloto=0,
+        excluded_unreliable=0, n_closed_clusters=700, n_labeled_closed=700, n_approved=350,
+        approval_rate=0.5, data_now=None, expected_valid_probability=valid, result=result,
+    )
+
+
+def test_a_raw_frequency_below_5_percent_can_still_be_not_calibrated():
+    run = _crafted_run(frequency=0.048, valid=0.8, calibrated_raw=True)
+
+    assert run.result.calibrated  # el criterio viejo (frecuencia bruta) diria SI
+    assert run.calibration == NOT_CALIBRATED
+    text = render_placebo(run, run_at=RUN_AT)
+    assert "Calibrado: NO (tasa condicional 6.0%" in text
+    assert "**Calibrado: NO**" in text
+    assert "[informativo] Frecuencia bruta de APORTA_VALOR por azar: 48 de 1000 (4.8%)" in text
+    assert "revisa el diseno" in text
 
 
 async def test_nothing_to_calibrate_without_closed_labeled_groups(db_path, small_n):
@@ -175,6 +238,7 @@ async def test_placebo_record_block_is_ready_to_copy(db_path, small_n):
 
     assert "Para copiar al registro de docs/FASE3_6_LLM.md" in text
     assert "**Placebo de la medicion, 2026-10-17 12:00 UTC**" in text
+    assert "**Calibrado: NO INFORMATIVO**" in text and "regla del 2026-10-17" in text
     assert "semilla del placebo 20261009" in text
     assert "Duracion de la corrida: 1.5 min" in text
 

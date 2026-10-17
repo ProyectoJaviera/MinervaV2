@@ -45,7 +45,7 @@ async def test_cli_prints_the_result_and_the_record_block_without_writing(db_pat
     proc = run_cli("--db", str(db_path), "--n-repeats", "3", *FLAGS)
 
     assert proc.returncode == 0, proc.stderr
-    assert "Calibrado (frecuencia < 5%): SI" in proc.stdout
+    assert "Calibrado: SI" in proc.stdout
     assert "δ=3%" in proc.stdout  # se puede imprimir por un pipe cp1252
     assert "Para copiar al registro de docs/FASE3_6_LLM.md" in proc.stdout
     assert hashlib.sha256(db_path.read_bytes()).hexdigest() == before
@@ -63,6 +63,37 @@ async def test_cli_out_saves_utf8_once_and_never_overwrites(db_path, tmp_path):
     assert "δ=3%" in saved and "Para copiar al registro" in saved
     assert second.returncode == 5 and "no sobrescribe" in second.stdout
     assert out.read_text(encoding="utf-8") == saved
+
+
+async def test_cli_not_informative_exits_7_and_still_saves_the_record(db_path, tmp_path):
+    insert_groups(db_path, scenario(40, 40, approved_ret=0.0, rejected_ret=0.0))
+    out = tmp_path / "placebo.txt"
+
+    proc = run_cli("--db", str(db_path), "--n-repeats", "2", *FLAGS, "--out", str(out))
+
+    assert proc.returncode == 7, proc.stderr
+    assert "Calibrado: NO INFORMATIVO" in proc.stdout
+    assert "NO correr el veredicto" in proc.stdout
+    assert "**Calibrado: NO INFORMATIVO**" in out.read_text(encoding="utf-8")
+
+
+async def test_main_maps_each_calibration_state_to_its_exit_code(db_path, monkeypatch):
+    from app.trading.ai_value import PlaceboResult
+    from app.trading.ai_value_placebo import PlaceboRun
+    from scripts import placebo_check
+
+    def run_for(freq, valid):
+        result = PlaceboResult(1000, round(freq * 1000), freq, 0.0, 0.1, freq < 0.05)
+        return PlaceboRun(
+            frozen_hash="h", n_repeats=1000, groups_after_filters=1, excluded_piloto=0,
+            excluded_unreliable=0, n_closed_clusters=1, n_labeled_closed=1, n_approved=1,
+            approval_rate=0.5, data_now=None, expected_valid_probability=valid, result=result,
+        )
+
+    for freq, valid, expected in ((0.02, 0.9, 0), (0.048, 0.8, 6), (0.0, 0.1, 7)):
+        crafted = run_for(freq, valid)
+        monkeypatch.setattr(placebo_check, "build_placebo", lambda *a, _run=crafted, **k: _run)
+        assert placebo_check.main(str(db_path), 1) == expected
 
 
 async def test_cli_with_nothing_to_calibrate_exits_3_and_writes_no_record(db_path, tmp_path):

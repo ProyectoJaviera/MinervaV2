@@ -2,9 +2,14 @@
 
 Relabela cada conglomerado al azar con la tasa de aprobacion observada y aplica
 la MISMA `ai_value_verdict` (conglomerados y bootstrap), repetido `--n-repeats`
-veces. Si la frecuencia de `APORTA_VALOR` bajo esa relabelacion al azar es
->= 0,05, el criterio no esta bien calibrado y no se usa para decidir hasta
-corregirlo.
+veces.
+
+**Criterio (decision del 2026-10-17, antes de ver datos).** "Calibrado" se decide con
+la tasa CONDICIONAL (frecuencia de APORTA_VALOR por azar / probabilidad de que una
+repeticion llegue al punto de analisis) < 5 %, y solo si esa probabilidad es >= 50 %.
+Si es menor, el resultado es NO INFORMATIVO (ni SI ni NO) y NO se corre el veredicto:
+se esperan 7 dias mas de datos y se repite (docs/VEREDICTO_3_6.md). La frecuencia
+bruta y su IC de Wilson se imprimen solo como informacion.
 
 **Mismos filtros que el veredicto** (`app.trading.ai_value_report.
 load_verdict_inputs`): grupos de la medicion bajo el hash congelado, sin piloto y
@@ -24,11 +29,12 @@ Al final imprime un bloque listo para copiar al registro de docs/FASE3_6_LLM.md.
 `--out` guarda el informe completo (UTF-8) sin sobrescribir un archivo existente.
 
     python scripts/placebo_check.py --db <copia consistente de la base>
-    python scripts/placebo_check.py --db <copia> --n-repeats 300 --out docs/PLACEBO_REGISTRO.txt
+    python scripts/placebo_check.py --db <copia> --out docs/PLACEBO_REGISTRO_AAAAMMDD.txt
 
-Codigos de salida: 0 = calibrado; 6 = NO calibrado (el criterio no se usa); 3 = nada
-que calibrar todavia; 4 = bandera de pruebas rechazada (la base no es sintetica);
-5 = `--out` apunta a un archivo que ya existe.
+Codigos de salida: 0 = CALIBRADO; 6 = NO calibrado (el criterio no se usa; se revisa el
+diseno); 7 = NO INFORMATIVO (probabilidad de llegar < 50 %); 3 = nada que calibrar
+todavia; 4 = bandera de pruebas rechazada (la base no es sintetica); 5 = `--out`
+apunta a un archivo que ya existe.
 
 `--allow-synthetic-for-tests` y `--frozen-hash` existen SOLO para las pruebas con
 datos sinteticos (misma guardia que `scripts/ai_value_report.py`).
@@ -46,7 +52,12 @@ sys.path.insert(0, ".")
 
 from app.config import settings  # noqa: E402
 from app.trading.ai_value import PLACEBO_REPEATS  # noqa: E402
-from app.trading.ai_value_placebo import build_placebo, render_placebo  # noqa: E402
+from app.trading.ai_value_placebo import (  # noqa: E402
+    CALIBRATED,
+    NOT_INFORMATIVE,
+    build_placebo,
+    render_placebo,
+)
 from app.trading.ai_value_report import SyntheticGuardError  # noqa: E402
 from app.trading.shadow_live_labeler import FROZEN_PROMPT_SHA256  # noqa: E402
 from scripts.measurement_status import _connect_ro  # noqa: E402
@@ -56,6 +67,7 @@ EXIT_NOTHING_TO_CALIBRATE = 3
 EXIT_SYNTHETIC_REFUSED = 4
 EXIT_OUT_EXISTS = 5
 EXIT_NOT_CALIBRATED = 6
+EXIT_NOT_INFORMATIVE = 7
 
 
 def main(
@@ -92,7 +104,9 @@ def main(
         with open(out_path, "x", encoding="utf-8") as fh:
             fh.write(header + "\n" + text)
         print(f"Registro guardado en {out_path}")
-    return EXIT_CALIBRATED if run.result.calibrated else EXIT_NOT_CALIBRATED
+    if run.calibration == CALIBRATED:
+        return EXIT_CALIBRATED
+    return EXIT_NOT_INFORMATIVE if run.calibration == NOT_INFORMATIVE else EXIT_NOT_CALIBRATED
 
 
 if __name__ == "__main__":

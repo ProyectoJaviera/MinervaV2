@@ -13,11 +13,15 @@ y los resultados no interviene: solo la estructura de conglomerados, los retorno
 la tasa de aprobacion. Por eso puede correrse antes de que el gate se abra (y debe
 registrarse antes de la primera decision real).
 
-**Calibracion vacia.** Con pocos conglomerados casi ninguna repeticion llega a
-`MIN_EFFECTIVE_N` por lado, todas dan INCONCLUSO y "Calibrado: SI" no dice nada.
-`expected_valid_probability` es la probabilidad exacta (binomial: el N efectivo
-aprobado de una repeticion es Binomial(conglomerados, tasa)) de que una repeticion
-llegue al punto de analisis; el informe la imprime y advierte si es baja.
+**Criterio de calibracion (decision del 2026-10-17, tomada antes de ver datos).**
+"Calibrado" se decide con la tasa CONDICIONAL -- frecuencia de APORTA_VALOR por azar
+dividida por la probabilidad de que una repeticion llegue al punto de analisis -- y
+debe ser < 5 %; y solo si esa probabilidad es >= 50 %. Con una probabilidad menor,
+casi todas las repeticiones dan INCONCLUSO por N insuficiente (calibracion vacia) y
+el resultado es "NO INFORMATIVO": ni SI ni NO. La probabilidad es exacta (binomial: el
+N efectivo aprobado de una repeticion es Binomial(conglomerados, tasa)). La frecuencia
+bruta y su IC de Wilson se siguen imprimiendo, pero solo como informacion; el
+`calibrated` de `ai_value.PlaceboResult` (frecuencia bruta) ya no decide.
 """
 
 from __future__ import annotations
@@ -46,6 +50,21 @@ from app.trading.shadow_live_labeler import FROZEN_PROMPT_SHA256
 
 INFORMATIVE_VALID_FRACTION = 0.5
 
+CALIBRATED = "CALIBRADO"
+NOT_CALIBRATED = "NO_CALIBRADO"
+NOT_INFORMATIVE = "NO_INFORMATIVO"
+
+
+def classify_calibration(frequency: float, valid_probability: float) -> tuple[str, float | None]:
+    """(estado, tasa condicional). NO INFORMATIVO si la probabilidad de llegar al
+    punto de analisis es < 50 % (no hay tasa condicional fiable); si no, CALIBRADO
+    cuando frecuencia / probabilidad < 5 %."""
+    if valid_probability < INFORMATIVE_VALID_FRACTION:
+        return NOT_INFORMATIVE, None
+    conditional = min(1.0, frequency / valid_probability)
+    state = CALIBRATED if conditional < PLACEBO_CALIBRATION_THRESHOLD else NOT_CALIBRATED
+    return state, conditional
+
 
 @dataclass(frozen=True)
 class PlaceboRun:
@@ -63,19 +82,24 @@ class PlaceboRun:
     result: PlaceboResult | None
 
     @property
-    def informative(self) -> bool:
-        return (
-            self.expected_valid_probability is not None
-            and self.expected_valid_probability >= INFORMATIVE_VALID_FRACTION
-        )
+    def calibration(self) -> str | None:
+        """CALIBRADO / NO_CALIBRADO / NO_INFORMATIVO, o None si no hay nada que calibrar."""
+        if self.result is None:
+            return None
+        return classify_calibration(
+            self.result.frequency, self.expected_valid_probability or 0.0
+        )[0]
 
     @property
     def conditional_rate(self) -> float | None:
         """Frecuencia de APORTA_VALOR si solo contaran las repeticiones que llegan
-        al punto de analisis (estimacion: frecuencia / probabilidad de llegar)."""
-        if self.result is None or not self.expected_valid_probability:
+        al punto de analisis (frecuencia / probabilidad de llegar); None si no es
+        informativo."""
+        if self.result is None:
             return None
-        return min(1.0, self.result.frequency / self.expected_valid_probability)
+        return classify_calibration(
+            self.result.frequency, self.expected_valid_probability or 0.0
+        )[1]
 
 
 def prob_both_sides_reach(n_clusters: int, approval_rate: float, min_n: int) -> float:
@@ -154,38 +178,41 @@ def render_placebo(run: PlaceboRun, *, run_at: datetime, elapsed_s: float | None
 
     r = run.result
     valid = run.expected_valid_probability or 0.0
+    state = run.calibration
+    cond = run.conditional_rate
+    outcome = _outcome_text(state, cond, valid)
     lines += [
         f"Tasa de aprobacion observada: {run.approval_rate:.1%} ({run.n_approved} de "
         f"{run.n_labeled_closed})",
         f"Repeticiones: {r.n_repeats}; remuestreos del bootstrap: {BOOTSTRAP_RESAMPLES}; "
         f"MIN_EFFECTIVE_N={MIN_EFFECTIVE_N}, δ={DELTA_PCT:.0%}",
         "",
-        f"APORTA_VALOR por azar: {r.aporta_valor_count} de {r.n_repeats} ({r.frequency:.1%})",
-        f"IC 95 % de Wilson de esa frecuencia: [{r.ci_low:.1%}, {r.ci_high:.1%}]",
         f"Repeticiones que llegan al punto de analisis (>= {MIN_EFFECTIVE_N} conglomerados por "
         f"lado), esperadas: {valid:.1%} (~{valid * r.n_repeats:.0f} de {r.n_repeats}; "
         "binomial exacto)",
+        f"Tasa condicional (frecuencia / probabilidad de llegar): "
+        f"{'n/d (no informativo)' if cond is None else f'{cond:.1%}'}",
+        f"[informativo] Frecuencia bruta de APORTA_VALOR por azar: {r.aporta_valor_count} de "
+        f"{r.n_repeats} ({r.frequency:.1%})",
+        f"[informativo] IC 95 % de Wilson de esa frecuencia bruta: "
+        f"[{r.ci_low:.1%}, {r.ci_high:.1%}]",
+        "",
+        f"Regla (decision del 2026-10-17, antes de ver resultados): se decide con la tasa "
+        f"condicional < {PLACEBO_CALIBRATION_THRESHOLD:.0%}, y solo si la probabilidad de "
+        f"llegar al punto de analisis es >= {INFORMATIVE_VALID_FRACTION:.0%}.",
+        f"Calibrado: {outcome}",
     ]
-    if run.conditional_rate is not None:
+    if state == NOT_CALIBRATED:
         lines.append(
-            f"Tasa estimada contando solo las repeticiones que llegan al punto de analisis: "
-            f"{run.conditional_rate:.1%}"
-        )
-    lines.append(
-        f"Calibrado (frecuencia < {PLACEBO_CALIBRATION_THRESHOLD:.0%}): "
-        f"{'SI' if r.calibrated else 'NO'}"
-    )
-    if not r.calibrated:
-        lines.append(
-            "El criterio NO esta bien calibrado: no se usa para decidir hasta corregirlo "
+            "El criterio NO esta calibrado: no se usa para decidir; se revisa el diseno "
             "(docs/FASE3_6_LLM.md, seccion f)."
         )
-    if not run.informative:
+    elif state == NOT_INFORMATIVE:
         lines.append(
-            f"ADVERTENCIA: solo ~{valid:.0%} de las repeticiones llegan al punto de analisis "
-            f"(se piden >= {INFORMATIVE_VALID_FRACTION:.0%}); las demas dan INCONCLUSO por N "
-            "insuficiente y no prueban nada. Este 'Calibrado' es poco informativo: repetirlo "
-            "cuando haya mas conglomerados."
+            f"NO INFORMATIVO: solo ~{valid:.0%} de las repeticiones llegan al punto de analisis; "
+            "las demas dan INCONCLUSO por N insuficiente y no prueban nada. NO correr el "
+            "veredicto: esperar 7 dias mas de datos y repetir el procedimiento desde la copia "
+            "(docs/VEREDICTO_3_6.md)."
         )
 
     fecha = run_at.strftime("%Y-%m-%d %H:%M UTC")
@@ -200,13 +227,36 @@ def render_placebo(run: PlaceboRun, *, run_at: datetime, elapsed_s: float | None
         f"- {r.n_repeats} repeticiones (semilla del placebo {PLACEBO_SEED}, del bootstrap "
         f"{BOOTSTRAP_SEED}, {BOOTSTRAP_RESAMPLES} remuestreos), N minimo {MIN_EFFECTIVE_N}, "
         f"δ {DELTA_PCT:.0%}.",
-        f"- APORTA_VALOR por azar: {r.aporta_valor_count}/{r.n_repeats} ({r.frequency:.1%}), "
-        f"IC 95 % de Wilson [{r.ci_low:.1%}, {r.ci_high:.1%}]; llegan al punto de analisis "
-        f"~{valid:.0%} de las repeticiones.",
-        f"- **Calibrado: {'SI' if r.calibrated else 'NO'}**"
-        f"{'' if run.informative else ' (poco informativo, ver advertencia)'}.",
+        f"- Llegan al punto de analisis ~{valid:.1%} de las repeticiones; tasa condicional "
+        f"{'n/d' if cond is None else f'{cond:.1%}'}.",
+        f"- [informativo] APORTA_VALOR por azar (bruta): {r.aporta_valor_count}/{r.n_repeats} "
+        f"({r.frequency:.1%}), IC 95 % de Wilson [{r.ci_low:.1%}, {r.ci_high:.1%}].",
+        f"- **Calibrado: {_short_outcome(state)}** (regla del 2026-10-17: tasa condicional "
+        f"< {PLACEBO_CALIBRATION_THRESHOLD:.0%} con probabilidad de llegar "
+        f">= {INFORMATIVE_VALID_FRACTION:.0%}).",
     ]
     if elapsed_s is not None:
         lines.append(f"- Duracion de la corrida: {elapsed_s / 60:.1f} min.")
     lines.append("----- fin del registro -----")
     return "\n".join(lines) + "\n"
+
+
+def _short_outcome(state: str | None) -> str:
+    return {CALIBRATED: "SI", NOT_CALIBRATED: "NO", NOT_INFORMATIVE: "NO INFORMATIVO"}[state]
+
+
+def _outcome_text(state: str | None, conditional: float | None, valid: float) -> str:
+    if state == CALIBRATED:
+        return (
+            f"SI (tasa condicional {conditional:.1%} < {PLACEBO_CALIBRATION_THRESHOLD:.0%}, "
+            f"probabilidad de llegar {valid:.1%} >= {INFORMATIVE_VALID_FRACTION:.0%})"
+        )
+    if state == NOT_CALIBRATED:
+        return (
+            f"NO (tasa condicional {conditional:.1%} >= {PLACEBO_CALIBRATION_THRESHOLD:.0%}, "
+            f"probabilidad de llegar {valid:.1%})"
+        )
+    return (
+        f"NO INFORMATIVO (probabilidad de llegar {valid:.1%} < "
+        f"{INFORMATIVE_VALID_FRACTION:.0%})"
+    )
