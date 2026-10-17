@@ -26,6 +26,12 @@
             otro puerto. Brazo ejecutado de la cuenta PAPER, subfase 3.9: abre solo
             las senales APROBADA que llegaron a tiempo, pasando por el motor de
             riesgo. Nunca ordenes reales: solo PaperBackend.)
+        NEWS_COLLECTION_ENABLED=true  (SOLO con -Port 8000; false con cualquier
+            otro puerto. Fase 4: recoleccion de noticias en una tarea aislada, gratuita
+            y sin costo de Anthropic; fuera del prompt de la medicion. Para dejarla
+            apagada tambien en el bot real, cambia la linea de $newsCollection.)
+        LESSONS_MEMORY_ENABLED=false  (siempre; la memoria de lecciones no se activa
+            durante la medicion.)
 
     -Port/-DatabasePath/-LogDir son parametros SOLO para poder probar este
     script contra el puerto 8001 y una base/carpeta de log temporales
@@ -113,9 +119,11 @@ $isRealBot = ($Port -eq 8000)
 $telegramCommands = if ($isRealBot) { "true" } else { "false" }
 $llmLabeling = if ($isRealBot) { "true" } else { "false" }
 $paperExecution = if ($isRealBot) { "true" } else { "false" }
+$newsCollection = if ($isRealBot) { "true" } else { "false" }
 Write-OpLog ("Puerto $Port libre. Arrancando con DATABASE_PATH=$DatabaseFullPath " +
     "AUTO_OPEN_WITHOUT_LLM=false LOG_LEVEL=INFO LLM_LIVE_LABELING_ENABLED=$llmLabeling " +
-    "TELEGRAM_COMMANDS_ENABLED=$telegramCommands PAPER_EXECUTION_ENABLED=$paperExecution")
+    "TELEGRAM_COMMANDS_ENABLED=$telegramCommands PAPER_EXECUTION_ENABLED=$paperExecution " +
+    "NEWS_COLLECTION_ENABLED=$newsCollection LESSONS_MEMORY_ENABLED=false")
 
 $env:DATABASE_PATH = $DatabaseFullPath
 $env:AUTO_OPEN_WITHOUT_LLM = "false"
@@ -123,6 +131,8 @@ $env:LOG_LEVEL = "INFO"
 $env:LLM_LIVE_LABELING_ENABLED = $llmLabeling
 $env:TELEGRAM_COMMANDS_ENABLED = $telegramCommands
 $env:PAPER_EXECUTION_ENABLED = $paperExecution
+$env:NEWS_COLLECTION_ENABLED = $newsCollection
+$env:LESSONS_MEMORY_ENABLED = "false"
 $env:LOG_DIR = $LogDirFullPath
 
 # Ver DESCRIPTION: cmd.exe fusiona stdout+stderr a $OutLog con "2>&1" (algo

@@ -99,6 +99,9 @@ def main(source_db: str, port: int) -> None:
     os.environ["TELEGRAM_BOT_TOKEN"] = ""
     # Brazo ejecutado de la cuenta paper (subfase 3.9): solo el bot real lo activa.
     os.environ["PAPER_EXECUTION_ENABLED"] = "false"
+    # Fase 4: ni la recoleccion de noticias (red) ni la memoria de lecciones en el dev server.
+    os.environ["NEWS_COLLECTION_ENABLED"] = "false"
+    os.environ["LESSONS_MEMORY_ENABLED"] = "false"
 
     import uvicorn
 

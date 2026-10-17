@@ -190,7 +190,9 @@ async def test_the_migration_on_a_copy_of_the_real_database_changes_nothing_else
 
     after = _row_counts(copy)
     created = set(after) - set(before)
-    assert created <= {"paper_execution_log"}  # solo la tabla nueva (si la copia es previa a 3.9)
+    # solo tablas NUEVAS y vacias (esta copia es previa a la 3.9 y a la Fase 4)
+    assert "paper_execution_log" in created or "paper_execution_log" in before
+    assert all(after[t] == 0 for t in created)
     assert after.get("paper_execution_log", 0) == 0
     assert {k: v for k, v in after.items() if k in before} == before
     conn = sqlite3.connect(str(copy))

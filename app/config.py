@@ -259,6 +259,26 @@ class Settings(BaseSettings):
     # APAGADO por defecto; solo start_bot.ps1 lo activa para el puerto 8000 (el dev server y
     # los tests lo mantienen apagado). Distinto de `auto_open_without_llm`, que sigue en false.
     paper_execution_enabled: bool = Field(default=False, alias="PAPER_EXECUTION_ENABLED")
+    # Fase 4 (docs/FASE4_PLAN.md): noticias y memoria de lecciones, FUERA del prompt congelado de
+    # la medicion. Cada pieza tiene su interruptor, apagado por defecto. La recoleccion de
+    # noticias es una tarea aislada y sin costo de la API de Anthropic (clasificacion determinista);
+    # solo start_bot.ps1 la activa, y solo para el puerto 8000. La memoria de lecciones no se activa
+    # en ningun puerto durante la medicion.
+    news_collection_enabled: bool = Field(default=False, alias="NEWS_COLLECTION_ENABLED")
+    # Fuentes habilitadas (ids de `app.news.sources`). Solo las verificadas en su documentacion
+    # oficial; ver docs/FASE4_PLAN.md ("Fuentes de noticias: verificacion").
+    news_sources: str = Field(default="gdelt,fed_monetary,fear_greed", alias="NEWS_SOURCES")
+    news_retention_days: int = Field(default=180, alias="NEWS_RETENTION_DAYS")
+    news_user_agent: str = Field(
+        default="MinervaPaperBot/1.0 (personal paper-trading research, non-commercial)",
+        alias="NEWS_USER_AGENT",
+    )
+    news_max_response_bytes: int = Field(default=2_000_000, alias="NEWS_MAX_RESPONSE_BYTES")
+    lessons_memory_enabled: bool = Field(default=False, alias="LESSONS_MEMORY_ENABLED")
+    # Muestra minima antes de que una leccion o una cohorte similar influya (evita el sobreajuste).
+    lessons_min_sample: int = Field(default=30, alias="LESSONS_MIN_SAMPLE")
+    lessons_rebuild_hours: float = Field(default=24.0, alias="LESSONS_REBUILD_HOURS")
+    lessons_top_k: int = Field(default=3, alias="LESSONS_TOP_K")
     # FRACCION 0-1 (score de confluencia, no un porcentaje de precio).
     confluence_score_threshold: float = Field(
         default=0.6, alias="CONFLUENCE_SCORE_THRESHOLD"
@@ -305,6 +325,10 @@ class Settings(BaseSettings):
         return [
             s.strip() for s in self.real_account_eligible_strategies.split(",") if s.strip()
         ]
+
+    @property
+    def news_sources_list(self) -> list[str]:
+        return [s.strip().lower() for s in self.news_sources.split(",") if s.strip()]
 
     @property
     def backtest_official_end_ms(self) -> int:

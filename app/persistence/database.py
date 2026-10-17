@@ -413,6 +413,130 @@ CREATE TABLE IF NOT EXISTS paper_execution_log (
 CREATE INDEX IF NOT EXISTS idx_paper_execution_log_outcome
     ON paper_execution_log (outcome, reason);
 
+-- Fase 4 (docs/FASE4_PLAN.md), todo aditivo y fuera del prompt congelado de la medicion.
+--
+-- Noticias recolectadas (app/news/): SOLO titulo, URL, dominio y fecha -- nunca el cuerpo.
+-- `url_hash` es UNICO (la misma noticia no se guarda dos veces); un titular casi duplicado se
+-- guarda con `dup_of` y se excluye del contexto. `fetched_at` es cuando LO VIO el bot:
+-- el contexto para una decision exige `fetched_at <= instante` (sin mirar al futuro).
+CREATE TABLE IF NOT EXISTS news_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    published_at TEXT,
+    domain TEXT,
+    title TEXT NOT NULL,
+    url TEXT NOT NULL,
+    url_hash TEXT NOT NULL UNIQUE,
+    title_hash TEXT NOT NULL,
+    language TEXT,
+    source_country TEXT,
+    assets_json TEXT NOT NULL DEFAULT '[]',
+    query_tag TEXT,
+    sentiment REAL,
+    sentiment_method TEXT,
+    dup_of INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_news_items_published ON news_items (published_at);
+CREATE INDEX IF NOT EXISTS idx_news_items_fetched ON news_items (fetched_at);
+
+-- Estado de la consulta condicional por fuente (ETag / Last-Modified) y cuando se puede volver
+-- a pedir (intervalo minimo, enfriamiento tras un 429). La salud (ultimo exito, fallos
+-- seguidos) vive en `data_source_health` con la fuente `news:<id>`.
+CREATE TABLE IF NOT EXISTS news_fetch_state (
+    source TEXT PRIMARY KEY,
+    etag TEXT,
+    last_modified TEXT,
+    last_attempt_at TEXT,
+    next_allowed_at TEXT,
+    last_status INTEGER,
+    last_items INTEGER
+);
+
+-- Fear & Greed Index (alternative.me): dato de mercado diario. Atribucion obligatoria junto a
+-- cualquier muestra del dato.
+CREATE TABLE IF NOT EXISTS fear_greed (
+    ts TEXT PRIMARY KEY,
+    value INTEGER NOT NULL,
+    classification TEXT,
+    fetched_at TEXT NOT NULL
+);
+
+-- Memoria de lecciones (app/memory/): una fila INMUTABLE por operacion CERRADA y fiable (sombra
+-- cerrada con PnL), con lo que se sabia al decidir y el resultado. El PnL vive aqui pero nunca se
+-- muestra por API/Telegram/dashboard sin `is_outcome_reveal_allowed`.
+CREATE TABLE IF NOT EXISTS memory_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_group_key TEXT NOT NULL UNIQUE,
+    shadow_trade_id INTEGER,
+    built_at TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL CHECK (side IN ('LONG', 'SHORT')),
+    strategy_set TEXT NOT NULL,
+    timeframe TEXT,
+    decision_time TEXT NOT NULL,
+    closed_at TEXT NOT NULL,
+    hour_utc INTEGER,
+    atr_pct REAL,
+    risk_reward REAL,
+    sl_margin_loss_pct REAL,
+    llm_label TEXT NOT NULL,
+    news_sentiment REAL,
+    news_count INTEGER,
+    fear_greed INTEGER,
+    pnl_net_usdt REAL NOT NULL,
+    margin_usdt REAL NOT NULL,
+    return_pct REAL NOT NULL,
+    outcome TEXT NOT NULL CHECK (outcome IN ('WIN', 'LOSS')),
+    close_reason TEXT,
+    duration_hours REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_entries_closed ON memory_entries (closed_at);
+
+-- Lecciones agregadas por version de reconstruccion (`build_id`). Solo es `ACTIVE` una leccion con
+-- muestra minima, intervalo que excluye la tasa base y signo estable en las dos mitades del tiempo.
+CREATE TABLE IF NOT EXISTS lessons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    build_id TEXT NOT NULL,
+    built_at TEXT NOT NULL,
+    dimension TEXT NOT NULL,
+    pattern TEXT NOT NULL,
+    n INTEGER NOT NULL,
+    wins INTEGER NOT NULL,
+    winrate REAL,
+    ci_low REAL,
+    ci_high REAL,
+    base_winrate REAL,
+    mean_return_pct REAL,
+    half1_delta REAL,
+    half2_delta REAL,
+    status TEXT NOT NULL
+        CHECK (status IN ('ACTIVE', 'INSUFFICIENT', 'UNSTABLE', 'NOT_SIGNIFICANT')),
+    UNIQUE (build_id, dimension, pattern)
+);
+
+-- Que lecciones se inyectaron en cada decision (para auditar su influencia mas adelante).
+CREATE TABLE IF NOT EXISTS lesson_applications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_group_key TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    build_id TEXT,
+    lesson_ids_json TEXT NOT NULL DEFAULT '[]',
+    n_similar INTEGER NOT NULL DEFAULT 0,
+    evidence TEXT NOT NULL
+);
+
+-- Post-mortem de rachas perdedoras y tablas de calibracion; `dedupe_key` evita repetir el mismo.
+CREATE TABLE IF NOT EXISTS lessons_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL CHECK (kind IN ('POSTMORTEM', 'CALIBRATION')),
+    created_at TEXT NOT NULL,
+    dedupe_key TEXT UNIQUE,
+    body_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS backtest_verdicts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     strategy TEXT NOT NULL,
