@@ -6,92 +6,124 @@ veces. Si la frecuencia de `APORTA_VALOR` bajo esa relabelacion al azar es
 >= 0,05, el criterio no esta bien calibrado y no se usa para decidir hasta
 corregirlo.
 
-Solo usa operaciones de la MEDICION (no el piloto, no sombras de antes de la
-3.6): los mismos dos filtros que usa el reporte normal
-(`app.trading.shadow_report.build_report`).
+**Mismos filtros que el veredicto** (`app.trading.ai_value_report.
+load_verdict_inputs`): grupos de la medicion bajo el hash congelado, sin piloto y
+sin sombras no confiables (RECONCILE_FAILED / reconciliacion fallida). Lee la copia
+en modo solo lectura (`mode=ro`, igual que `scripts/measurement_status.py` y
+`scripts/ai_value_report.py`); `--db` debe ser una ruta distinta de
+`settings.database_path` (assert explicito). El placebo no revela nada de la IA (las
+etiquetas reales se sustituyen por azar), asi que puede correrse antes de que el gate
+se abra; debe registrarse ANTES de la primera decision real.
 
-**Tiempo aproximado.** Cada repeticion corre un bootstrap completo (2.000
-remuestreos por defecto). Con el valor de diseno (1.000 repeticiones) sobre el
-volumen de conglomerados de una medicion ya avanzada (cientos), puede tardar
-varios minutos; con unas pocas docenas de conglomerados (medicion temprana)
-tarda segundos. Para una vuelta rapida, bajar `--n-repeats` (p.ej. 100) a
-costa de un IC de Wilson mas ancho -- no cambia el calculo de cada repeticion,
-solo cuantas se hacen.
+**Tiempo.** Cada repeticion corre un bootstrap completo (2.000 remuestreos): ~0,65 s
+con ~640 conglomerados, es decir ~11 min con las 1.000 repeticiones de diseno
+(medicion y detalle en docs/VEREDICTO_3_6.md). Para una vuelta rapida, bajar
+`--n-repeats` (p.ej. 100-300) a costa de un IC de Wilson mas ancho.
 
-Ejecutalo sobre una COPIA de la base (regla de CLAUDE.md, nunca la de trabajo):
+Al final imprime un bloque listo para copiar al registro de docs/FASE3_6_LLM.md.
+`--out` guarda el informe completo (UTF-8) sin sobrescribir un archivo existente.
 
-    python scripts/placebo_check.py --db data/backups/minerva_placebo_copia.db
-    python scripts/placebo_check.py --db data/backups/minerva_placebo_copia.db --n-repeats 100
+    python scripts/placebo_check.py --db <copia consistente de la base>
+    python scripts/placebo_check.py --db <copia> --n-repeats 300 --out docs/PLACEBO_REGISTRO.txt
+
+Codigos de salida: 0 = calibrado; 6 = NO calibrado (el criterio no se usa); 3 = nada
+que calibrar todavia; 4 = bandera de pruebas rechazada (la base no es sintetica);
+5 = `--out` apunta a un archivo que ya existe.
+
+`--allow-synthetic-for-tests` y `--frozen-hash` existen SOLO para las pruebas con
+datos sinteticos (misma guardia que `scripts/ai_value_report.py`).
 """
 
 from __future__ import annotations
 
 import argparse
-import asyncio
-import os
 import sys
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, ".")
 
 from app.config import settings  # noqa: E402
-from app.persistence.database import Database  # noqa: E402
-from app.persistence.repositories import llm_logs_repo, shadow_repo  # noqa: E402
-from app.trading.ai_value import APROBADA, RECHAZADA, placebo_calibration  # noqa: E402
+from app.trading.ai_value import PLACEBO_REPEATS  # noqa: E402
+from app.trading.ai_value_placebo import build_placebo, render_placebo  # noqa: E402
+from app.trading.ai_value_report import SyntheticGuardError  # noqa: E402
+from app.trading.shadow_live_labeler import FROZEN_PROMPT_SHA256  # noqa: E402
+from scripts.measurement_status import _connect_ro  # noqa: E402
+
+EXIT_CALIBRATED = 0
+EXIT_NOTHING_TO_CALIBRATE = 3
+EXIT_SYNTHETIC_REFUSED = 4
+EXIT_OUT_EXISTS = 5
+EXIT_NOT_CALIBRATED = 6
 
 
-async def main(db_path: str, n_repeats: int) -> None:
-    db = Database(db_path)
-    await db.connect()
+def main(
+    db_path: str, n_repeats: int = PLACEBO_REPEATS, *, allow_synthetic_for_tests: bool = False,
+    frozen_hash: str = FROZEN_PROMPT_SHA256, out_path: str | None = None,
+) -> int:
+    if out_path is not None and Path(out_path).exists():
+        print(f"RECHAZADO: {out_path} ya existe; este script no sobrescribe un registro.")
+        return EXIT_OUT_EXISTS
+    conn = _connect_ro(db_path)
     try:
-        trades_open = await shadow_repo.get_open(db)
-        trades_closed = await shadow_repo.get_closed(db)
-        all_trades = trades_open + trades_closed
-
-        piloto_keys = await llm_logs_repo.get_piloto_signal_group_keys(db)
-        measurement_keys = await llm_logs_repo.get_measurement_signal_group_keys(db)
-        measured = [
-            t for t in all_trades
-            if t.signal_group_key in measurement_keys and t.signal_group_key not in piloto_keys
-        ]
-        labeled_closed = [
-            t for t in measured
-            if t.closed_at is not None and t.llm_decision in (APROBADA, RECHAZADA)
-        ]
-        if not labeled_closed:
-            print("No hay operaciones de la medicion, cerradas y con decision del LLM: "
-                  "nada que calibrar todavia.")
-            return
-
-        n_app = sum(1 for t in labeled_closed if t.llm_decision == APROBADA)
-        approval_rate = n_app / len(labeled_closed)
-        print(f"Operaciones de la medicion, cerradas y con decision: {len(labeled_closed)}")
-        print(f"Tasa de aprobacion observada: {approval_rate:.1%}")
-        print(f"Repeticiones: {n_repeats} (puede tardar; ver el docstring del script)")
-
-        result = placebo_calibration(measured, approval_rate, n_repeats=n_repeats)
-
-        print(f"APORTA_VALOR por azar: {result.aporta_valor_count} de {result.n_repeats} "
-              f"({result.frequency:.1%})")
-        print(f"IC 95 % de Wilson de esa frecuencia: [{result.ci_low:.1%}, {result.ci_high:.1%}]")
-        print(f"Calibrado (frecuencia < 5 %): {'SI' if result.calibrated else 'NO'}")
-        if not result.calibrated:
-            print(
-                "El criterio NO esta bien calibrado: no se usa para decidir hasta corregirlo "
-                "(docs/FASE3_6_LLM.md, seccion f)."
+        print(f"Repeticiones: {n_repeats} (puede tardar; ver el docstring del script)", flush=True)
+        started = time.perf_counter()
+        try:
+            run = build_placebo(
+                conn, frozen_hash=frozen_hash, allow_synthetic_for_tests=allow_synthetic_for_tests,
+                n_repeats=n_repeats,
             )
+        except SyntheticGuardError as exc:
+            print(f"RECHAZADO: {exc}")
+            return EXIT_SYNTHETIC_REFUSED
     finally:
-        await db.close()
+        conn.close()
+
+    elapsed = time.perf_counter() - started
+    header = f"Copia analizada: {Path(db_path).resolve()}"
+    text = render_placebo(run, run_at=datetime.now(UTC), elapsed_s=elapsed)
+    print(header)
+    print(text)
+    if run.result is None:
+        return EXIT_NOTHING_TO_CALIBRATE
+    if out_path is not None:
+        # Modo "x": falla si el archivo aparecio entre la comprobacion y ahora.
+        with open(out_path, "x", encoding="utf-8") as fh:
+            fh.write(header + "\n" + text)
+        print(f"Registro guardado en {out_path}")
+    return EXIT_CALIBRATED if run.result.calibrated else EXIT_NOT_CALIBRATED
 
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        # La consola de Windows (cp1252) no puede imprimir el delta del informe.
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--db", required=True, help="copia de la base a analizar")
-    parser.add_argument("--n-repeats", type=int, default=1000)
+    parser.add_argument("--db", required=True, help="copia de la base (nunca la de trabajo)")
+    parser.add_argument("--n-repeats", type=int, default=PLACEBO_REPEATS)
+    parser.add_argument(
+        "--out", default=None,
+        help="guarda el informe (UTF-8) como registro; nunca sobrescribe un archivo existente",
+    )
+    parser.add_argument(
+        "--allow-synthetic-for-tests", action="store_true",
+        help="SOLO pruebas: acepta una base sintetica (se rechaza con datos reales)",
+    )
+    parser.add_argument(
+        "--frozen-hash", default=None,
+        help="SOLO pruebas, junto con --allow-synthetic-for-tests: hash de la base sintetica",
+    )
     args = parser.parse_args()
-    if not Path(args.db).exists():
-        raise SystemExit(f"No existe: {args.db}")
-    assert os.path.abspath(args.db) != os.path.abspath(settings.database_path), (
+    if args.frozen_hash is not None and not args.allow_synthetic_for_tests:
+        parser.error("--frozen-hash solo se acepta junto con --allow-synthetic-for-tests")
+    if args.n_repeats < 1:
+        parser.error("--n-repeats debe ser >= 1")
+
+    assert Path(args.db).resolve() != Path(settings.database_path).resolve(), (
         "la ruta de --db no puede ser la base de trabajo (settings.database_path)"
     )
-    asyncio.run(main(args.db, args.n_repeats))
+    sys.exit(main(
+        args.db, args.n_repeats, allow_synthetic_for_tests=args.allow_synthetic_for_tests,
+        frozen_hash=args.frozen_hash or FROZEN_PROMPT_SHA256, out_path=args.out,
+    ))
