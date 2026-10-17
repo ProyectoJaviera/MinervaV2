@@ -101,7 +101,7 @@ async def test_router_answers_help_for_unknown_commands_and_silence_for_plain_te
 # --- /status ------------------------------------------------------------------------------
 
 
-async def test_status_on_an_empty_account(db):
+async def test_status_on_an_empty_account(db, reveal_open):
     ctx, _ = make_ctx(db)
 
     text = await CommandRouter(ctx)("/status")
@@ -115,6 +115,24 @@ async def test_status_on_an_empty_account(db):
     assert "Ultimo ciclo de senales: hace 3 min" in text
     assert "Etiquetado en vivo: DESACTIVADO | hash congelado OK: si" in text
     assert "Medicion: APROBADA 0/300, RECHAZADA 0/300 | gate CERRADO" in text
+
+
+async def test_status_hides_balance_and_equity_without_the_official_record(db):
+    """Estado real de hoy (gate cerrado, sin registro): el balance y el equity de la cuenta
+    paper son el PnL de las APROBADA ejecutadas, asi que no se muestran."""
+    ctx, backend = make_ctx(db, marks={"BTCUSDT": 104.0})
+    trade = await _open_long(backend)
+    await backend.close_if_open(trade.id, 105.0, "TP", fill_source="TICK")
+    await _open_long(backend)
+
+    text = await CommandRouter(ctx)("/status")
+
+    assert (
+        "Capital inicial 100.00 USDT | balance y equity: ocultos hasta el registro oficial" in text
+    )
+    assert "balance 100" not in text and "equity 1" not in text
+    assert "Posiciones abiertas: 1/5" in text  # la estructura y el estado de riesgo siguen
+    assert "Kill switch: inactivo" in text
 
 
 async def test_status_reflects_pause_kill_switch_breaker_and_drawdown_stop(db):
@@ -173,7 +191,7 @@ async def test_positions_without_open_trades(db):
     assert text == "MODO PAPER TRADING\nSin posiciones abiertas (cuenta real simulada)."
 
 
-async def test_positions_show_the_floating_pnl_with_the_monitor_marks(db):
+async def test_positions_show_the_floating_pnl_with_the_monitor_marks(db, reveal_open):
     ctx, backend = make_ctx(db, marks={"BTCUSDT": 98.0})
     await _open_long(backend)
 
@@ -184,7 +202,19 @@ async def test_positions_show_the_floating_pnl_with_the_monitor_marks(db):
     assert "PnL flotante -" in text and "(mark 98.0)" in text
 
 
-async def test_positions_without_a_mark_say_so_and_never_call_the_network(db):
+async def test_positions_keep_the_structure_but_hide_the_floating_pnl_without_the_record(db):
+    ctx, backend = make_ctx(db, marks={"BTCUSDT": 98.0})
+    await _open_long(backend)
+
+    text = await CommandRouter(ctx)("/positions")
+
+    assert "Posiciones abiertas (cuenta real simulada): 1" in text
+    assert "BTCUSDT LONG" in text and "SL 95.0" in text and "TP 110.0" in text
+    assert "PnL flotante: ocultos hasta el registro oficial del veredicto" in text
+    assert "(mark" not in text and "PnL flotante -" not in text and "PnL flotante +" not in text
+
+
+async def test_positions_without_a_mark_say_so_and_never_call_the_network(db, reveal_open):
     ctx, backend = make_ctx(db, marks={})
     await _open_long(backend)
     calls_before = list(backend.rest_client.calls)
@@ -195,7 +225,22 @@ async def test_positions_without_a_mark_say_so_and_never_call_the_network(db):
     assert backend.rest_client.calls == calls_before  # ningun REST desde el comando
 
 
-async def test_balance_with_floating_pnl_realized_pnl_and_missing_marks(db):
+async def test_balance_hides_balance_equity_and_pnl_without_the_official_record(db):
+    ctx, backend = make_ctx(db, marks={"BTCUSDT": 104.0})
+    trade = await _open_long(backend)
+    await backend.close_if_open(trade.id, 105.0, "TP", fill_source="TICK")  # una ganadora cerrada
+    await _open_long(backend)
+
+    text = await CommandRouter(ctx)("/balance")
+
+    assert "Capital inicial: 100.00 USDT" in text
+    assert "Balance, equity y PnL: ocultos hasta el registro oficial del veredicto" in text
+    assert "Posiciones abiertas: 1" in text
+    for leaked in ("Balance realizado", "Equity", "vs inicial", "parcial"):
+        assert leaked not in text
+
+
+async def test_balance_with_floating_pnl_realized_pnl_and_missing_marks(db, reveal_open):
     ctx, backend = make_ctx(db, marks={"BTCUSDT": 104.0})
     trade = await _open_long(backend)
     initial = ctx.settings.initial_capital_usdt
@@ -221,7 +266,7 @@ async def test_balance_with_floating_pnl_realized_pnl_and_missing_marks(db):
     assert "Posiciones abiertas: 0" in closed
 
 
-async def test_equity_matches_the_paper_backend_calculation(db):
+async def test_equity_matches_the_paper_backend_calculation(db, reveal_open):
     ctx, backend = make_ctx(db, marks={"BTCUSDT": 97.5})
     await _open_long(backend)
 
@@ -235,7 +280,9 @@ async def test_equity_matches_the_paper_backend_calculation(db):
 # --- nunca sombras con resultados ----------------------------------------------------------
 
 
-async def test_positions_and_balance_never_touch_shadow_trades(file_db):
+async def test_positions_and_balance_read_shadow_trades_only_through_pnl_free_queries(file_db):
+    """Para decidir si los resultados de la cuenta se muestran, /positions y /balance consultan
+    el avance de la medicion (conteos y marcas de tiempo): jamas un campo de resultado."""
     db, path = file_db
     insert_groups(path, scenario(5, 5, approved_ret=HUGE, rejected_ret=-HUGE))
     ctx, backend = make_ctx(db, marks={"BTCUSDT": 98.0})
@@ -246,7 +293,10 @@ async def test_positions_and_balance_never_touch_shadow_trades(file_db):
         balance = await CommandRouter(ctx)("/balance")
 
     assert trace.statements
-    assert not any("shadow_trades" in s.lower() for s in trace.statements)
+    for sql in (s.lower() for s in trace.statements):
+        if "shadow_trades" in sql:
+            for forbidden in ("pnl", "exit_price", "close_reason", "select *"):
+                assert forbidden not in sql, sql
     for text in (positions, balance):
         assert str(int(HUGE)) not in text
 

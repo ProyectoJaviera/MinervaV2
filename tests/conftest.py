@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import pytest
 import pytest_asyncio
 
 from app.config import settings
@@ -17,6 +18,13 @@ async def db() -> Database:
         yield database
     finally:
         await database.close()
+
+
+@pytest.fixture
+def reveal_open(monkeypatch):
+    """Simula "gate abierto + registro oficial del veredicto" en los comandos de Telegram: sin
+    esto (el estado real hoy) balance, equity, PnL y PF de la cuenta paper estan ocultos."""
+    monkeypatch.setattr("app.telegram.commands.is_outcome_reveal_allowed", lambda *a, **k: True)
 
 
 @pytest_asyncio.fixture

@@ -7,7 +7,10 @@
   medicion solo lee `app.trading.measurement_status` (conteos y marcas de tiempo, sin
   PnL), y este modulo NO importa `shadow_report`, `ai_value*` ni `shadow_repo`.
 - `/positions` y `/balance` reflejan la cuenta REAL SIMULADA (`trades`), nunca las
-  sombras.
+  sombras. Desde la subfase 3.9 esa cuenta incluye las operaciones del brazo ejecutado
+  (senales APROBADA), asi que balance, equity, PnL flotante y PF/esperanza solo se muestran
+  con `is_outcome_reveal_allowed` (gate abierto + registro oficial), igual que los
+  resultados de las sombras; antes de eso solo estructura (simbolo, lado, niveles) y conteos.
 - Sin llamadas a la red de Bitunix: el PnL flotante usa los marks que ya mantiene el
   `PositionMonitor`.
 - Texto plano (sin `parse_mode`), primera linea "MODO PAPER TRADING".
@@ -37,12 +40,14 @@ from app.trading.measurement_status import (
     MeasurementStatus,
     compute_status_async,
     is_measurement_gate_open,
+    is_outcome_reveal_allowed,
     pace_lines,
 )
 
 logger = get_logger(__name__)
 
 HEADER = "MODO PAPER TRADING"
+HIDDEN_RESULTS = "ocultos hasta el registro oficial del veredicto (regla del 2026-10-17)"
 COMMANDS = ("/status", "/positions", "/balance", "/metrics", "/pause", "/resume", "/kill")
 
 
@@ -113,7 +118,6 @@ def _measurement_line(status: MeasurementStatus) -> str:
 
 async def cmd_status(ctx: BotContext) -> str:
     now = ctx.now()
-    balance, equity, positions, missing = await _equity_and_missing(ctx)
     paused = await control_state.is_scheduler_paused(ctx.db)
     kill = await risk_engine.is_kill_switch_active(ctx.db)
     breaker_until = await risk_engine.get_active_circuit_breaker_until(ctx.db)
@@ -121,6 +125,16 @@ async def cmd_status(ctx: BotContext) -> str:
     since = local_day_start_utc(ctx.settings.report_timezone, now)
     spend = await llm_logs_repo.get_spend_since(ctx.db, since)
     status = await compute_status_async(ctx.db)
+    initial = ctx.settings.initial_capital_usdt
+    if is_outcome_reveal_allowed(status):
+        balance, equity, positions, missing = await _equity_and_missing(ctx)
+        account_line = (
+            f"Capital inicial {initial:.2f} | balance {balance:.2f} | equity {equity:.2f} USDT"
+            + (f" (sin mark: {', '.join(missing)})" if missing else "")
+        )
+    else:
+        positions = await trades_repo.get_open_positions(ctx.db)
+        account_line = f"Capital inicial {initial:.2f} USDT | balance y equity: {HIDDEN_RESULTS}"
 
     last_cycle = ctx.scheduler.last_cycle_at
     if last_cycle is None:
@@ -133,8 +147,7 @@ async def cmd_status(ctx: BotContext) -> str:
     labeling_on = bool(labeler.settings.llm_live_labeling_enabled)
     lines = [
         HEADER,
-        f"Capital inicial {ctx.settings.initial_capital_usdt:.2f} | balance {balance:.2f} | "
-        f"equity {equity:.2f} USDT" + (f" (sin mark: {', '.join(missing)})" if missing else ""),
+        account_line,
         f"Posiciones abiertas: {len(positions)}/{ctx.settings.max_simultaneous_positions}",
         f"Kill switch: {'ACTIVO' if kill else 'inactivo'} | Scheduler pausado: "
         f"{'SI (la medicion esta detenida)' if paused else 'no'}",
@@ -167,14 +180,24 @@ async def _paper_arm_line(ctx: BotContext) -> str:
 # --- /positions, /balance -----------------------------------------------------------
 
 
+async def _results_visible(ctx: BotContext) -> bool:
+    """Los resultados de la cuenta paper (balance, equity, PnL) siguen la MISMA regla que los de
+    las sombras: solo con el gate abierto Y el registro oficial del veredicto (subfase 3.9:
+    las operaciones del brazo ejecutado son la mitad APROBADA del veredicto)."""
+    return is_outcome_reveal_allowed(await compute_status_async(ctx.db))
+
+
 async def cmd_positions(ctx: BotContext) -> str:
     positions = await trades_repo.get_open_positions(ctx.db)
     if not positions:
         return f"{HEADER}\nSin posiciones abiertas (cuenta real simulada)."
+    reveal = await _results_visible(ctx)
     marks = ctx.marks()
     lines = [HEADER, f"Posiciones abiertas (cuenta real simulada): {len(positions)}"]
     for p in positions:
-        if p.symbol in marks:
+        if not reveal:
+            float_txt = f"PnL flotante: {HIDDEN_RESULTS}"
+        elif p.symbol in marks:
             pnl = _usd(ctx.paper_backend.unrealized_pnl_usdt(p, marks[p.symbol]))
             float_txt = f"PnL flotante {pnl} USDT (mark {marks[p.symbol]})"
         else:
@@ -189,8 +212,17 @@ async def cmd_positions(ctx: BotContext) -> str:
 
 
 async def cmd_balance(ctx: BotContext) -> str:
-    balance, equity, positions, missing = await _equity_and_missing(ctx)
     initial = ctx.settings.initial_capital_usdt
+    if not await _results_visible(ctx):
+        positions = await trades_repo.get_open_positions(ctx.db)
+        return "\n".join([
+            HEADER,
+            "Cuenta real simulada (no incluye sombras):",
+            f"- Capital inicial: {initial:.2f} USDT",
+            f"- Balance, equity y PnL: {HIDDEN_RESULTS}",
+            f"- Posiciones abiertas: {len(positions)}",
+        ])
+    balance, equity, positions, missing = await _equity_and_missing(ctx)
     lines = [
         HEADER,
         "Cuenta real simulada (no incluye sombras):",
@@ -206,9 +238,18 @@ async def cmd_balance(ctx: BotContext) -> str:
 # --- /metrics -------------------------------------------------------------------------
 
 
-async def _real_account_metrics(ctx: BotContext) -> list[str]:
+async def _real_account_metrics(ctx: BotContext, *, reveal: bool) -> list[str]:
     """PF y esperanza por estrategia de las operaciones CERRADAS de la cuenta real
-    simulada (tabla `trades`), nunca de las sombras."""
+    simulada (tabla `trades`), nunca de las sombras. Sin el registro oficial del veredicto
+    solo el conteo: la consulta ni siquiera lee el PnL."""
+    if not reveal:
+        row = await ctx.db.fetch_one("SELECT COUNT(*) AS n FROM trades WHERE status = 'CLOSED'")
+        if not row["n"]:
+            return ["Cuenta real simulada: sin operaciones cerradas todavia."]
+        return [
+            f"Cuenta real simulada: {row['n']} operaciones cerradas "
+            f"(PF y esperanza: {HIDDEN_RESULTS})"
+        ]
     rows = await ctx.db.fetch_all(
         "SELECT strategy, pnl_net_usdt FROM trades WHERE status = 'CLOSED'"
     )
@@ -275,7 +316,7 @@ async def cmd_metrics(ctx: BotContext) -> str:
             "hasta el punto de analisis."
         )
     lines.append("")
-    lines += await _real_account_metrics(ctx)
+    lines += await _real_account_metrics(ctx, reveal=is_outcome_reveal_allowed(status))
     return "\n".join(lines)
 
 

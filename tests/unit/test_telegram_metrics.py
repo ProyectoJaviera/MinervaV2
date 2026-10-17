@@ -104,7 +104,7 @@ async def test_metrics_never_run_a_pnl_query_over_shadow_trades(file_db, small_g
             assert forbidden not in sql, sql
 
 
-async def test_metrics_include_the_real_account_by_strategy(db):
+async def test_metrics_include_the_real_account_by_strategy(db, reveal_open):
     ctx, backend = make_ctx(db, marks={"BTCUSDT": 105.0})
     trade = await _open_long(backend)
     await backend.close_if_open(trade.id, 105.0, "TP", fill_source="TICK")
@@ -113,6 +113,35 @@ async def test_metrics_include_the_real_account_by_strategy(db):
 
     assert "Cuenta real simulada: 1 operaciones cerradas" in text
     assert "- ema_cross_9_21: 1 cerradas | PF n/d | esperanza +" in text
+
+
+async def test_metrics_hide_the_real_account_results_without_the_official_record(db):
+    ctx, backend = make_ctx(db, marks={"BTCUSDT": 105.0})
+    trade = await _open_long(backend)
+    await backend.close_if_open(trade.id, 105.0, "TP", fill_source="TICK")
+
+    text = await CommandRouter(ctx)("/metrics")
+
+    assert (
+        "Cuenta real simulada: 1 operaciones cerradas "
+        "(PF y esperanza: ocultos hasta el registro oficial del veredicto" in text
+    )
+    for leaked in ("PF n/d", "PF 1", "esperanza +", "esperanza -", "ema_cross_9_21:"):
+        assert leaked not in text
+
+
+async def test_metrics_never_read_the_account_pnl_while_the_results_are_hidden(file_db):
+    db, path = file_db
+    ctx, backend = make_ctx(db, marks={"BTCUSDT": 105.0})
+    trade = await _open_long(backend)
+    await backend.close_if_open(trade.id, 105.0, "TP", fill_source="TICK")
+
+    async with SqlTrace(db) as trace:
+        await CommandRouter(ctx)("/metrics")
+
+    trade_reads = [s.lower() for s in trace.statements if "from trades" in s.lower()]
+    assert trade_reads  # cuenta las cerradas...
+    assert not any("pnl" in s or "select *" in s for s in trade_reads)  # ...sin leer el PnL
 
 
 def test_the_commands_module_cannot_reach_the_verdict_or_the_shadow_results():

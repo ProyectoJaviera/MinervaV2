@@ -16,11 +16,11 @@ Disenado para fallar CERRADO, no abierto:
   en el futuro, NO aparece en la respuesta hasta que alguien lo agregue a
   mano aqui -- nunca `trade.model_dump()` ni ningun atajo que copie "todo
   menos lo prohibido".
-- El router nunca declara `response_model=list[ShadowTrade]` (a diferencia
-  de `positions.py`/`trades.py`, donde no hay nada que esconder): como
-  `ShadowTrade` SI declara `pnl_net_usdt` como campo real, el filtrado de
-  `response_model` de FastAPI no protegeria nada -- el valor real se
-  serializaria igual. Las rutas que usan esto devuelven `list[dict]` simple.
+- El router nunca declara `response_model=list[ShadowTrade]` (ni, desde la subfase
+  3.9, `positions.py`/`trades.py` con `Trade`): como `ShadowTrade`/`Trade` SI declaran
+  `pnl_net_usdt` como campo real, el filtrado de `response_model` de FastAPI no
+  protegeria nada -- el valor real se serializaria igual. Las rutas que usan esto
+  devuelven `list[dict]` simple.
 - Deliberadamente fuera del whitelist en CUALQUIER caso (no sirven para esta
   vista y son senales blandas de resultado, no solo PnL explicito):
   `fee_entry_usdt`/`fee_exit_usdt`/`funding_paid_usdt`/
@@ -33,7 +33,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 
-from app.persistence.models import ShadowTrade
+from app.persistence.models import ShadowTrade, Trade
 
 # Campos que NUNCA revelan un resultado (plan/senal al abrir, no el cierre).
 _ALWAYS_VISIBLE_FIELDS = (
@@ -53,6 +53,36 @@ def shadow_trade_to_public_dict(trade: ShadowTrade, *, reveal_outcome: bool) -> 
     if reveal_outcome:
         data.update(
             {field: _serialize_value(getattr(trade, field)) for field in _OUTCOME_FIELDS}
+        )
+    return data
+
+
+# --- cuenta paper (`trades`): subfase 3.9 ---------------------------------------------------
+#
+# Con el brazo ejecutado activo, `trades` contiene operaciones de senales APROBADA: su PnL, sus
+# costos y su motivo de cierre son la mitad APROBADA del veredicto, asi que siguen la MISMA
+# regla que las sombras (`is_outcome_reveal_allowed`). `GET /trades` y `GET /positions` (sin
+# login) ya NO usan `response_model=list[Trade]`: pasan por esta lista BLANCA. `decision_json`,
+# las columnas de reconciliacion y cualquier campo futuro quedan fuera hasta agregarlos a mano.
+_TRADE_ALWAYS_VISIBLE_FIELDS = (
+    "id", "symbol", "side", "strategy", "status", "leverage", "margin_usdt", "notional_usdt",
+    "qty", "entry_price", "opened_at", "sl_price", "tp_price", "trailing_distance", "liq_price",
+    "sl_margin_loss_pct", "decision_source",
+)
+_TRADE_OUTCOME_FIELDS = (
+    "pnl_gross_usdt", "pnl_net_usdt", "exit_price", "close_reason", "closed_at", "fee_entry_usdt",
+    "fee_exit_usdt", "funding_paid_usdt", "slippage_entry_usdt", "slippage_exit_usdt",
+    "best_price", "effective_stop", "fill_source",
+)
+
+
+def trade_to_public_dict(trade: Trade, *, reveal_outcome: bool) -> dict:
+    data = {
+        field: _serialize_value(getattr(trade, field)) for field in _TRADE_ALWAYS_VISIBLE_FIELDS
+    }
+    if reveal_outcome:
+        data.update(
+            {field: _serialize_value(getattr(trade, field)) for field in _TRADE_OUTCOME_FIELDS}
         )
     return data
 
