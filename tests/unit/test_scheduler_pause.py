@@ -30,7 +30,7 @@ class SpyLabeler:
     def note_cycle_start(self) -> None:
         self.cycle_starts += 1
 
-    def maybe_label(self, trade) -> None:  # pragma: no cover - sin candidatos
+    def maybe_label(self, trade, candidate=None) -> None:  # pragma: no cover - sin candidatos
         raise AssertionError("no deberia etiquetar")
 
 
@@ -138,10 +138,13 @@ async def test_health_reports_the_control_block(db):
     heartbeat.beat()
     scheduler = _FakeSchedulerForHealth(datetime.now(UTC))
 
-    normal = await health(heartbeat=heartbeat, scheduler=scheduler, live_labeler=labeler, db=db)
+    kwargs = dict(
+        heartbeat=heartbeat, scheduler=scheduler, live_labeler=labeler, db=db, paper_arm=None,
+    )
+    normal = await health(**kwargs)
     await control_state.set_scheduler_paused(db, True)
     await risk_engine.activate_kill_switch(db)
-    paused = await health(heartbeat=heartbeat, scheduler=scheduler, live_labeler=labeler, db=db)
+    paused = await health(**kwargs)
 
     assert normal["control"] == {"paused": False, "kill_switch_active": False}
     assert paused["control"] == {"paused": True, "kill_switch_active": True}

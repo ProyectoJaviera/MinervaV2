@@ -57,6 +57,7 @@ class BotContext:
     scheduler: Any
     live_labeler: Any
     monitor: Any | None = None
+    paper_arm: Any | None = None  # brazo ejecutado de la cuenta paper (subfase 3.9)
     now: Callable[[], datetime] = lambda: datetime.now(UTC)  # noqa: E731
 
     def marks(self) -> dict[str, float]:
@@ -145,9 +146,22 @@ async def cmd_status(ctx: BotContext) -> str:
         f"Ultimo ciclo de senales: {cycle}",
         f"Etiquetado en vivo: {'activo' if labeling_on else 'DESACTIVADO'} | hash congelado OK: "
         f"{'si' if labeler.frozen_hash_ok else 'NO'}",
+        await _paper_arm_line(ctx),
         _measurement_line(status),
     ]
     return "\n".join(lines)
+
+
+async def _paper_arm_line(ctx: BotContext) -> str:
+    """Brazo ejecutado de la cuenta paper: solo estado y conteos del dia, sin PnL."""
+    arm = ctx.paper_arm
+    if arm is None or not arm.active:
+        return "Brazo ejecutado (paper): apagado"
+    block = await arm.health_block()
+    return (
+        f"Brazo ejecutado (paper): activo | abiertas hoy {block['opened_today']} | "
+        f"omitidas hoy {block['skipped_today']}"
+    )
 
 
 # --- /positions, /balance -----------------------------------------------------------

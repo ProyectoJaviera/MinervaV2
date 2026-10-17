@@ -12,7 +12,11 @@ Reglas del plan aprobado:
   presupuesto diario que ya usa el piloto) con `fase='MEDICION'`.
 - **Nunca toca la cuenta real.** Esta clase no importa `PaperBackend` ni
   `trades_repo` de escritura: no abre ni cierra posiciones reales.
-  `AUTO_OPEN_WITHOUT_LLM` sigue en `false`, ese camino no se tocó.
+  `AUTO_OPEN_WITHOUT_LLM` sigue en `false`, ese camino no se tocó. Desde la subfase
+  3.9 puede avisar a un gancho opcional (`on_decision`, el `submit` de
+  `app.trading.paper_execution.PaperExecutionArm`) DESPUES de que la etiqueta ya
+  quedo persistida; el gancho no devuelve nada, corre en su propia tarea y un fallo
+  suyo se registra pero no afecta al etiquetado.
 - **Hash congelado, sin descartes silenciosos.** `FROZEN_PROMPT_SHA256` es el
   valor verificado contra el piloto real de v4 (45/45 JSON valido, banda de
   aprobacion OK, signo de funding correcto en los 45 casos -- ver seccion k).
@@ -34,7 +38,9 @@ Reglas del plan aprobado:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Any
 
 from app.config import Settings
 from app.core.logging import get_logger
@@ -69,10 +75,14 @@ MAX_LABELING_DELAY_SECONDS = 1800.0
 class ShadowLiveLabeler:
     def __init__(
         self, db: Database, settings: Settings, decision_service: LlmDecisionService,
+        on_decision: Callable[[ShadowTrade, Any, Any], None] | None = None,
     ) -> None:
         self.db = db
         self.settings = settings
         self.decision_service = decision_service
+        # Gancho sincrono `(sombra, resultado, candidato)`, llamado DESPUES de persistir la
+        # etiqueta (subfase 3.9). `None` (por defecto) = comportamiento anterior.
+        self.on_decision = on_decision
         self._tasks: set[asyncio.Task] = set()
         self._frozen_hash_ok_this_cycle = True
 
@@ -96,15 +106,17 @@ class ShadowLiveLabeler:
                 PROMPT_SHA256, FROZEN_PROMPT_SHA256,
             )
 
-    def maybe_label(self, trade: ShadowTrade) -> None:
+    def maybe_label(self, trade: ShadowTrade, candidate: Any = None) -> None:
         """Dispara (fuego y olvido) el etiquetado de `trade` si el flag esta
         en `true` Y el hash de este ciclo coincide con el congelado. Nunca
-        bloquea al llamador (`Scheduler.run_cycle`)."""
+        bloquea al llamador (`Scheduler.run_cycle`). `candidate` (la senal agrupada
+        de la que salio la sombra) solo viaja hasta el gancho `on_decision`; el
+        etiquetado no lo usa."""
         if not self.settings.llm_live_labeling_enabled:
             return
         if not self._frozen_hash_ok_this_cycle:
             return
-        task = asyncio.create_task(self._label_one(trade))
+        task = asyncio.create_task(self._label_one(trade, candidate))
         self._tasks.add(task)
         task.add_done_callback(self._on_task_done)
 
@@ -121,7 +133,20 @@ class ShadowLiveLabeler:
                 "Tarea de etiquetado en vivo fallo de forma inesperada", exc_info=exc,
             )
 
-    async def _label_one(self, trade: ShadowTrade) -> None:
+    def _dispatch_decision(self, trade: ShadowTrade, result: Any, candidate: Any) -> None:
+        """Avisa al gancho DESPUES de que `decide_group` ya persistio la etiqueta. Nunca
+        lanza: lo que haga (o falle) el gancho no cambia el etiquetado."""
+        if self.on_decision is None or result is None:
+            return
+        try:
+            self.on_decision(trade, result, candidate)
+        except Exception as exc:  # noqa: BLE001 - el etiquetado no depende del gancho
+            logger.error(
+                "Gancho de decision fallo (%s); el etiquetado no se ve afectado.",
+                type(exc).__name__,
+            )
+
+    async def _label_one(self, trade: ShadowTrade, candidate: Any = None) -> None:
         current = await shadow_repo.get(self.db, trade.id)
         if current is None:
             return
@@ -134,13 +159,15 @@ class ShadowLiveLabeler:
         features = await build_features_from_shadow_trade(self.db, current, self.settings)
         user_message = build_user_message(features)
         estimated_tokens = estimate_input_tokens(SYSTEM_PROMPT, user_message)
-        await self.decision_service.decide_group(
+        result = await self.decision_service.decide_group(
             signal_group_key=current.signal_group_key, shadow_trade_id=current.id,
             candle_close_time=current.candle_close_time, system_prompt=SYSTEM_PROMPT,
             prompt_version=PROMPT_VERSION, user_message=user_message,
             estimated_input_tokens=estimated_tokens, features_version=FEATURES_VERSION,
             now=now,
         )
+        # `decide_group` ya escribio la etiqueta (y la fila de llm_logs) al volver.
+        self._dispatch_decision(current, result, candidate)
 
     async def shutdown(self) -> None:
         """Cancela toda tarea pendiente (cierre limpio del bot, punto 4 del

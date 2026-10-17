@@ -39,6 +39,7 @@ from app.market.universe import UniverseRefresher
 from app.persistence.database import Database
 from app.telegram.commands import BotContext
 from app.telegram.runtime import maybe_start_telegram_bot
+from app.trading.paper_execution import PaperExecutionArm
 from app.trading.position_monitor import PositionMonitor
 from app.trading.shadow_book import ShadowBook
 from app.trading.shadow_live_labeler import ShadowLiveLabeler, build_decision_service
@@ -68,7 +69,14 @@ async def lifespan(app: FastAPI):
     # TAREA B (docs/FASE3_6_LLM.md seccion k): apagado por defecto
     # (`settings.llm_live_labeling_enabled`) -- `ShadowLiveLabeler` en si
     # decide si corre o no en cada ciclo, construirlo aqui no activa nada.
-    live_labeler = ShadowLiveLabeler(db, settings, build_decision_service(db, settings))
+    #
+    # Subfase 3.9: el brazo ejecutado de la cuenta PAPER se entera de cada decision DESPUES de
+    # que el labeler la persiste (`on_decision`) y corre en su propia tarea. Apagado por
+    # defecto (`PAPER_EXECUTION_ENABLED`); solo conoce a `PaperBackend`, nunca a un backend real.
+    paper_arm = PaperExecutionArm(db, settings, paper_backend)
+    live_labeler = ShadowLiveLabeler(
+        db, settings, build_decision_service(db, settings), on_decision=paper_arm.submit,
+    )
     scheduler = Scheduler(
         db, rest_client, paper_backend, settings, ws_client=ws_client, shadow=shadow_book,
         live_labeler=live_labeler,
@@ -87,10 +95,17 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001 - un fallo aqui no debe impedir arrancar
         logger.critical("Fallo la reconciliacion al arrancar", exc_info=True)
 
+    try:
+        await paper_arm.activate()
+    except Exception:  # noqa: BLE001 - el brazo nunca impide arrancar la medicion
+        logger.critical("Fallo la activacion del brazo ejecutado (paper)", exc_info=True)
+        paper_arm.active = False
+
     await monitor.start_feed()
     await scheduler.sync_ws_subscriptions()
 
     app.state.db = db
+    app.state.paper_execution = paper_arm
     app.state.rest_client = rest_client
     app.state.paper_backend = paper_backend
     app.state.monitor = monitor
@@ -112,7 +127,7 @@ async def lifespan(app: FastAPI):
         settings,
         BotContext(
             db=db, settings=settings, paper_backend=paper_backend, scheduler=scheduler,
-            live_labeler=live_labeler, monitor=monitor,
+            live_labeler=live_labeler, monitor=monitor, paper_arm=paper_arm,
         ),
         tasks,
     )
@@ -134,6 +149,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 pass
         await live_labeler.shutdown()
+        await paper_arm.shutdown()
         await monitor.shutdown()
         await coingecko_client.aclose()
         await rest_client.aclose()

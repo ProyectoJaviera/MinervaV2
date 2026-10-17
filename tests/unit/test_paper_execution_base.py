@@ -165,6 +165,41 @@ def _row_counts(path: Path) -> dict[str, int]:
         conn.close()
 
 
+REAL_DB = REPO_ROOT / "data" / "minerva_estabilidad.db"
+
+
+@pytest.mark.skipif(not REAL_DB.exists(), reason="no hay copia local de la base real")
+async def test_the_migration_on_a_copy_of_the_real_database_changes_nothing_else(tmp_path):
+    """Smoke sobre datos reales: la base real se abre en SOLO LECTURA y se copia con la API de
+    backup a `tmp_path`; solo la copia se migra (nunca la de `data/`)."""
+    copy = tmp_path / "real_copy.db"
+    assert copy.resolve() != REAL_DB.resolve()
+    source = sqlite3.connect(f"file:{REAL_DB.as_posix()}?mode=ro", uri=True)
+    destination = sqlite3.connect(str(copy))
+    try:
+        source.backup(destination)
+    finally:
+        destination.close()
+        source.close()
+    before = _row_counts(copy)
+
+    for _ in range(2):  # el segundo arranque debe ser inocuo
+        database = Database(str(copy))
+        await database.connect()
+        await database.close()
+
+    after = _row_counts(copy)
+    created = set(after) - set(before)
+    assert created <= {"paper_execution_log"}  # solo la tabla nueva (si la copia es previa a 3.9)
+    assert after.get("paper_execution_log", 0) == 0
+    assert {k: v for k, v in after.items() if k in before} == before
+    conn = sqlite3.connect(str(copy))
+    try:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        conn.close()
+
+
 async def test_connecting_to_a_database_without_the_table_adds_only_that_table(tmp_path):
     path = tmp_path / "old_shape.db"
     database = Database(str(path))

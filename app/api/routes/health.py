@@ -15,7 +15,11 @@ El bloque `llm_labeling` (TAREA B, docs/FASE3_6_LLM.md seccion k) informa el
 etiquetado en vivo de sombras durante la medicion: `frozen_hash_ok=false`
 significa que `PROMPT_SHA256` actual no coincide con el congelado y que, por
 eso, el etiquetado NO esta corriendo (aunque `enabled` sea `true`) -- ver
-`app/trading/shadow_live_labeler.py`."""
+`app/trading/shadow_live_labeler.py`.
+
+El bloque `paper_execution` (subfase 3.9) informa el brazo ejecutado de la cuenta paper:
+`enabled` es el interruptor, `active` que quedo armado al arrancar, `armed_since` desde
+cuando y las aperturas/omisiones del dia. Nunca trae PnL ni resultados."""
 
 from __future__ import annotations
 
@@ -23,7 +27,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_db, get_heartbeat, get_live_labeler, get_scheduler
+from app.api.deps import get_db, get_heartbeat, get_live_labeler, get_paper_arm, get_scheduler
 from app.core.heartbeat import Heartbeat
 from app.core.logging import get_dropped_log_count
 from app.core.scheduler import Scheduler
@@ -39,11 +43,16 @@ from app.llm.decision_service import (
 from app.persistence.database import Database
 from app.persistence.repositories import llm_logs_repo
 from app.trading import control_state, risk_engine
+from app.trading.paper_execution import PaperExecutionArm
 from app.trading.shadow_live_labeler import ShadowLiveLabeler
 
 router = APIRouter()
 
 STALE_AFTER_MINUTES = 90
+
+NO_PAPER_EXECUTION = {
+    "enabled": False, "active": False, "armed_since": None, "opened_today": 0, "skipped_today": 0,
+}
 
 
 @router.get("/health")
@@ -52,6 +61,7 @@ async def health(
     scheduler: Scheduler = Depends(get_scheduler),
     live_labeler: ShadowLiveLabeler = Depends(get_live_labeler),
     db: Database = Depends(get_db),
+    paper_arm: PaperExecutionArm | None = Depends(get_paper_arm),
 ) -> dict:
     last_cycle_at = scheduler.last_cycle_at
     stale = (
@@ -94,4 +104,7 @@ async def health(
             ),
             "cost_today_usd": cost_today_usd,
         },
+        "paper_execution": (
+            await paper_arm.health_block() if paper_arm is not None else NO_PAPER_EXECUTION
+        ),
     }

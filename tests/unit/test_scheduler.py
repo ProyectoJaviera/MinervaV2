@@ -225,12 +225,14 @@ class FakeLiveLabeler:
     def __init__(self) -> None:
         self.cycle_starts = 0
         self.labeled: list = []
+        self.candidates: list = []
 
     def note_cycle_start(self) -> None:
         self.cycle_starts += 1
 
-    def maybe_label(self, trade) -> None:
+    def maybe_label(self, trade, candidate=None) -> None:
         self.labeled.append(trade)
+        self.candidates.append(candidate)
 
 
 @pytest.mark.asyncio
@@ -253,6 +255,8 @@ async def test_run_cycle_calls_note_cycle_start_once_and_labels_each_new_shadow(
     assert live_labeler.cycle_starts == 1
     assert len(live_labeler.labeled) == 1
     assert live_labeler.labeled[0].symbol == "BTCUSDT"
+    # la senal agrupada viaja con la sombra hasta el gancho del brazo ejecutado (subfase 3.9)
+    assert live_labeler.candidates == [candidate]
 
 
 @pytest.mark.asyncio

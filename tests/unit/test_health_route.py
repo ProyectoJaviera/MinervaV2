@@ -39,11 +39,16 @@ async def test_health_is_ok_with_a_recent_cycle(db):
     scheduler = FakeScheduler(last_cycle_at=now)
 
     result = await health(
-        heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db
+        heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db,
+        paper_arm=None,
     )
 
     assert result["status"] == "ok"
     assert result["mode"] == "PAPER_TRADING"
+    assert result["paper_execution"] == {
+        "enabled": False, "active": False, "armed_since": None, "opened_today": 0,
+        "skipped_today": 0,
+    }
     assert result["last_beat_at"] == now.isoformat()
     assert result["last_cycle_at"] == now.isoformat()
     assert result["log_dropped_count"] == 0
@@ -59,7 +64,8 @@ async def test_health_is_stale_when_last_cycle_at_is_too_old(db):
     scheduler = FakeScheduler(last_cycle_at=old)  # ...pero el ciclo de negocio no avanza
 
     result = await health(
-        heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db
+        heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db,
+        paper_arm=None,
     )
 
     assert result["status"] == "stale"
@@ -73,7 +79,8 @@ async def test_health_is_stale_when_no_cycle_has_ever_completed(db):
     scheduler = FakeScheduler(last_cycle_at=None)
 
     result = await health(
-        heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db
+        heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db,
+        paper_arm=None,
     )
 
     assert result["status"] == "stale"
@@ -88,7 +95,8 @@ async def test_health_is_not_stale_just_under_the_threshold(db):
     scheduler = FakeScheduler(last_cycle_at=recent)
 
     result = await health(
-        heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db
+        heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db,
+        paper_arm=None,
     )
 
     assert result["status"] == "ok"

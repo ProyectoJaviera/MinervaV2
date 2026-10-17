@@ -11,7 +11,9 @@ backtest (docs/FASE2_CRITERIOS.md punto 6).
 
 La apertura automatica esta desactivada por defecto (`AUTO_OPEN_WITHOUT_LLM=false`)
 hasta la subfase 3.6: sin LLM las senales se registran en `signals` pero no
-llegan a la cuenta real.
+llegan a la cuenta real. Las aperturas de la cuenta paper con LLM NO pasan por aqui:
+las hace el brazo ejecutado (`app.trading.paper_execution`) cuando el etiquetado en vivo
+guarda una decision APROBADA (subfase 3.9).
 """
 
 from __future__ import annotations
@@ -108,8 +110,9 @@ class Scheduler:
                 except Exception:  # noqa: BLE001 - la sombra no debe tumbar el ciclo
                     logger.exception("Error abriendo operacion sombra en %s", candidate.symbol)
                 if shadow_trade is not None and self.live_labeler is not None:
-                    # Fuego y olvido: no bloquea el resto del ciclo (TAREA B).
-                    self.live_labeler.maybe_label(shadow_trade)
+                    # Fuego y olvido: no bloquea el resto del ciclo (TAREA B). El candidato
+                    # solo viaja hasta el gancho del brazo ejecutado (subfase 3.9).
+                    self.live_labeler.maybe_label(shadow_trade, candidate)
             try:
                 real = await self._process_candidate(candidate)
             except Exception:  # noqa: BLE001 - un candidato no debe tumbar el resto del ciclo

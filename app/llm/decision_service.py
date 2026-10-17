@@ -50,8 +50,9 @@ def estimate_cost_usd(input_tokens: int, output_tokens: int, settings: Settings)
 
 def real_open_allowed(label: str, decision_delay_s: float, settings: Settings) -> bool:
     """Regla de apertura de la cuenta real (seccion g): solo con APROBADA y si la
-    decision llego a tiempo. No la usa nada del ciclo del bot todavia (ver
-    docstring del modulo); queda lista para cuando se conecte."""
+    decision llego a tiempo. Desde la subfase 3.9 la aplica el brazo ejecutado de la
+    cuenta PAPER (`app.trading.paper_execution`), que se entera de cada decision despues
+    de que `decide_group` la persistio; este servicio sigue sin abrir nada."""
     return label == "APROBADA" and decision_delay_s <= settings.llm_real_max_delay_seconds
 
 

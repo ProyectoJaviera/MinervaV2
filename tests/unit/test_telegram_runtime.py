@@ -171,7 +171,7 @@ class CountingLabeler:
     def note_cycle_start(self) -> None:
         self.cycle_starts += 1
 
-    def maybe_label(self, trade) -> None:  # pragma: no cover - sin candidatos
+    def maybe_label(self, trade, candidate=None) -> None:  # pragma: no cover - sin candidatos
         raise AssertionError("no deberia etiquetar")
 
 
