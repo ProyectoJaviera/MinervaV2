@@ -6,7 +6,8 @@ responde, el resumen lo dice (y sigue informando lo que hay en la base).
 
 Contenido: estado de `GET /health` (ok/stale, `frozen_hash_ok`, etiquetado en vivo),
 etiquetadas y fallidas en las ultimas 24 h, costo del LLM en 24 h y acumulado de la
-medicion, N efectivo por lado (x/300) y si el gate esta abierto. **Nunca PnL ni
+medicion, N efectivo por lado (x/300), ritmo y dias estimados POR CALENDARIO y EN MARCHA
+(con el porcentaje de tiempo en marcha) y si el gate esta abierto. **Nunca PnL ni
 resultados de sombras**: las consultas solo tocan `llm_logs` y las marcas de
 tiempo/lado/simbolo de `shadow_trades` que ya usa `app.trading.measurement_status`
 (el mismo modulo sin PnL que protege la API y el dashboard).
@@ -60,6 +61,7 @@ from app.trading.measurement_status import (  # noqa: E402
     MeasurementStatus,
     compute_status,
     is_measurement_gate_open,
+    pace_lines,
 )
 from app.trading.shadow_live_labeler import FROZEN_PROMPT_SHA256  # noqa: E402
 from scripts.check_health import fetch_health  # noqa: E402
@@ -209,6 +211,7 @@ def _db_lines(snap: DbSnapshot | None, db_error: str | None, tz: ZoneInfo) -> li
         f"Avance de la medicion (punto de analisis: {MIN_EFFECTIVE_N} por lado):",
         f"- N efectivo APROBADA: {s.n_eff_approved}/{MIN_EFFECTIVE_N}",
         f"- N efectivo RECHAZADA: {s.n_eff_rejected}/{MIN_EFFECTIVE_N}",
+        *(f"- {line}" for line in pace_lines(s)),
     ]
     if is_measurement_gate_open(s):
         lines.append(

@@ -25,13 +25,24 @@ resultados: `is_outcome_reveal_allowed` (gate abierto Y registro oficial del
 veredicto en `docs/`, ver `app.trading.verdict_record`) es la condicion unica
 que usan la API, el dashboard y los reportes para decidir si una respuesta puede
 revelar PnL de sombras etiquetadas (regla del 2026-10-17: primero el placebo
-oficial y el veredicto)."""
+oficial y el veredicto).
+
+**Ritmo sobre tiempo EN MARCHA** (ademas del de calendario): el ritmo de calendario
+divide por todos los dias de la ventana, incluidos los que el bot estuvo apagado
+(p.ej. las ~58 h del 15 al 17 de octubre), asi que subestima lo que hace el bot cuando
+corre. El tiempo en marcha sale de las marcas de tiempo de las evaluaciones de cada
+ciclo (`signals.evaluated_at`, una por (simbolo, estrategia, timeframe, vela) y, como
+hay una estrategia de 1 h, al menos una por hora con el bot evaluando): un hueco de
+mas de `OFFLINE_GAP_HOURS` entre marcas consecutivas cuenta ENTERO como apagado. Solo
+marcas de tiempo, nunca PnL. Si la copia no tiene ninguna marca (base anterior a la
+3.3, o sintetica), el ritmo en marcha es `None` ("sin datos"), no 0 %."""
 
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.llm.schemas import DECISION_TO_LABEL
@@ -44,6 +55,59 @@ FASE_MEDICION = "MEDICION"
 APPROVAL_BAND = (0.15, 0.85)
 NON_OK_STATUSES = ("TIMEOUT", "ERROR_HTTP", "INVALID", "BUDGET_EXCEEDED")
 RATE_WINDOW_DAYS = 7.0
+OFFLINE_GAP_HOURS = 2.0
+
+# Marcas de evaluacion con resolucion de MINUTO (`YYYY-MM-DDTHH:MM`, UTC: `evaluated_at`
+# se escribe con `datetime.now(UTC)`): basta para un umbral de horas y una rafaga de
+# ~60 filas de un mismo ciclo colapsa en 1-3 marcas. Solo se leen las posteriores a
+# `lower`, que es el inicio de la medicion MENOS el umbral: una marca anterior a eso
+# habria dejado un hueco > umbral hasta la primera marca leida, que ya cuenta apagado.
+EVAL_MARKS_SQL = (
+    "SELECT DISTINCT substr(evaluated_at, 1, 16) AS m FROM signals WHERE evaluated_at >= ?"
+)
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def eval_marks_lower_bound(first_medicion_row_at: datetime) -> str:
+    start = _as_utc(first_medicion_row_at) - timedelta(hours=OFFLINE_GAP_HOURS)
+    return start.strftime("%Y-%m-%dT%H:%M")
+
+
+def parse_eval_marks(rows: Iterable) -> list[datetime]:
+    return [
+        datetime.strptime(r["m"], "%Y-%m-%dT%H:%M").replace(tzinfo=UTC) for r in rows if r["m"]
+    ]
+
+
+def running_seconds(
+    marks: Iterable[datetime], window_start: datetime, window_end: datetime,
+    *, gap_hours: float = OFFLINE_GAP_HOURS,
+) -> float:
+    """Segundos EN MARCHA dentro de `[window_start, window_end]`: cada par de marcas
+    consecutivas separadas por <= `gap_hours` cuenta completo; un hueco mayor cuenta
+    ENTERO como apagado. El extremo final de la ventana funciona como una marca mas (si
+    la ultima evaluacion fue hace <= `gap_hours`, el bot sigue en marcha); el comienzo
+    anterior a la primera marca cuenta apagado."""
+    start, end = _as_utc(window_start), _as_utc(window_end)
+    if end <= start:
+        return 0.0
+    points = sorted(p for p in (_as_utc(m) for m in marks) if p <= end)
+    if not points:
+        return 0.0
+    if points[-1] < end:
+        points.append(end)
+    gap = timedelta(hours=gap_hours)
+    running = 0.0
+    for prev, cur in zip(points, points[1:], strict=False):
+        if cur - prev > gap:
+            continue
+        lo, hi = max(prev, start), min(cur, end)
+        if hi > lo:
+            running += (hi - lo).total_seconds()
+    return running
 
 
 @dataclass(frozen=True)
@@ -115,6 +179,13 @@ class MeasurementStatus:
     rate_approved_per_day: float | None = None
     rate_rejected_per_day: float | None = None
     data_now: datetime | None = None
+    # Ritmo sobre tiempo EN MARCHA (ver el docstring del modulo). `None` = sin marcas de
+    # evaluacion en la copia. Los porcentajes son fracciones 0-1.
+    running_window_days: float | None = None
+    uptime_pct_window: float | None = None
+    uptime_pct_total: float | None = None
+    rate_approved_running_per_day: float | None = None
+    rate_rejected_running_per_day: float | None = None
 
     @property
     def total_ok(self) -> int:
@@ -135,15 +206,83 @@ class MeasurementStatus:
         return max(0, MIN_EFFECTIVE_N - n_eff)
 
     def days_needed(self, side: str) -> float | None:
-        """`None` significa "no se puede estimar" (sin historia suficiente en
+        """Dias de CALENDARIO estimados (el ritmo incluye los dias que el bot estuvo
+        apagado). `None` significa "no se puede estimar" (sin historia suficiente en
         la ventana, o ritmo reciente nulo) -- NUNCA una cantidad negativa."""
+        rate = self.rate_approved_per_day if side == "APROBADA" else self.rate_rejected_per_day
+        return self._days(side, rate)
+
+    def days_needed_running(self, side: str) -> float | None:
+        """Dias EN MARCHA estimados con el ritmo del tiempo que el bot estuvo
+        evaluando. Equivale a dias de calendario solo si el bot no vuelve a apagarse."""
+        rate = (
+            self.rate_approved_running_per_day if side == "APROBADA"
+            else self.rate_rejected_running_per_day
+        )
+        return self._days(side, rate)
+
+    def _days(self, side: str, rate: float | None) -> float | None:
         shortfall = self.shortfall(side)
         if shortfall == 0:
             return 0.0
-        rate = self.rate_approved_per_day if side == "APROBADA" else self.rate_rejected_per_day
         if not rate:  # None o 0.0: sin ritmo reciente del que proyectar
             return None
         return shortfall / rate
+
+
+def _fmt_pace_days(value: float | None, unit: str) -> str:
+    if value is None:
+        return "sin datos para estimar"
+    if value == 0.0:
+        return "ya alcanzado"
+    return f"~{value:.1f} {unit}"
+
+
+def _fmt_rate(rate: float | None, suffix: str) -> str:
+    return "n/d" if rate is None else f"{rate:.2f}{suffix}"
+
+
+def pace_lines(status: MeasurementStatus) -> list[str]:
+    """Ritmo y dias estimados, los DOS, con rotulos explicitos -- texto comun de
+    `scripts/measurement_status.py`, `/metrics` de Telegram y el resumen diario. Sin PnL."""
+    window = f"{status.window_days:.1f}"
+    lines = [
+        f"Ritmo por CALENDARIO (ultimos {window} dias, INCLUYE el tiempo con el bot apagado): "
+        f"APROBADA {_fmt_rate(status.rate_approved_per_day, '/dia')} -> "
+        f"{_fmt_pace_days(status.days_needed('APROBADA'), 'dias de calendario')}; "
+        f"RECHAZADA {_fmt_rate(status.rate_rejected_per_day, '/dia')} -> "
+        f"{_fmt_pace_days(status.days_needed('RECHAZADA'), 'dias de calendario')}"
+    ]
+    if status.running_window_days is None:
+        lines.append(
+            "Ritmo EN MARCHA: sin marcas de evaluacion de senales en esta base, no se puede "
+            "calcular"
+        )
+    else:
+        lines.append(
+            f"Ritmo EN MARCHA (solo el tiempo evaluando senales; un hueco de mas de "
+            f"{OFFLINE_GAP_HOURS:g} h sin ciclos cuenta como apagado): "
+            f"APROBADA {_fmt_rate(status.rate_approved_running_per_day, '/dia en marcha')} -> "
+            f"{_fmt_pace_days(status.days_needed_running('APROBADA'), 'dias EN MARCHA')}; "
+            f"RECHAZADA {_fmt_rate(status.rate_rejected_running_per_day, '/dia en marcha')} -> "
+            f"{_fmt_pace_days(status.days_needed_running('RECHAZADA'), 'dias EN MARCHA')}"
+        )
+        window_pct = (
+            "n/d" if status.uptime_pct_window is None else f"{status.uptime_pct_window:.0%}"
+        )
+        total_pct = "n/d" if status.uptime_pct_total is None else f"{status.uptime_pct_total:.0%}"
+        lines.append(
+            f"Tiempo en marcha: {window_pct} de los ultimos {window} dias "
+            f"({status.running_window_days:.1f} dias en marcha); {total_pct} desde el inicio de "
+            "la medicion. Los dias EN MARCHA equivalen a dias de calendario solo si el bot no "
+            "vuelve a apagarse."
+        )
+        if status.running_window_days < 1.0:
+            lines.append(
+                "(aviso: menos de 1 dia en marcha en la ventana -- la estimacion en marcha es "
+                "volatil)"
+            )
+    return lines
 
 
 def is_measurement_gate_open(status: MeasurementStatus) -> bool:
@@ -168,12 +307,13 @@ def is_outcome_reveal_allowed(status: MeasurementStatus, docs_dir: Path | None =
 
 def _build_status_from_rows(
     *, frozen_hash: str, rate_window_days: float, rows, known_keys, shadow_rows, labeled_rows,
+    eval_marks: list[datetime] | None = None,
 ) -> MeasurementStatus:
     """Computo puro, comun a `compute_status`/`compute_status_async`: ya
-    recibe las 4 consultas resueltas (filas de `llm_logs`, claves conocidas,
-    sombras posteriores a la primera fila, y las etiquetadas con su sombra
-    unida) -- separado para no duplicar esta logica entre la variante
-    sincrona y la async."""
+    recibe las 5 consultas resueltas (filas de `llm_logs`, claves conocidas,
+    sombras posteriores a la primera fila, las etiquetadas con su sombra
+    unida y las marcas de evaluacion de los ciclos) -- separado para no
+    duplicar esta logica entre la variante sincrona y la async."""
     total_medicion_rows = len(rows)
     ok_by_label = {"APROBADA": 0, "RECHAZADA": 0}
     non_ok_counts = dict.fromkeys(NON_OK_STATUSES, 0)
@@ -223,6 +363,22 @@ def _build_status_from_rows(
     rate_approved = n_eff_approved_window / window_days if window_days > 0 else None
     rate_rejected = n_eff_rejected_window / window_days if window_days > 0 else None
 
+    # Mismo numerador (lo etiquetado en la ventana), pero dividido por el tiempo en que el
+    # bot estuvo evaluando senales dentro de esa misma ventana.
+    running_window_days = uptime_window = uptime_total = None
+    rate_approved_running = rate_rejected_running = None
+    if eval_marks:
+        window_s = (data_now - window_start).total_seconds()
+        total_s = (data_now - first_medicion_row_at).total_seconds()
+        running_window_s = running_seconds(eval_marks, window_start, data_now)
+        running_window_days = running_window_s / 86400.0
+        uptime_window = running_window_s / window_s if window_s > 0 else None
+        running_total_s = running_seconds(eval_marks, first_medicion_row_at, data_now)
+        uptime_total = running_total_s / total_s if total_s > 0 else None
+        if running_window_days > 0:
+            rate_approved_running = n_eff_approved_window / running_window_days
+            rate_rejected_running = n_eff_rejected_window / running_window_days
+
     return MeasurementStatus(
         frozen_hash=frozen_hash, total_medicion_rows=total_medicion_rows,
         ok_by_label=ok_by_label, approval_rate=approval_rate, within_band=within_band,
@@ -231,7 +387,10 @@ def _build_status_from_rows(
         first_medicion_row_at=first_medicion_row_at, n_eff_approved=n_eff_approved,
         n_eff_rejected=n_eff_rejected, window_days=window_days,
         rate_approved_per_day=rate_approved, rate_rejected_per_day=rate_rejected,
-        data_now=data_now,
+        data_now=data_now, running_window_days=running_window_days,
+        uptime_pct_window=uptime_window, uptime_pct_total=uptime_total,
+        rate_approved_running_per_day=rate_approved_running,
+        rate_rejected_running_per_day=rate_rejected_running,
     )
 
 
@@ -273,10 +432,14 @@ def compute_status(
         """,
         (FASE_MEDICION, frozen_hash),
     ).fetchall()
+    eval_marks = parse_eval_marks(
+        conn.execute(EVAL_MARKS_SQL, (eval_marks_lower_bound(first_medicion_row_at),)).fetchall()
+    )
 
     return _build_status_from_rows(
         frozen_hash=frozen_hash, rate_window_days=rate_window_days, rows=rows,
         known_keys=known_keys, shadow_rows=shadow_rows, labeled_rows=labeled_rows,
+        eval_marks=eval_marks,
     )
 
 
@@ -313,8 +476,12 @@ async def compute_status_async(
         """,
         (FASE_MEDICION, frozen_hash),
     )
+    eval_marks = parse_eval_marks(
+        await db.fetch_all(EVAL_MARKS_SQL, (eval_marks_lower_bound(first_medicion_row_at),))
+    )
 
     return _build_status_from_rows(
         frozen_hash=frozen_hash, rate_window_days=rate_window_days, rows=rows,
         known_keys=known_keys, shadow_rows=shadow_rows, labeled_rows=labeled_rows,
+        eval_marks=eval_marks,
     )

@@ -103,6 +103,26 @@ def insert_groups(path: Path, groups: list[Group]) -> None:
         conn.close()
 
 
+def insert_eval_marks(path: Path, marks: list[datetime], *, per_mark: int = 1) -> None:
+    """Marcas de evaluacion de ciclos (`signals.evaluated_at`) para el ritmo EN MARCHA.
+    `per_mark` > 1 imita la rafaga de un ciclo real (varias estrategias en el mismo
+    minuto). Cada fila lleva un `candle_close_time` unico (UNIQUE de la tabla)."""
+    conn = sqlite3.connect(str(path))
+    try:
+        for i, mark in enumerate(marks):
+            for j in range(per_mark):
+                evaluated_at = (mark + timedelta(seconds=j)).isoformat()
+                conn.execute(
+                    "INSERT INTO signals (symbol, strategy, timeframe, candle_close_time, "
+                    "evaluated_at, signal, price_at_eval) VALUES (?, 'ema_cross_9_21', '1h', ?, "
+                    "?, 'HOLD', 1.0)",
+                    (f"S{j}USDT", f"{mark.isoformat()}#{i}", evaluated_at),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _json_list(values: tuple[str, ...]) -> str:
     import json
 

@@ -34,6 +34,7 @@ from app.trading.measurement_status import (  # noqa: E402
     RATE_WINDOW_DAYS,
     MeasurementStatus,
     compute_status,
+    pace_lines,
 )
 
 
@@ -44,14 +45,6 @@ def _connect_ro(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(f"file:{p.as_posix()}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
-
-
-def _fmt_days(value: float | None) -> str:
-    if value is None:
-        return "sin datos suficientes para estimar (poco ritmo reciente o poca historia)"
-    if value == 0.0:
-        return "ya alcanzado"
-    return f"~{value:.1f} dias"
 
 
 def format_report(status: MeasurementStatus) -> str:
@@ -124,17 +117,13 @@ def format_report(status: MeasurementStatus) -> str:
         f"(faltan {status.shortfall('RECHAZADA')})"
     )
     lines.append(
-        f"Ritmo de los ultimos {status.window_days:.1f} dias disponibles "
-        f"(ventana de {RATE_WINDOW_DAYS:.0f}, o todos los disponibles si hay menos historia):"
+        f"Ritmo en conglomerados efectivos/dia sobre los ultimos {status.window_days:.1f} dias "
+        f"disponibles (ventana de {RATE_WINDOW_DAYS:.0f}, o todos los disponibles si hay "
+        "menos historia). Se muestran DOS ritmos:"
     )
-    rate_app = f"{status.rate_approved_per_day:.2f}" if status.rate_approved_per_day else "0.00"
-    rate_rej = f"{status.rate_rejected_per_day:.2f}" if status.rate_rejected_per_day else "0.00"
-    lines.append(f"  APROBADA: {rate_app} conglomerados efectivos/dia")
-    lines.append(f"  RECHAZADA: {rate_rej} conglomerados efectivos/dia")
+    lines.extend(f"  {line}" for line in pace_lines(status))
     if status.window_days < 1.0:
         lines.append("  (aviso: menos de 1 dia de historia -- estimacion volatil)")
-    lines.append(f"Dias estimados para APROBADA: {_fmt_days(status.days_needed('APROBADA'))}")
-    lines.append(f"Dias estimados para RECHAZADA: {_fmt_days(status.days_needed('RECHAZADA'))}")
     return "\n".join(lines) + "\n"
 
 

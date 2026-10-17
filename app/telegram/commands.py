@@ -37,6 +37,7 @@ from app.trading.measurement_status import (
     MeasurementStatus,
     compute_status_async,
     is_measurement_gate_open,
+    pace_lines,
 )
 
 logger = get_logger(__name__)
@@ -191,14 +192,6 @@ async def cmd_balance(ctx: BotContext) -> str:
 # --- /metrics -------------------------------------------------------------------------
 
 
-def _fmt_days(value: float | None) -> str:
-    if value is None:
-        return "sin datos suficientes para estimar"
-    if value == 0.0:
-        return "ya alcanzado"
-    return f"~{value:.1f} dias"
-
-
 async def _real_account_metrics(ctx: BotContext) -> list[str]:
     """PF y esperanza por estrategia de las operaciones CERRADAS de la cuenta real
     simulada (tabla `trades`), nunca de las sombras."""
@@ -241,10 +234,10 @@ async def cmd_metrics(ctx: BotContext) -> str:
         )
         lines += [
             f"- N efectivo APROBADA: {status.n_eff_approved}/{MIN_EFFECTIVE_N} "
-            f"(faltan {status.shortfall('APROBADA')}; {_fmt_days(status.days_needed('APROBADA'))})",
+            f"(faltan {status.shortfall('APROBADA')})",
             f"- N efectivo RECHAZADA: {status.n_eff_rejected}/{MIN_EFFECTIVE_N} "
-            f"(faltan {status.shortfall('RECHAZADA')}; "
-            f"{_fmt_days(status.days_needed('RECHAZADA'))})",
+            f"(faltan {status.shortfall('RECHAZADA')})",
+            *(f"- {line}" for line in pace_lines(status)),
             f"- Tasa de aprobacion del LLM: {rate}",
             f"- Filas OK {status.total_ok} de {status.total_medicion_rows}; no OK: "
             + (

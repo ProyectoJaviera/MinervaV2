@@ -12,6 +12,7 @@ from app.api.deps import get_db
 from app.api.security import require_auth
 from app.persistence.database import Database
 from app.trading.measurement_status import (
+    OFFLINE_GAP_HOURS,
     compute_status_async,
     is_measurement_gate_open,
     is_outcome_reveal_allowed,
@@ -48,6 +49,17 @@ async def status(db: Database = Depends(get_db)) -> dict:
         "rate_rejected_per_day": s.rate_rejected_per_day,
         "days_needed_approved": s.days_needed("APROBADA"),
         "days_needed_rejected": s.days_needed("RECHAZADA"),
+        # Ritmo sobre tiempo EN MARCHA (solo el tiempo evaluando senales; un hueco > 2 h
+        # sin ciclos cuenta como apagado). Los anteriores son de CALENDARIO. null = sin
+        # marcas de evaluacion. Los porcentajes son fracciones 0-1. Sin PnL.
+        "offline_gap_hours": OFFLINE_GAP_HOURS,
+        "running_window_days": s.running_window_days,
+        "uptime_pct_window": s.uptime_pct_window,
+        "uptime_pct_total": s.uptime_pct_total,
+        "rate_approved_running_per_day": s.rate_approved_running_per_day,
+        "rate_rejected_running_per_day": s.rate_rejected_running_per_day,
+        "days_needed_running_approved": s.days_needed_running("APROBADA"),
+        "days_needed_running_rejected": s.days_needed_running("RECHAZADA"),
         "gate_open": is_measurement_gate_open(s),
         # Gate abierto Y registro oficial del veredicto: lo unico que habilita mostrar
         # resultados. Con gate_open=true y esto en false el dashboard dice
