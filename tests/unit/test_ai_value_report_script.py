@@ -93,6 +93,81 @@ async def test_the_official_record_written_by_the_cli_unlocks_the_outcome_reveal
     assert find_verdict_record(docs).name == "VEREDICTO_3_6_REGISTRO_2026-12-05.txt"
 
 
+PRIOR_RECORD = (
+    "=== Veredicto de valor de la IA (subfase 3.6) ===\n"
+    "- **Veredicto: INCONCLUSO** (el intervalo cruza entre cero y delta)\n"
+)
+
+
+async def test_out_is_refused_when_any_official_record_of_another_date_already_exists(
+    db_path, tmp_path,
+):
+    """Un unico registro oficial: con un registro valido previo (otra fecha), --out se
+    rechaza con el codigo 5, no crea nada y ni siquiera llega a abrir la base."""
+    insert_groups(db_path, scenario(300, 300, approved_ret=0.30))
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    prior = docs / "VEREDICTO_3_6_REGISTRO_2026-12-01.txt"
+    prior.write_text(PRIOR_RECORD, encoding="utf-8")
+    new_record = docs / "VEREDICTO_3_6_REGISTRO_2026-12-05.txt"
+
+    proc = run_cli(
+        "--db", str(db_path), "--allow-synthetic-for-tests", "--frozen-hash", SYNTHETIC_HASH,
+        "--out", str(new_record),
+    )
+
+    assert proc.returncode == 5, proc.stderr
+    assert "ya existe un registro oficial del veredicto" in proc.stdout
+    assert "VEREDICTO_3_6_REGISTRO_2026-12-01.txt" in proc.stdout
+    assert "Veredicto:" not in proc.stdout.replace("registro oficial del veredicto", "")
+    assert not new_record.exists()
+    assert sorted(f.name for f in docs.iterdir()) == ["VEREDICTO_3_6_REGISTRO_2026-12-01.txt"]
+    assert prior.read_text(encoding="utf-8") == PRIOR_RECORD  # el original no se toca
+
+
+async def test_out_is_refused_when_the_official_record_lives_in_the_repo_docs_folder(
+    db_path, tmp_path, monkeypatch, capsys,
+):
+    from app.trading import verdict_record
+    from scripts import ai_value_report
+
+    repo_docs = tmp_path / "repo_docs"
+    repo_docs.mkdir()
+    (repo_docs / "VEREDICTO_3_6_REGISTRO_2026-12-01.txt").write_text(
+        PRIOR_RECORD, encoding="utf-8"
+    )
+    monkeypatch.setattr(verdict_record, "DOCS_DIR", repo_docs)
+    elsewhere = tmp_path / "otra_carpeta"
+    elsewhere.mkdir()
+
+    code = ai_value_report.main(
+        str(db_path), allow_synthetic_for_tests=True, frozen_hash=SYNTHETIC_HASH,
+        out_path=str(elsewhere / "VEREDICTO_3_6_REGISTRO_2026-12-05.txt"),
+    )
+
+    assert code == 5
+    assert "ya existe un registro oficial del veredicto" in capsys.readouterr().out
+    assert list(elsewhere.iterdir()) == []
+
+
+async def test_out_is_allowed_when_the_previous_file_is_not_a_valid_record(db_path, tmp_path):
+    """Un archivo con el patron pero SIN veredicto valido (p.ej. un borrador) no cuenta
+    como registro oficial y no bloquea el primero de verdad."""
+    insert_groups(db_path, scenario(300, 300, approved_ret=0.30))
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "VEREDICTO_3_6_REGISTRO_2026-12-01.txt").write_text("borrador", encoding="utf-8")
+    new_record = docs / "VEREDICTO_3_6_REGISTRO_2026-12-05.txt"
+
+    proc = run_cli(
+        "--db", str(db_path), "--allow-synthetic-for-tests", "--frozen-hash", SYNTHETIC_HASH,
+        "--out", str(new_record),
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert new_record.exists()
+
+
 async def test_cli_out_is_not_created_when_there_is_no_verdict(db_path, tmp_path):
     insert_groups(db_path, scenario(299, 300, approved_ret=0.30))
     out = tmp_path / "registro.txt"

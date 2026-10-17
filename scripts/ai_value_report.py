@@ -13,7 +13,9 @@ el minimo. La logica vive en `app/trading/ai_value_report.py`.
 
 Codigos de salida: 0 = veredicto impreso; 3 = rechazado por gate cerrado o punto de
 analisis no alcanzado; 4 = bandera de pruebas rechazada (la base no es sintetica);
-5 = `--out` apunta a un archivo que ya existe (no se sobrescribe).
+5 = `--out` rechazado: el archivo ya existe, o ya hay un registro oficial del veredicto
+(`docs/VEREDICTO_3_6_REGISTRO*.txt` con un veredicto valido, de cualquier fecha): solo
+puede haber UN registro oficial. No se crea ni se sobrescribe nada.
 
 Procedimiento completo (placebo antes, una sola corrida, registro de la salida):
 docs/VEREDICTO_3_6.md.
@@ -34,6 +36,7 @@ from pathlib import Path
 sys.path.insert(0, ".")
 
 from app.config import settings  # noqa: E402
+from app.trading import verdict_record  # noqa: E402
 from app.trading.ai_value_report import (  # noqa: E402
     STATE_VERDICT,
     SyntheticGuardError,
@@ -42,12 +45,23 @@ from app.trading.ai_value_report import (  # noqa: E402
 )
 from app.trading.measurement_status import is_measurement_gate_open  # noqa: E402
 from app.trading.shadow_live_labeler import FROZEN_PROMPT_SHA256  # noqa: E402
+from app.trading.verdict_record import find_verdict_record  # noqa: E402
 from scripts.measurement_status import _connect_ro, format_report  # noqa: E402
 
 EXIT_OK = 0
 EXIT_REFUSED = 3
 EXIT_SYNTHETIC_REFUSED = 4
 EXIT_OUT_EXISTS = 5
+
+
+def _existing_official_record(out_path: str) -> Path | None:
+    """Un registro oficial ya existente (de CUALQUIER fecha): en el `docs/` del repo,
+    que es el que lee la API, o en la carpeta de `--out`."""
+    for directory in (verdict_record.DOCS_DIR, Path(out_path).resolve().parent):
+        found = find_verdict_record(directory)
+        if found is not None:
+            return found
+    return None
 
 
 def main(
@@ -57,6 +71,15 @@ def main(
     if out_path is not None and Path(out_path).exists():
         print(f"RECHAZADO: {out_path} ya existe; este script no sobrescribe un registro.")
         return EXIT_OUT_EXISTS
+    if out_path is not None:
+        existing = _existing_official_record(out_path)
+        if existing is not None:
+            print(
+                f"RECHAZADO: ya existe un registro oficial del veredicto ({existing}); solo puede "
+                f"haber UNO (regla de una sola mirada). No se creo {out_path}. Para reemplazarlo "
+                "hay que moverlo o renombrarlo a mano, a proposito."
+            )
+            return EXIT_OUT_EXISTS
     conn = _connect_ro(db_path)
     try:
         try:

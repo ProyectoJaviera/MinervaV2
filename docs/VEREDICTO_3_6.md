@@ -38,7 +38,12 @@ al instante exacto de los 300), por eso:
    (`gate_open` en el dashboard o en `scripts/measurement_status.py`).
 2. Guarda el informe con `--out` (registro oficial, UTF-8, no sobrescribe).
 3. Volver a correr con más datos **no es un veredicto nuevo**: el registro oficial es
-   el primero.
+   el primero. **Solo puede haber UN registro oficial**: `--out` se rechaza (código 5)
+   si ya existe en `docs/` (o en la carpeta del `--out`) **cualquier** archivo
+   `VEREDICTO_3_6_REGISTRO*.txt` con un veredicto válido, aunque sea de otra fecha; no
+   crea nada y rechaza antes de abrir la base. Un borrador sin la línea
+   `Veredicto: <X>` no cuenta y no bloquea. Reemplazar el registro es una decisión
+   deliberada que se hace a mano (moverlo o renombrarlo), no un efecto de volver a correr.
 
 ## Pasos
 
@@ -207,6 +212,6 @@ ella.
 | 2 | error de uso (argparse) | error de uso (argparse) |
 | 3 | rechazado: gate cerrado o punto de análisis no alcanzado | nada que calibrar todavía |
 | 4 | bandera de pruebas rechazada: la base no es sintética | ídem |
-| 5 | `--out` apunta a un archivo que ya existe | ídem |
+| 5 | `--out` rechazado: el archivo ya existe, **o ya hay un registro oficial del veredicto** (de cualquier fecha) | `--out` apunta a un archivo que ya existe |
 | 6 | — | NO calibrado: el criterio no se usa para decidir |
 | 7 | — | NO INFORMATIVO: no correr el veredicto; esperar 7 días de datos y repetir |
