@@ -146,6 +146,11 @@ de ruina) y si los límites del punto 4 se sostienen en la práctica -- no
 para la comparación de calidad del LLM, que ya está limpia en
 `shadow_trades`.
 
+**[SUPERADO por la medición 3.6 y el reporte 3.8: los regímenes <30 / 30-100 / ≥100 por
+lado y la advertencia de "evidencia baja" de este párrafo YA NO RIGEN. Hoy hay un único punto
+de análisis (300 conglomerados efectivos por lado, δ = 3 %, tres veredictos) y nada se
+muestra antes: ver `docs/VEREDICTO_3_6.md` y `docs/PASO_DINERO_REAL.md`.]**
+
 **Criterio de valor de la IA** (revisado, tercera ronda -- el umbral
 anterior de N=30 por lado medía solo que hubiera "algo" de muestra, no que
 la diferencia fuera real): se considera que hay evidencia SUFICIENTE para
@@ -464,7 +469,28 @@ por el resto del día (ver punto 2, status `SIN_LLM`).
 
 ## 8. Criterios de paso a dinero real (evaluados, no automáticos)
 
-### Actualización con la reejecución v2 de Fase 2 (vigente)
+### Actualización subfase 3.8 (vigente; manda sobre lo de abajo si hay contradicción)
+
+El reporte está implementado (`scripts/real_money_report.py`, `app/trading/real_money_report.py`)
+y se describe, con la reconciliación completa, en `docs/PASO_DINERO_REAL.md`. Resumen de lo que
+cambia respecto a las secciones de abajo:
+
+- **Regímenes de evidencia retirados.** El criterio de la IA es solo el veredicto del registro
+  oficial de la medición 3.6 (`docs/VEREDICTO_3_6_REGISTRO*.txt`); se cita, no se recalcula. Si no
+  dice `APORTA_VALOR`, el reporte concluye "no pasar a dinero real" y no evalúa nada más. Sin
+  gate abierto Y registro oficial (`is_outcome_reveal_allowed`) solo dice qué falta.
+- **PF**: PF > 1,3 (`MIN_PROFIT_FACTOR`) **y** límite inferior del IC 95 % del PF (bootstrap por
+  conglomerados) > 1,0. Se evalúa con ≥ 100 operaciones cerradas; con menos es `SIN DATOS`.
+- **Estados**: cada criterio es `PASA` / `NO PASA` / `SIN DATOS`; la falta de datos nunca pasa.
+- **Dependencia nueva: subfase 3.9** (conectar el brazo ejecutado en paper). Hoy
+  `real_open_allowed` no está conectada y la tabla `trades` está vacía, así que los criterios de
+  la cuenta ejecutada (días, operaciones, PF, drawdown, concentración, reconciliación) no tienen
+  datos: el reporte los marca `SIN DATOS` hasta que 3.9 marque las operaciones con
+  `decision_source = 'LLM_APROBADA'` y fije `real_arm_started_at` y
+  `real_arm_drawdown_baseline`.
+- **Solo recomienda.** v1 es 100 % paper: el reporte nunca habilita ejecución real.
+
+### Actualización con la reejecución v2 de Fase 2 (vigente en ritmos y datos; su regla sobre la IA la reemplaza la 3.8)
 
 Fuente: `docs/FASE2_REEJECUCION.md`, secciones 5.3 a 5.5. La v2 usa el tope de SL
 corregido por redondeo y la ventana oficial fija (2026-10-01 00:00 UTC).
@@ -612,7 +638,8 @@ ejecutado). Se agregan:
 | 3.5 | `shadow_trades` sin LLM todavía (punto 2 parcial): señales que sobreviven el filtro de SL se AGRUPAN primero por (símbolo, dirección, vela) entre estrategias (`contributing_strategies`) y luego se simulan con margen ilimitado, `llm_decision` queda `PENDIENTE` hasta 3.6 | Smoke test: shadow trades usan exactamente el mismo cálculo de fees/PnL que `PaperBackend` para la misma señal (fixture compartida); no dependen de margen/posiciones disponibles en la cuenta real; test de agrupación: 2 señales de estrategias distintas, mismo símbolo/dirección/vela, producen UN solo `shadow_trade` con ambas estrategias listadas, no dos |
 | 3.6 | LLM (punto 6): cliente Anthropic (Sonnet), `llm_logs`, validación con pydantic, cache de prompt, temperatura baja, tope de $1/día, etiquetado `APROBADA`/`RECHAZADA`/`SIN_LLM` | Tests unitarios con el cliente de Anthropic mockeado (nunca una llamada real en tests) para aprobar/rechazar/presupuesto agotado; UNA llamada real manual (modelo y precio a confirmar contra la documentación oficial en ese momento) la corre el usuario para validar credenciales, modelo y costo real vs. la estimación de la sección 6, nunca el asistente (`CLAUDE.md`: nunca leer `.env`/credenciales) |
 | 3.7 | Bot de Telegram (punto 5): 7 comandos, long-polling, allowlist por `TELEGRAM_CHAT_ID`. **Implementada el 2026-10-17 en el código (despliegue y smoke manual pendientes del usuario): ver `docs/FASE3_7_TELEGRAM.md`** (`/metrics` solo muestra avance, `/pause`/`/resume`/`/kill` piden confirmación y advierten que detienen la medición, aislamiento del scheduler/etiquetado/monitor) | Test que confirma que un `chat_id` distinto del configurado no dispara ningún comando; smoke test manual del usuario contra una instancia de paper (requiere token real de Telegram) |
-| 3.8 | Reporte de paso a dinero real (punto 8), con el ritmo de operaciones revisado tras la v2 (1,667 operaciones OOS/día elegibles; 60 días a 100 con aprobacion del 100 %, 120 días con el 50 %) | Tests contra fixtures sintéticas que cubren cada combinación de criterio pasa/falla, incluido el intervalo de confianza bootstrap de `APROBADA` vs. `RECHAZADA` en los tres regímenes de evidencia (<30, 30-100, ≥100 por lado) |
+| 3.8 | Reporte de paso a dinero real (punto 8), con el ritmo de operaciones revisado tras la v2 (1,667 operaciones OOS/día elegibles; 60 días a 100 con aprobacion del 100 %, 120 días con el 50 %). **Implementada el 2026-10-17: `scripts/real_money_report.py` y `docs/PASO_DINERO_REAL.md`.** Los regímenes de evidencia (<30, 30-100, ≥100 por lado) se RETIRARON (los reemplaza el veredicto único de la 3.6); la evaluación de la cuenta ejecutada depende de la subfase 3.9 | Tests contra fixtures sintéticas que cubren cada criterio en sus bordes (`PASA` / `NO PASA` / `SIN DATOS`), el orden estricto (sin gate abierto Y registro oficial no se lee ningún resultado), el veredicto oficial como insumo (no `APORTA_VALOR` ⇒ "no pasar") y que ni el módulo ni el script importan ejecución real |
+| 3.9 | **Pendiente, sin planificar.** Conectar el brazo ejecutado en paper (cuenta real simulada operando solo las `APROBADA` que pasen el motor de riesgo): conectar `real_open_allowed`, persistir `decision_source='LLM_APROBADA'` y `signal_group_key` en `trades`, y fijar `real_arm_started_at` y `real_arm_drawdown_baseline` al activarlo | Se planifica aparte, con tu aprobación, y por lógica solo tras un veredicto `APORTA_VALOR` |
 
 Orden deliberado: el motor de riesgo (3.2) va ANTES de que el generador de
 señales (3.3) multiplique de 1 símbolo/1 estrategia a 10 símbolos/6
