@@ -26,7 +26,7 @@ from app.market.bitunix_rest import BitunixRestClient
 from app.market.bitunix_ws import BitunixPublicWSClient
 from app.persistence.database import Database
 from app.persistence.repositories import shadow_repo, trades_repo, universe_repo
-from app.trading import risk_engine
+from app.trading import control_state, risk_engine
 from app.trading.shadow_book import ShadowBook
 from app.trading.shadow_live_labeler import ShadowLiveLabeler
 from app.trading.signal_generator import (
@@ -61,6 +61,7 @@ class Scheduler:
         # generador de senales (no el heartbeat, que solo prueba que el event
         # loop sigue vivo) -- expuesto en GET /health como `last_cycle_at`.
         self.last_cycle_at: datetime | None = None
+        self._pause_logged = False
 
     def stop(self) -> None:
         self._stop.set()
@@ -79,6 +80,20 @@ class Scheduler:
                 pass
 
     async def run_cycle(self) -> list[SignalCandidate]:
+        # Pausa pedida por Telegram (subfase 3.7, `app.trading.control_state`):
+        # sin senales, sombras ni etiquetado = SIN medicion. `last_cycle_at` NO
+        # avanza, asi `/health` pasa a "stale" y la alerta externa avisa: una
+        # pausa que detiene la medicion no puede ser silenciosa. Los cierres de
+        # posiciones (PositionMonitor) no pasan por aqui.
+        if await control_state.is_scheduler_paused(self.db):
+            if not self._pause_logged:
+                logger.warning(
+                    "Scheduler PAUSADO (system_state.scheduler_paused): no se generan senales, "
+                    "sombras ni etiquetado -- la medicion esta detenida. Reanudar con /resume."
+                )
+                self._pause_logged = True
+            return []
+        self._pause_logged = False
         if self.live_labeler is not None:
             # Una vez por ciclo (TAREA B, docs/FASE3_6_LLM.md seccion k), no
             # una vez por candidato: deja en cache si el hash coincide con el

@@ -38,6 +38,7 @@ from app.llm.decision_service import (
 )
 from app.persistence.database import Database
 from app.persistence.repositories import llm_logs_repo
+from app.trading import control_state, risk_engine
 from app.trading.shadow_live_labeler import ShadowLiveLabeler
 
 router = APIRouter()
@@ -69,6 +70,12 @@ async def health(
     return {
         "status": "stale" if stale else "ok",
         "mode": "PAPER_TRADING",
+        # Subfase 3.7: una pausa del scheduler DETIENE la medicion (y deja el
+        # status en "stale"); aqui se ve que fue a proposito.
+        "control": {
+            "paused": await control_state.is_scheduler_paused(db),
+            "kill_switch_active": await risk_engine.is_kill_switch_active(db),
+        },
         "last_beat_at": heartbeat.last_beat_at.isoformat() if heartbeat.last_beat_at else None,
         "last_cycle_at": last_cycle_at.isoformat() if last_cycle_at else None,
         "log_dropped_count": get_dropped_log_count(),

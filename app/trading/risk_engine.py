@@ -271,6 +271,14 @@ async def deactivate_kill_switch(db: Database) -> None:
     await _set_bool(db, _KEY_KILL_SWITCH, False)
 
 
+async def is_kill_switch_active(db: Database) -> bool:
+    return await _get_bool(db, _KEY_KILL_SWITCH, False)
+
+
+async def is_drawdown_stop_active(db: Database) -> bool:
+    return await _get_bool(db, _KEY_DRAWDOWN_STOP_ACTIVE, False)
+
+
 async def resume_drawdown_stop(db: Database, current_equity: float) -> None:
     """Reanudacion manual del stop por drawdown (modo `"duro"`) -- a
     diferencia del circuit breaker, este nunca se levanta solo.
