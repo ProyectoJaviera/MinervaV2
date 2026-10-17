@@ -11,7 +11,11 @@ from fastapi import APIRouter, Depends
 from app.api.deps import get_db
 from app.api.security import require_auth
 from app.persistence.database import Database
-from app.trading.measurement_status import compute_status_async, is_measurement_gate_open
+from app.trading.measurement_status import (
+    compute_status_async,
+    is_measurement_gate_open,
+    is_outcome_reveal_allowed,
+)
 
 router = APIRouter(prefix="/api/measurement", dependencies=[Depends(require_auth)])
 
@@ -45,4 +49,8 @@ async def status(db: Database = Depends(get_db)) -> dict:
         "days_needed_approved": s.days_needed("APROBADA"),
         "days_needed_rejected": s.days_needed("RECHAZADA"),
         "gate_open": is_measurement_gate_open(s),
+        # Gate abierto Y registro oficial del veredicto: lo unico que habilita mostrar
+        # resultados. Con gate_open=true y esto en false el dashboard dice
+        # "gate abierto: seguir docs/VEREDICTO_3_6.md".
+        "outcome_reveal_allowed": is_outcome_reveal_allowed(s),
     }

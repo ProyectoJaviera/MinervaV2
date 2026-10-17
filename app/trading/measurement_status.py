@@ -20,18 +20,23 @@ conectada del bot) es el que usan los endpoints de solo lectura bajo `/api/`
 `row["col"]` que `sqlite3.Row`).
 
 `is_measurement_gate_open` es el UNICO lugar que decide si la medicion ya
-junto `MIN_EFFECTIVE_N` por lado -- `app/api/serializers.py` lo usa como la
-unica fuente de verdad para decidir si una respuesta puede revelar PnL de
-sombras etiquetadas."""
+junto `MIN_EFFECTIVE_N` por lado. Pero abrir el gate NO basta para mostrar
+resultados: `is_outcome_reveal_allowed` (gate abierto Y registro oficial del
+veredicto en `docs/`, ver `app.trading.verdict_record`) es la condicion unica
+que usan la API, el dashboard y los reportes para decidir si una respuesta puede
+revelar PnL de sombras etiquetadas (regla del 2026-10-17: primero el placebo
+oficial y el veredicto)."""
 
 from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from app.llm.schemas import DECISION_TO_LABEL
 from app.persistence.database import Database
+from app.trading import verdict_record
 from app.trading.ai_value import MIN_EFFECTIVE_N
 from app.trading.shadow_live_labeler import FROZEN_PROMPT_SHA256
 
@@ -146,6 +151,19 @@ def is_measurement_gate_open(status: MeasurementStatus) -> bool:
     conglomerados por lado -- `app/api/serializers.py` la usa para decidir si
     una respuesta puede revelar PnL/resultados de sombras etiquetadas."""
     return status.n_eff_approved >= MIN_EFFECTIVE_N and status.n_eff_rejected >= MIN_EFFECTIVE_N
+
+
+def is_outcome_reveal_allowed(status: MeasurementStatus, docs_dir: Path | None = None) -> bool:
+    """CONDICION UNICA para mostrar resultados (PnL, salida, motivo de cierre) de
+    las sombras etiquetadas, en la API, el dashboard y los scripts de reporte:
+    el gate abierto Y un registro oficial del veredicto en `docs/`
+    (`app.trading.verdict_record`). Con el gate abierto y sin registro todavia
+    hay que seguir `docs/VEREDICTO_3_6.md` (copia, placebo oficial, veredicto): si
+    el placebo sale NO INFORMATIVO se esperan 7 dias y en ese tiempo NO se ven
+    resultados (regla del 2026-10-17). Un registro sin gate abierto tampoco basta."""
+    return is_measurement_gate_open(status) and (
+        verdict_record.find_verdict_record(docs_dir) is not None
+    )
 
 
 def _build_status_from_rows(

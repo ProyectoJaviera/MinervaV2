@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from app.config import settings
+from app.trading.verdict_record import find_verdict_record
 from tests.unit.synthetic_measurement import (
     SYNTHETIC_HASH,
     create_schema,
@@ -67,6 +68,29 @@ async def test_cli_out_saves_the_official_record_once_and_never_overwrites(db_pa
     assert "no sobrescribe" in second.stdout
     assert "Veredicto:" not in second.stdout  # rechazado antes de abrir la base
     assert out.read_text(encoding="utf-8") == saved
+
+
+async def test_the_official_record_written_by_the_cli_unlocks_the_outcome_reveal(
+    db_path, tmp_path,
+):
+    """Enlace entre el informe real y el detector de registro: lo que escribe
+    `--out` con el nombre del patron es aceptado; el mismo contenido con nombre de
+    placebo no lo es."""
+    insert_groups(db_path, scenario(300, 300, approved_ret=0.30))
+    flags = ("--allow-synthetic-for-tests", "--frozen-hash", SYNTHETIC_HASH)
+    docs = tmp_path / "docs"
+    docs.mkdir()
+
+    placebo_name = str(docs / "PLACEBO_2026-12-05.txt")
+    wrong_name = run_cli("--db", str(db_path), *flags, "--out", placebo_name)
+    assert wrong_name.returncode == 0, wrong_name.stderr
+    assert find_verdict_record(docs) is None
+
+    right_name = run_cli(
+        "--db", str(db_path), *flags, "--out", str(docs / "VEREDICTO_3_6_REGISTRO_2026-12-05.txt"),
+    )
+    assert right_name.returncode == 0, right_name.stderr
+    assert find_verdict_record(docs).name == "VEREDICTO_3_6_REGISTRO_2026-12-05.txt"
 
 
 async def test_cli_out_is_not_created_when_there_is_no_verdict(db_path, tmp_path):

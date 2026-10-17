@@ -6,12 +6,13 @@ correrlo SOBRE UNA COPIA de la base real, nunca sobre la base de trabajo
 
     python scripts/shadow_report.py --db data/backups/minerva_shadow_copia.db
 
-**Se niega a imprimir mientras `is_measurement_gate_open` sea falso**: el reporte
-incluye PnL por estrategia y el criterio de valor de la IA, y mirar resultados
-antes de que la medicion junte `MIN_EFFECTIVE_N` conglomerados efectivos por lado
-contaminaria el veredicto (docs/FASE3_6_LLM.md seccion i). Con el gate cerrado
-solo muestra los contadores; para el veredicto completo usar
-`scripts/ai_value_report.py`. Codigo de salida 3 si se niega.
+**Se niega a imprimir mientras `is_outcome_reveal_allowed` sea falso** (gate abierto
+Y registro oficial del veredicto en `docs/VEREDICTO_3_6_REGISTRO*.txt`): el reporte
+incluye PnL por estrategia y el criterio de valor de la IA, y mirar resultados antes
+del punto de analisis -- o, con el gate ya abierto, antes del placebo oficial y del
+veredicto -- contaminaria la medicion (docs/FASE3_6_LLM.md seccion i y
+docs/VEREDICTO_3_6.md). Para el veredicto usar `scripts/ai_value_report.py`. Codigo
+de salida 3 si se niega.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from app.trading.ai_value import MIN_EFFECTIVE_N  # noqa: E402
 from app.trading.measurement_status import (  # noqa: E402
     compute_status_async,
     is_measurement_gate_open,
+    is_outcome_reveal_allowed,
 )
 from app.trading.shadow_report import build_report  # noqa: E402
 
@@ -41,15 +43,24 @@ async def main(db_path: str) -> int:
     await db.connect()
     try:
         status = await compute_status_async(db)
-        if not is_measurement_gate_open(status):
-            print(
-                "REPORTE NO MOSTRADO: la medicion aun no junto "
-                f"MIN_EFFECTIVE_N={MIN_EFFECTIVE_N} conglomerados efectivos por lado, y este "
-                "reporte incluye PnL por estrategia y el criterio de valor de la IA "
-                "(mirarlos antes contaminaria la medicion, seccion i).\n"
-                f"N efectivo APROBADA: {status.n_eff_approved}/{MIN_EFFECTIVE_N}, "
-                f"RECHAZADA: {status.n_eff_rejected}/{MIN_EFFECTIVE_N}."
-            )
+        if not is_outcome_reveal_allowed(status):
+            if is_measurement_gate_open(status):
+                print(
+                    "REPORTE NO MOSTRADO: gate abierto, pero todavia no existe el registro "
+                    "oficial del veredicto (docs/VEREDICTO_3_6_REGISTRO*.txt). Seguir "
+                    "docs/VEREDICTO_3_6.md: copia, placebo oficial y, solo si sale CALIBRADO, "
+                    "scripts/ai_value_report.py. Este reporte incluye PnL por estrategia y el "
+                    "criterio de valor de la IA: verlos antes contaminaria el procedimiento."
+                )
+            else:
+                print(
+                    "REPORTE NO MOSTRADO: la medicion aun no junto "
+                    f"MIN_EFFECTIVE_N={MIN_EFFECTIVE_N} conglomerados efectivos por lado, y este "
+                    "reporte incluye PnL por estrategia y el criterio de valor de la IA "
+                    "(mirarlos antes contaminaria la medicion, seccion i).\n"
+                    f"N efectivo APROBADA: {status.n_eff_approved}/{MIN_EFFECTIVE_N}, "
+                    f"RECHAZADA: {status.n_eff_rejected}/{MIN_EFFECTIVE_N}."
+                )
             return EXIT_REFUSED
         print(await build_report(db))
         return EXIT_OK

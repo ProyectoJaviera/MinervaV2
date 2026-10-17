@@ -41,13 +41,34 @@ async def test_cli_refuses_to_print_with_the_gate_closed(db_path):
         assert forbidden not in proc.stdout
 
 
-async def test_main_prints_the_report_when_the_gate_is_open(db_path, monkeypatch, capsys):
-    monkeypatch.setattr(shadow_report, "is_measurement_gate_open", lambda status: True)
+async def test_main_prints_the_report_only_with_the_gate_open_and_the_official_record(
+    db_path, monkeypatch, capsys,
+):
+    monkeypatch.setattr(shadow_report, "is_outcome_reveal_allowed", lambda status: True)
 
     code = await shadow_report.main(str(db_path))
 
     assert code == 0
     assert "Total de operaciones sombra" in capsys.readouterr().out
+
+
+async def test_main_refuses_with_the_gate_open_but_without_the_official_record(
+    db_path, monkeypatch, tmp_path, capsys,
+):
+    from app.trading import verdict_record
+
+    monkeypatch.setattr(shadow_report, "is_measurement_gate_open", lambda status: True)
+    monkeypatch.setattr("app.trading.measurement_status.MIN_EFFECTIVE_N", 1)
+    monkeypatch.setattr(verdict_record, "DOCS_DIR", tmp_path)  # docs/ sin registro
+
+    code = await shadow_report.main(str(db_path))
+
+    out = capsys.readouterr().out
+    assert code == 3
+    assert "gate abierto, pero todavia no existe el registro oficial" in out
+    assert "docs/VEREDICTO_3_6.md" in out
+    for forbidden in ("Total de operaciones sombra", "PnL neto total", "Criterio de valor"):
+        assert forbidden not in out
 
 
 def test_cli_refuses_the_working_database_path():

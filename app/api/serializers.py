@@ -4,9 +4,11 @@
 **El unico punto de paso para revelar un resultado de sombra etiquetada**:
 `shadow_trade_to_public_dict`. La regla del usuario es estricta -- ninguna
 respuesta puede mostrar PnL ni resultado de una sombra etiquetada hasta que
-la medicion junte `MIN_EFFECTIVE_N` conglomerados efectivos por lado
-(`app.trading.measurement_status.is_measurement_gate_open`), para no sesgar
-la lectura de una medicion todavia en curso.
+la medicion junte `MIN_EFFECTIVE_N` conglomerados efectivos por lado Y exista
+el registro oficial del veredicto
+(`app.trading.measurement_status.is_outcome_reveal_allowed`: gate abierto +
+`docs/VEREDICTO_3_6_REGISTRO*.txt` con un veredicto valido), para no sesgar la
+lectura de una medicion todavia en curso ni el procedimiento del placebo.
 
 Disenado para fallar CERRADO, no abierto:
 

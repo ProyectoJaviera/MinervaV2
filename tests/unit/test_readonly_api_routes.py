@@ -217,19 +217,13 @@ async def test_recent_shadows_never_include_outcome_fields_with_the_gate_closed(
     assert rows[0]["llm_decision"] == "APROBADA"
 
 
-@pytest.mark.asyncio
-async def test_recent_shadows_include_outcome_fields_once_the_gate_opens(db, monkeypatch):
-    """Fuerza el gate abierto bajando MIN_EFFECTIVE_N a 1 (en vez de sembrar
-    300 conglomerados reales) -- prueba el camino "abierto" del endpoint sin
-    esperar semanas; el camino "cerrado" ya se prueba con datos reales en el
-    smoke de nivel 2 (la medicion real esta muy por debajo de 300/300)."""
-    import app.trading.measurement_status as ms_module
+VALID_RECORD = (
+    "=== Veredicto de valor de la IA (subfase 3.6) ===\n"
+    "- **Veredicto: INCONCLUSO** (el intervalo cruza entre cero y delta)\n"
+)
 
-    # Solo este modulo lee MIN_EFFECTIVE_N para is_measurement_gate_open/
-    # shortfall (lo importo una vez de ai_value.py a su propio namespace) --
-    # parchear ai_value.py no alcanzaria a este camino.
-    monkeypatch.setattr(ms_module, "MIN_EFFECTIVE_N", 1)
 
+async def _seed_two_closed_groups(db):
     await _seed_group(
         db, key="g1", opened_at=T0, closed_at=T0 + timedelta(hours=1),
         llm_decision="APROBADA", log={"decision": "APROBAR", "created_at": T0},
@@ -239,11 +233,106 @@ async def test_recent_shadows_include_outcome_fields_once_the_gate_opens(db, mon
         llm_decision="RECHAZADA",
         log={"decision": "RECHAZAR", "created_at": T0 + timedelta(hours=2)},
     )
+
+
+def _open_gate(monkeypatch):
+    """Fuerza el gate abierto bajando MIN_EFFECTIVE_N a 1 (en vez de sembrar 300
+    conglomerados reales). Solo `measurement_status` lee esa constante para el gate."""
+    import app.trading.measurement_status as ms_module
+
+    monkeypatch.setattr(ms_module, "MIN_EFFECTIVE_N", 1)
+
+
+def _docs_with(monkeypatch, tmp_path, files: dict[str, str]):
+    from app.trading import verdict_record
+
+    for name, text in files.items():
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    monkeypatch.setattr(verdict_record, "DOCS_DIR", tmp_path)
+
+
+OUTCOME_FIELDS = ("pnl_gross_usdt", "pnl_net_usdt", "exit_price", "close_reason", "closed_at")
+
+
+@pytest.mark.asyncio
+async def test_recent_shadows_include_outcome_fields_only_with_the_gate_open_and_the_record(
+    db, monkeypatch, tmp_path,
+):
+    _open_gate(monkeypatch)
+    _docs_with(monkeypatch, tmp_path, {"VEREDICTO_3_6_REGISTRO_2026-12-05.txt": VALID_RECORD})
+    await _seed_two_closed_groups(db)
     client = make_authenticated_client(db)
 
-    response = client.get("/api/shadow-trades/recent")
+    rows = client.get("/api/shadow-trades/recent").json()
 
-    rows = response.json()
     approved_row = next(r for r in rows if r["llm_decision"] == "APROBADA")
     assert approved_row["pnl_net_usdt"] == 4.5
     assert approved_row["close_reason"] == "TP"
+    status = client.get("/api/measurement/status").json()
+    assert status["gate_open"] is True and status["outcome_reveal_allowed"] is True
+
+
+@pytest.mark.asyncio
+async def test_gate_open_without_the_official_record_reveals_nothing(db, monkeypatch, tmp_path):
+    _open_gate(monkeypatch)
+    _docs_with(monkeypatch, tmp_path, {})  # docs/ sin registro
+    await _seed_two_closed_groups(db)
+    client = make_authenticated_client(db)
+
+    rows = client.get("/api/shadow-trades/recent").json()
+    status = client.get("/api/measurement/status").json()
+
+    assert rows and all(field not in row for row in rows for field in OUTCOME_FIELDS)
+    assert status["gate_open"] is True and status["outcome_reveal_allowed"] is False
+
+
+@pytest.mark.asyncio
+async def test_gate_open_with_a_record_without_a_valid_verdict_reveals_nothing(
+    db, monkeypatch, tmp_path,
+):
+    _open_gate(monkeypatch)
+    _docs_with(
+        monkeypatch, tmp_path,
+        {
+            "VEREDICTO_3_6_REGISTRO_2026-12-05.txt": "Calibrado: NO INFORMATIVO",
+            "PLACEBO_2026-12-05.txt": VALID_RECORD,  # nombre de placebo: no cuenta
+        },
+    )
+    await _seed_two_closed_groups(db)
+    client = make_authenticated_client(db)
+
+    rows = client.get("/api/shadow-trades/recent").json()
+
+    assert rows and all(field not in row for row in rows for field in OUTCOME_FIELDS)
+    assert client.get("/api/measurement/status").json()["outcome_reveal_allowed"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_valid_record_with_the_gate_closed_reveals_nothing(db, monkeypatch, tmp_path):
+    # El gate real exige 300 por lado: sin tocar la constante sigue cerrado.
+    _docs_with(monkeypatch, tmp_path, {"VEREDICTO_3_6_REGISTRO_2026-12-05.txt": VALID_RECORD})
+    await _seed_two_closed_groups(db)
+    client = make_authenticated_client(db)
+
+    rows = client.get("/api/shadow-trades/recent").json()
+    status = client.get("/api/measurement/status").json()
+
+    assert rows and all(field not in row for row in rows for field in OUTCOME_FIELDS)
+    assert status["gate_open"] is False and status["outcome_reveal_allowed"] is False
+
+
+@pytest.mark.asyncio
+async def test_the_record_is_read_on_every_request_so_it_unlocks_without_a_restart(
+    db, monkeypatch, tmp_path,
+):
+    _open_gate(monkeypatch)
+    _docs_with(monkeypatch, tmp_path, {})
+    await _seed_two_closed_groups(db)
+    client = make_authenticated_client(db)
+    before = client.get("/api/shadow-trades/recent").json()
+
+    (tmp_path / "VEREDICTO_3_6_REGISTRO_2026-12-05.txt").write_text(VALID_RECORD, encoding="utf-8")
+    after = client.get("/api/shadow-trades/recent").json()
+
+    assert all("pnl_net_usdt" not in r for r in before)
+    assert any("pnl_net_usdt" in r for r in after)
