@@ -76,19 +76,23 @@ class PaperBackend(ExecutionBackend):
         for p in positions:
             if p.symbol not in price_cache:
                 price_cache[p.symbol] = await self._get_mark_price(p.symbol)
-            result = compute_close_result(
-                p.side, p.qty, p.entry_price, price_cache[p.symbol],
-                p.fee_entry_usdt, self.settings.taker_fee_pct,
-            )
-            unrealized += (
-                result.pnl_net_usdt
-                - p.funding_paid_usdt
-                - p.slippage_entry_usdt
-                - exit_slippage_usdt(
-                    p.qty, price_cache[p.symbol], self.settings.backtest_slippage_bps
-                )
-            )
+            unrealized += self.unrealized_pnl_usdt(p, price_cache[p.symbol])
         return balance + unrealized
+
+    def unrealized_pnl_usdt(self, position: Trade, mark: float) -> float:
+        """PnL flotante neto de UNA posicion abierta al precio `mark`: cierre
+        hipotetico con comisiones, menos el funding ya acumulado, el slippage de
+        entrada y el de salida estimado. Sin red: el llamador aporta el mark."""
+        result = compute_close_result(
+            position.side, position.qty, position.entry_price, mark,
+            position.fee_entry_usdt, self.settings.taker_fee_pct,
+        )
+        return (
+            result.pnl_net_usdt
+            - position.funding_paid_usdt
+            - position.slippage_entry_usdt
+            - exit_slippage_usdt(position.qty, mark, self.settings.backtest_slippage_bps)
+        )
 
     async def open_position(
         self,

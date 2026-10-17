@@ -279,6 +279,15 @@ async def is_drawdown_stop_active(db: Database) -> bool:
     return await _get_bool(db, _KEY_DRAWDOWN_STOP_ACTIVE, False)
 
 
+async def get_active_circuit_breaker_until(db: Database) -> datetime | None:
+    """Hasta cuando dura el circuit breaker si sigue vigente; `None` si no hay o ya vencio."""
+    raw = await system_state_repo.get_state(db, _KEY_CIRCUIT_BREAKER_UNTIL)
+    if not raw:
+        return None
+    until = datetime.fromisoformat(raw)
+    return until if datetime.now(UTC) < until else None
+
+
 async def resume_drawdown_stop(db: Database, current_equity: float) -> None:
     """Reanudacion manual del stop por drawdown (modo `"duro"`) -- a
     diferencia del circuit breaker, este nunca se levanta solo.
