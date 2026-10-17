@@ -8,7 +8,7 @@ from app.persistence.database import Database
 from app.persistence.models import Side, Trade, TradeStatus
 
 
-def _row_to_trade(row) -> Trade:
+def row_to_trade(row) -> Trade:
     return Trade(
         id=row["id"],
         symbol=row["symbol"],
@@ -156,7 +156,7 @@ async def get_open_positions(db: Database, symbol: str | None = None) -> list[Tr
         rows = await db.fetch_all(
             "SELECT * FROM trades WHERE status = 'OPEN' ORDER BY opened_at DESC"
         )
-    return [_row_to_trade(r) for r in rows]
+    return [row_to_trade(r) for r in rows]
 
 
 async def update_reconciliation_state(
@@ -189,19 +189,19 @@ async def get_open_positions_as_of(db: Database, as_of: datetime) -> list[Trade]
         "ORDER BY opened_at DESC",
         (as_of.isoformat(), as_of.isoformat()),
     )
-    return [_row_to_trade(r) for r in rows]
+    return [row_to_trade(r) for r in rows]
 
 
 async def get_trades(db: Database, limit: int = 100) -> list[Trade]:
     rows = await db.fetch_all(
         "SELECT * FROM trades ORDER BY opened_at DESC LIMIT ?", (limit,)
     )
-    return [_row_to_trade(r) for r in rows]
+    return [row_to_trade(r) for r in rows]
 
 
 async def get_trade(db: Database, trade_id: int) -> Trade | None:
     row = await db.fetch_one("SELECT * FROM trades WHERE id = ?", (trade_id,))
-    return _row_to_trade(row) if row else None
+    return row_to_trade(row) if row else None
 
 
 async def committed_margin(db: Database, symbol: str | None = None) -> float:
