@@ -12,6 +12,7 @@ Ejecutar a mano con:
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import time
@@ -61,9 +62,10 @@ def real_db_copy_for_bot(tmp_path):
     tocan datos reales."""
     import sqlite3
 
-    from app.config import settings
-
-    real_path = Path(settings.database_path).resolve()
+    # La base que usa start_bot.ps1 en el bot real, NO `settings.database_path`:
+    # el default de config.py (data/minerva.db) es una base vieja y un backfill en
+    # frio de dias hace que /health tarde mas de 180 s en responder.
+    real_path = (REPO_ROOT / "data" / "minerva_estabilidad.db").resolve()
     copy_path = tmp_path / "test_bot_copy.db"
     assert copy_path.resolve() != real_path, "la copia no puede ser la base real"
     if real_path.exists():
@@ -107,6 +109,22 @@ def test_start_refuses_a_second_instance_then_stop_frees_the_port(real_db_copy_f
     stop = _run_ps1("stop_bot.ps1", "-Port", str(PORT), timeout=30)
     assert stop.returncode == 0, f"stdout={stop.stdout!r} stderr={stop.stderr!r}"
     assert "quedo libre" in stop.stdout
+    # La cadena completa cmd.exe -> pythonw.exe del .venv -> proceso real se reconoce,
+    # se detiene entera y no queda vivo ninguno de los tres.
+    chain_line = next(
+        line for line in stop.stdout.splitlines() if line.startswith("Cadena reconocida")
+    )
+    assert "proceso real" in chain_line
+    assert "launcher del venv (pythonw.exe)" in chain_line
+    assert "cmd.exe de start_bot.ps1" in chain_line
+    pids = [int(p) for p in re.findall(r"PID (\d+)", chain_line)]
+    assert len(pids) == 3
+    assert "Confirmado: no queda vivo ningun proceso de la cadena" in stop.stdout
+    for pid in pids:
+        listing = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True
+        ).stdout
+        assert str(pid) not in listing, f"el PID {pid} sigue vivo despues de stop_bot.ps1"
 
     deadline = time.monotonic() + 10
     freed = False
