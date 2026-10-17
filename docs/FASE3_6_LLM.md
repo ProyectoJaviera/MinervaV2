@@ -413,8 +413,11 @@ con frecuencia, el criterio está mal calibrado.
    bootstrap por conglomerados y la misma semilla.
 4. Repetir 1.000 veces. Registrar la frecuencia de **APORTA_VALOR**.
 
-**Criterio de calibración (sin cambios):** la frecuencia de APORTA_VALOR debe ser menor
-que 0,05 (contraste unilateral, con un nivel de significación del 5 %).
+**Criterio de calibración:** la frecuencia de APORTA_VALOR debe ser menor que 0,05
+(contraste unilateral, con un nivel de significación del 5 %). **Ajuste del 2026-10-17
+(decisión de Renzo, tomada antes de tener datos; ver el final de esta sección):** la
+frecuencia se mide de forma *condicional* a llegar al punto de análisis, y solo si
+llegar es probable.
 
 **Intervalo de confianza de la frecuencia (informativo).** Además del punto, se reporta
 el intervalo de Wilson al 95 % de esa frecuencia, porque con 1.000 repeticiones el propio
@@ -437,11 +440,29 @@ por debajo del umbral del placebo.
 **Implementado (2026-10-17).** `scripts/placebo_check.py` (lógica en
 `app/trading/ai_value_placebo.py`) usa los mismos filtros que el veredicto (hash
 congelado, sin piloto, sin sombras no confiables), lee la copia en solo lectura, imprime
-al final un bloque para pegar aquí y acepta `--out`. Con pocos conglomerados casi
-ninguna repetición llega a 300 por lado y "Calibrado: SI" es vacío: el script imprime la
-probabilidad de llegar al punto de análisis y avisa si es baja. Tiempos y
-recomendaciones en `docs/VEREDICTO_3_6.md`. **Registro del placebo de la medicion real:
-pendiente** (se pega aquí el bloque que imprime el script, antes de la primera decisión).
+al final un bloque para pegar aquí y acepta `--out`. Tiempos y recomendaciones en
+`docs/VEREDICTO_3_6.md`.
+
+**Criterio de "Calibrado" ajustado (decisión del 2026-10-17, antes de ver datos).** Con
+pocos conglomerados casi ninguna repetición llega a 300 por lado y todas dan INCONCLUSO:
+una frecuencia bruta baja sería vacía. Por eso, en `app/trading/ai_value_placebo.py`
+(no en `ai_value.py`): se calcula la probabilidad exacta (binomial) de que una repetición
+llegue al punto de análisis; si es **< 50 %** el resultado es **NO INFORMATIVO** (ni SI ni
+NO; código de salida 7); si es **≥ 50 %** se decide con la **tasa condicional**
+(frecuencia / probabilidad de llegar) **< 5 %** → CALIBRADO, si no NO calibrado. La
+frecuencia bruta y su IC de Wilson se siguen imprimiendo, solo como información.
+
+**Regla de procedimiento (decisión de Renzo, 2026-10-17, tomada antes de ver
+resultados).** Cuando el gate se abra: (1) hacer la copia; (2) correr el placebo oficial
+con 1.000 repeticiones; (3) si sale NO INFORMATIVO, **NO correr el veredicto**: esperar
+7 días más de datos y repetir desde (1); (4) si sale CALIBRADO, correr
+`scripts/ai_value_report.py` **una sola vez** con `--out` sobre **esa misma copia**;
+(5) si sale NO calibrado, no se usa el criterio para decidir y se revisa el diseño. La
+espera depende solo de conteos, nunca de resultados. Detalle en
+`docs/VEREDICTO_3_6.md`.
+
+**Registro del placebo de la medición real: pendiente** (se pega aquí el bloque que
+imprime el script, antes de la primera decisión).
 
 ---
 
