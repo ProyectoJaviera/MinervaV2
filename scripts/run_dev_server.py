@@ -17,6 +17,9 @@ pasa recien dentro de `uvicorn.run` -- el orden es critico, no cosmetico).
 Fuerza tambien `TELEGRAM_COMMANDS_ENABLED=false` y `TELEGRAM_BOT_TOKEN=""` (un
 token admite un solo consumidor de long-polling; ver `app/telegram/runtime.py`).
 
+Fuerza `PAPER_EXECUTION_ENABLED=false` (el brazo ejecutado de la cuenta paper, subfase
+3.9, solo lo activa el bot real).
+
 Fuerza `LLM_LIVE_LABELING_ENABLED=false` (y `ANTHROPIC_API_KEY=""`, como
 refuerzo redundante) SIN IMPORTAR lo que diga el `.env` real: el `.env` real
 de hoy tiene ese flag en `true`. Si este script heredara el entorno real tal
@@ -94,6 +97,8 @@ def main(source_db: str, port: int) -> None:
     # desarrollo nunca debe competir con el bot real (candado codificado, como el del LLM).
     os.environ["TELEGRAM_COMMANDS_ENABLED"] = "false"
     os.environ["TELEGRAM_BOT_TOKEN"] = ""
+    # Brazo ejecutado de la cuenta paper (subfase 3.9): solo el bot real lo activa.
+    os.environ["PAPER_EXECUTION_ENABLED"] = "false"
 
     import uvicorn
 

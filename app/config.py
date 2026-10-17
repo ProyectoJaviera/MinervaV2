@@ -254,6 +254,11 @@ class Settings(BaseSettings):
     # defecto a proposito -- activarlo es una decision del usuario, no de
     # este codigo; nunca lo cambia el propio bot ni un deploy.
     llm_live_labeling_enabled: bool = Field(default=False, alias="LLM_LIVE_LABELING_ENABLED")
+    # Subfase 3.9 (docs/FASE3_9_BRAZO_EJECUTADO.md): brazo ejecutado de la cuenta PAPER --
+    # abre solo las senales APROBADA que llegaron a tiempo (`llm_real_max_delay_seconds`).
+    # APAGADO por defecto; solo start_bot.ps1 lo activa para el puerto 8000 (el dev server y
+    # los tests lo mantienen apagado). Distinto de `auto_open_without_llm`, que sigue en false.
+    paper_execution_enabled: bool = Field(default=False, alias="PAPER_EXECUTION_ENABLED")
     # FRACCION 0-1 (score de confluencia, no un porcentaje de precio).
     confluence_score_threshold: float = Field(
         default=0.6, alias="CONFLUENCE_SCORE_THRESHOLD"

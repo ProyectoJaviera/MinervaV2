@@ -386,6 +386,32 @@ BEGIN
     SELECT RAISE(ABORT, 'llm_decision es inmutable una vez decidida');
 END;
 
+-- Brazo ejecutado de la cuenta PAPER (subfase 3.9, docs/FASE3_9_BRAZO_EJECUTADO.md): una
+-- fila por cada decision APROBADA que el brazo considero, abra o no. `signal_group_key`
+-- es UNICA (reclamo idempotente: un grupo nunca abre dos veces). `outcome` PENDING solo
+-- dura el instante entre el reclamo y la apertura (o hasta que el arranque lo resuelve);
+-- `reason` explica un SKIPPED (LATE_DECISION, SCHEDULER_PAUSED, POSITION_ALREADY_OPEN,
+-- NO_CONTRACT_SPEC, BELOW_MIN_ORDER, RISK_<codigo>, OPEN_ERROR, ABORTED_RESTART). Sin PnL
+-- ni ningun resultado: solo la decision de ejecucion, con sus detalles en `details_json`.
+CREATE TABLE IF NOT EXISTS paper_execution_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_group_key TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    resolved_at TEXT,
+    shadow_trade_id INTEGER,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL CHECK (side IN ('LONG', 'SHORT')),
+    strategy TEXT,
+    decision_delay_s REAL NOT NULL,
+    outcome TEXT NOT NULL CHECK (outcome IN ('PENDING', 'OPENED', 'SKIPPED')),
+    reason TEXT,
+    details_json TEXT,
+    trade_id INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_paper_execution_log_outcome
+    ON paper_execution_log (outcome, reason);
+
 CREATE TABLE IF NOT EXISTS backtest_verdicts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     strategy TEXT NOT NULL,
