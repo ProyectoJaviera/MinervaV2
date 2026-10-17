@@ -72,6 +72,10 @@ export interface MeasurementStatus {
   days_needed_approved: number | null;
   days_needed_rejected: number | null;
   gate_open: boolean;
+  // Gate abierto Y registro oficial del veredicto (docs/VEREDICTO_3_6_REGISTRO*.txt):
+  // lo unico que habilita mostrar resultados de las sombras. Con gate_open=true y esto
+  // en false hay que seguir docs/VEREDICTO_3_6.md (placebo oficial y veredicto).
+  outcome_reveal_allowed: boolean;
 }
 
 export interface LlmDecisionEntry {

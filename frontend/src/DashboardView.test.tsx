@@ -22,7 +22,7 @@ const MEASUREMENT_BODY = {
   first_medicion_row_at: null, data_now: null, n_eff_approved: 0, n_eff_rejected: 0,
   shortfall_approved: 300, shortfall_rejected: 300, window_days: 0,
   rate_approved_per_day: null, rate_rejected_per_day: null, days_needed_approved: null,
-  days_needed_rejected: null, gate_open: false,
+  days_needed_rejected: null, gate_open: false, outcome_reveal_allowed: false,
 };
 
 const SHADOW_WITHOUT_OUTCOME = {
@@ -76,12 +76,15 @@ describe("DashboardView: columnas de PnL de las sombras", () => {
     expect(screen.queryByText("Motivo de cierre")).not.toBeInTheDocument();
   });
 
-  it("SI muestra columnas de PnL/cierre cuando el backend las manda (gate abierto)", async () => {
+  it("SI muestra columnas de PnL/cierre con el gate abierto Y el registro oficial", async () => {
     vi.stubGlobal(
       "fetch",
       mockFetchRoutedByPath({
         "/health": { status: 200, body: HEALTH_BODY },
-        "/api/measurement/status": { status: 200, body: { ...MEASUREMENT_BODY, gate_open: true } },
+        "/api/measurement/status": {
+          status: 200,
+          body: { ...MEASUREMENT_BODY, gate_open: true, outcome_reveal_allowed: true },
+        },
         "/api/llm/decisions/recent": { status: 200, body: [] },
         "/api/shadow-trades/recent": { status: 200, body: [SHADOW_WITH_OUTCOME] },
       })
@@ -93,5 +96,87 @@ describe("DashboardView: columnas de PnL de las sombras", () => {
     expect(screen.getByText("PnL neto")).toBeInTheDocument();
     expect(screen.getByText("Motivo de cierre")).toBeInTheDocument();
     expect(screen.getByText("TP")).toBeInTheDocument();
+    expect(screen.queryByText(/seguir docs\/VEREDICTO_3_6\.md/i)).not.toBeInTheDocument();
+  });
+
+  it("gate abierto SIN registro: avisa 'seguir docs/VEREDICTO_3_6.md' y no muestra PnL", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRoutedByPath({
+        "/health": { status: 200, body: HEALTH_BODY },
+        "/api/measurement/status": {
+          status: 200,
+          body: { ...MEASUREMENT_BODY, gate_open: true, outcome_reveal_allowed: false },
+        },
+        "/api/llm/decisions/recent": { status: 200, body: [] },
+        // el backend real no manda los campos de resultado en este estado
+        "/api/shadow-trades/recent": { status: 200, body: [SHADOW_WITHOUT_OUTCOME] },
+      })
+    );
+
+    render(withQueryClient(<DashboardView username="renzo" />));
+
+    await screen.findByText("BTCUSDT LONG");
+    expect(screen.getByRole("status")).toHaveTextContent(/gate abierto: seguir docs\/VEREDICTO_3_6\.md/i);
+    expect(screen.queryByText("PnL neto")).not.toBeInTheDocument();
+    expect(screen.getByText(/queda oculto hasta que exista el registro oficial/i)).toBeInTheDocument();
+  });
+
+  it("falla cerrado: aunque el backend mandara resultados, sin outcome_reveal_allowed no se ven", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRoutedByPath({
+        "/health": { status: 200, body: HEALTH_BODY },
+        "/api/measurement/status": {
+          status: 200,
+          body: { ...MEASUREMENT_BODY, gate_open: true, outcome_reveal_allowed: false },
+        },
+        "/api/llm/decisions/recent": { status: 200, body: [] },
+        "/api/shadow-trades/recent": { status: 200, body: [SHADOW_WITH_OUTCOME] },
+      })
+    );
+
+    render(withQueryClient(<DashboardView username="renzo" />));
+
+    await screen.findByText("BTCUSDT LONG");
+    expect(screen.queryByText("PnL neto")).not.toBeInTheDocument();
+    expect(screen.queryByText("4.5000")).not.toBeInTheDocument();
+    expect(screen.queryByText("TP")).not.toBeInTheDocument();
+  });
+
+  it("un backend viejo sin el campo outcome_reveal_allowed tampoco muestra resultados", async () => {
+    const { outcome_reveal_allowed: _omit, ...legacy } = MEASUREMENT_BODY;
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRoutedByPath({
+        "/health": { status: 200, body: HEALTH_BODY },
+        "/api/measurement/status": { status: 200, body: { ...legacy, gate_open: true } },
+        "/api/llm/decisions/recent": { status: 200, body: [] },
+        "/api/shadow-trades/recent": { status: 200, body: [SHADOW_WITH_OUTCOME] },
+      })
+    );
+
+    render(withQueryClient(<DashboardView username="renzo" />));
+
+    await screen.findByText("BTCUSDT LONG");
+    expect(screen.queryByText("PnL neto")).not.toBeInTheDocument();
+  });
+
+  it("con el gate cerrado explica que faltan los 300 conglomerados y no muestra el aviso del procedimiento", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRoutedByPath({
+        "/health": { status: 200, body: HEALTH_BODY },
+        "/api/measurement/status": { status: 200, body: MEASUREMENT_BODY },
+        "/api/llm/decisions/recent": { status: 200, body: [] },
+        "/api/shadow-trades/recent": { status: 200, body: [SHADOW_WITHOUT_OUTCOME] },
+      })
+    );
+
+    render(withQueryClient(<DashboardView username="renzo" />));
+
+    await screen.findByText("BTCUSDT LONG");
+    expect(screen.getByText(/junte 300 conglomerados efectivos por lado/i)).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

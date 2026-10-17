@@ -19,6 +19,13 @@ export function DashboardView({ username }: { username: string }) {
   const decisions = useRecentDecisions();
   const shadows = useRecentShadows();
 
+  const gateOpen = measurement.data?.gate_open === true;
+  // Falla CERRADO: sin el campo (backend viejo) o en false, nunca se muestran
+  // resultados, ni siquiera si el backend los mandara. El frontend nunca los calcula.
+  const revealAllowed = measurement.data?.outcome_reveal_allowed === true;
+  const showOutcomeColumns =
+    revealAllowed && (shadows.data ?? []).some((s) => "pnl_net_usdt" in s);
+
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4">
       <div className="flex items-center justify-between">
@@ -89,6 +96,17 @@ export function DashboardView({ username }: { username: string }) {
                 statusColor="bg-amber-600"
               />
             </div>
+
+            {gateOpen && !revealAllowed && (
+              <p
+                role="status"
+                className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
+              >
+                Gate abierto: seguir docs/VEREDICTO_3_6.md (copia, placebo oficial y, solo si sale
+                CALIBRADO, el veredicto). No se muestran resultados hasta que exista el registro
+                oficial del veredicto.
+              </p>
+            )}
 
             <BandIndicator rate={measurement.data.approval_rate} withinBand={measurement.data.within_band} />
 
@@ -194,9 +212,10 @@ export function DashboardView({ username }: { username: string }) {
                 <th className="py-1 pr-2">Estrategia</th>
                 <th className="py-1 pr-2">Estado</th>
                 <th className="py-1 pr-2">Decision LLM</th>
-                {/* Estas dos columnas solo aparecen si el backend las manda
-                    (gate de medicion abierto) -- nunca se calculan aca. */}
-                {(shadows.data ?? []).some((s) => "pnl_net_usdt" in s) && (
+                {/* Estas dos columnas solo aparecen con el gate abierto Y el registro
+                    oficial del veredicto (outcome_reveal_allowed), y solo si el backend
+                    manda los campos -- nunca se calculan aca. */}
+                {showOutcomeColumns && (
                   <>
                     <th className="py-1 pr-2">PnL neto</th>
                     <th className="py-1 pr-2">Motivo de cierre</th>
@@ -214,7 +233,7 @@ export function DashboardView({ username }: { username: string }) {
                   <td className="py-1 pr-2">{s.strategy ?? "-"}</td>
                   <td className="py-1 pr-2">{s.status}</td>
                   <td className="py-1 pr-2">{s.llm_decision}</td>
-                  {"pnl_net_usdt" in s && (
+                  {showOutcomeColumns && (
                     <>
                       <td className="py-1 pr-2">
                         {s.pnl_net_usdt !== null && s.pnl_net_usdt !== undefined
@@ -228,7 +247,7 @@ export function DashboardView({ username }: { username: string }) {
               ))}
               {(shadows.data ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-2 text-gray-400">
+                  <td colSpan={showOutcomeColumns ? 7 : 5} className="py-2 text-gray-400">
                     Sin datos todavia.
                   </td>
                 </tr>
@@ -236,10 +255,11 @@ export function DashboardView({ username }: { username: string }) {
             </tbody>
           </table>
         </div>
-        {!measurement.data?.gate_open && (
+        {!revealAllowed && (
           <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
-            El PnL de las sombras etiquetadas queda oculto hasta que la medicion junte 300
-            conglomerados efectivos por lado -- ver la tarjeta de avance de arriba.
+            {gateOpen
+              ? "El PnL de las sombras etiquetadas queda oculto hasta que exista el registro oficial del veredicto (ver el aviso de la tarjeta de avance)."
+              : "El PnL de las sombras etiquetadas queda oculto hasta que la medicion junte 300 conglomerados efectivos por lado -- ver la tarjeta de avance de arriba."}
           </p>
         )}
       </Card>

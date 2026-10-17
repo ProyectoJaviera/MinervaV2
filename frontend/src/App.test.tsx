@@ -44,6 +44,7 @@ const MEASUREMENT_BODY = {
   days_needed_approved: null,
   days_needed_rejected: null,
   gate_open: false,
+  outcome_reveal_allowed: false,
 };
 
 function mockFetchRoutedByPath(routes: Record<string, { status: number; body: unknown }>) {
