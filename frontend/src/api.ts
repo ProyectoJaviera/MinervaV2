@@ -71,6 +71,18 @@ export interface MeasurementStatus {
   rate_rejected_per_day: number | null;
   days_needed_approved: number | null;
   days_needed_rejected: number | null;
+  // Ritmo sobre tiempo EN MARCHA (solo el tiempo evaluando senales; un hueco mayor a
+  // `offline_gap_hours` sin ciclos cuenta como apagado). Los campos de arriba son de
+  // CALENDARIO (incluyen el tiempo apagado). Opcionales: un backend viejo no los manda;
+  // null = sin marcas de evaluacion. Los porcentajes son fracciones 0-1. Sin PnL.
+  offline_gap_hours?: number;
+  running_window_days?: number | null;
+  uptime_pct_window?: number | null;
+  uptime_pct_total?: number | null;
+  rate_approved_running_per_day?: number | null;
+  rate_rejected_running_per_day?: number | null;
+  days_needed_running_approved?: number | null;
+  days_needed_running_rejected?: number | null;
   gate_open: boolean;
   // Gate abierto Y registro oficial del veredicto (docs/VEREDICTO_3_6_REGISTRO*.txt):
   // lo unico que habilita mostrar resultados de las sombras. Con gate_open=true y esto

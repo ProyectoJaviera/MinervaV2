@@ -162,6 +162,69 @@ describe("DashboardView: columnas de PnL de las sombras", () => {
     expect(screen.queryByText("PnL neto")).not.toBeInTheDocument();
   });
 
+  it("muestra el ritmo por calendario Y el ritmo en marcha, rotulados, con el porcentaje de tiempo en marcha", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRoutedByPath({
+        "/health": { status: 200, body: HEALTH_BODY },
+        "/api/measurement/status": {
+          status: 200,
+          body: {
+            ...MEASUREMENT_BODY,
+            window_days: 3.2,
+            days_needed_approved: 317.7,
+            days_needed_rejected: 237.5,
+            offline_gap_hours: 2,
+            running_window_days: 0.8,
+            uptime_pct_window: 0.25,
+            uptime_pct_total: 0.62,
+            rate_approved_running_per_day: 3.7,
+            rate_rejected_running_per_day: 5,
+            days_needed_running_approved: 80.2,
+            days_needed_running_rejected: 59.1,
+          },
+        },
+        "/api/llm/decisions/recent": { status: 200, body: [] },
+        "/api/shadow-trades/recent": { status: 200, body: [] },
+      })
+    );
+
+    render(withQueryClient(<DashboardView username="renzo" />));
+
+    await screen.findByText(/Dias estimados para llegar a 300/);
+    expect(screen.getByText("~317.7 dias de calendario")).toBeInTheDocument();
+    expect(screen.getByText("~237.5 dias de calendario")).toBeInTheDocument();
+    expect(screen.getByText("~80.2 dias EN MARCHA")).toBeInTheDocument();
+    expect(screen.getByText("~59.1 dias EN MARCHA")).toBeInTheDocument();
+    expect(screen.getByText(/incluye el tiempo con el bot apagado/)).toBeInTheDocument();
+    expect(screen.getByText(/un hueco de mas de 2 h sin ciclos cuenta como apagado/)).toBeInTheDocument();
+    expect(screen.getByText("25% (0.8 de 3.2 dias)")).toBeInTheDocument();
+    expect(screen.getByText("62%")).toBeInTheDocument();
+    expect(screen.getByText(/Menos de 1 dia en marcha en la ventana/)).toBeInTheDocument();
+  });
+
+  it("un backend viejo sin los campos de ritmo en marcha sigue funcionando y dice 'sin datos'", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRoutedByPath({
+        "/health": { status: 200, body: HEALTH_BODY },
+        "/api/measurement/status": {
+          status: 200,
+          body: { ...MEASUREMENT_BODY, days_needed_approved: 12.5 },
+        },
+        "/api/llm/decisions/recent": { status: 200, body: [] },
+        "/api/shadow-trades/recent": { status: 200, body: [] },
+      })
+    );
+
+    render(withQueryClient(<DashboardView username="renzo" />));
+
+    await screen.findByText("~12.5 dias de calendario");
+    expect(screen.getAllByText("sin datos suficientes para estimar").length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText("sin datos")).toBeInTheDocument();
+    expect(screen.queryByText(/EN MARCHA$/)).not.toBeInTheDocument();
+  });
+
   it("con el gate cerrado explica que faltan los 300 conglomerados y no muestra el aviso del procedimiento", async () => {
     vi.stubGlobal(
       "fetch",

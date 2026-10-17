@@ -138,19 +138,72 @@ export function DashboardView({ username }: { username: string }) {
               </div>
             )}
 
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <caption className="mb-1 text-left text-sm text-gray-700 dark:text-gray-300">
+                  Dias estimados para llegar a 300 conglomerados efectivos
+                </caption>
+                <thead>
+                  <tr className="border-b border-gray-200 text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    <th className="py-1 pr-2 font-normal">Ritmo</th>
+                    <th className="py-1 pr-2 font-normal">APROBADA</th>
+                    <th className="py-1 pr-2 font-normal">RECHAZADA</th>
+                  </tr>
+                </thead>
+                <tbody className="tabular-nums">
+                  <tr className="border-b border-gray-100 dark:border-gray-800">
+                    <th scope="row" className="py-1 pr-2 text-left font-medium">
+                      Por calendario
+                      <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">
+                        incluye el tiempo con el bot apagado
+                      </span>
+                    </th>
+                    <td className="py-1 pr-2">
+                      {fmtDays(measurement.data.days_needed_approved, "dias de calendario")}
+                    </td>
+                    <td className="py-1 pr-2">
+                      {fmtDays(measurement.data.days_needed_rejected, "dias de calendario")}
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row" className="py-1 pr-2 text-left font-medium">
+                      En marcha
+                      <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">
+                        solo el tiempo evaluando senales (un hueco de mas de{" "}
+                        {measurement.data.offline_gap_hours ?? 2} h sin ciclos cuenta como apagado)
+                      </span>
+                    </th>
+                    <td className="py-1 pr-2">
+                      {fmtDays(measurement.data.days_needed_running_approved, "dias EN MARCHA")}
+                    </td>
+                    <td className="py-1 pr-2">
+                      {fmtDays(measurement.data.days_needed_running_rejected, "dias EN MARCHA")}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <StatTile
-                label="Dias estimados (APROBADA)"
-                value={fmtDays(measurement.data.days_needed_approved)}
+                label="Tiempo en marcha (ventana del ritmo)"
+                value={
+                  measurement.data.running_window_days == null
+                    ? "sin datos"
+                    : `${fmtPct(measurement.data.uptime_pct_window, 0)} (${measurement.data.running_window_days.toFixed(1)} de ${measurement.data.window_days.toFixed(1)} dias)`
+                }
               />
               <StatTile
-                label="Dias estimados (RECHAZADA)"
-                value={fmtDays(measurement.data.days_needed_rejected)}
+                label="Tiempo en marcha (desde el inicio de la medicion)"
+                value={fmtPct(measurement.data.uptime_pct_total, 0)}
               />
             </div>
             <p className="text-xs text-gray-400 dark:text-gray-500">
-              Ritmo sobre {measurement.data.window_days.toFixed(1)} dias de historia reciente. Tasa de
-              aprobacion: {fmtPct(measurement.data.approval_rate)}.
+              Ritmo sobre {measurement.data.window_days.toFixed(1)} dias de historia reciente. Los
+              dias EN MARCHA equivalen a dias de calendario solo si el bot no vuelve a apagarse.
+              {measurement.data.running_window_days != null &&
+                measurement.data.running_window_days < 1 &&
+                " Menos de 1 dia en marcha en la ventana: la estimacion en marcha es volatil."}{" "}
+              Tasa de aprobacion: {fmtPct(measurement.data.approval_rate)}.
             </p>
           </div>
         ) : (
