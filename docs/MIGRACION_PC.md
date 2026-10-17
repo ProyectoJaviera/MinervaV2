@@ -20,6 +20,14 @@ misma base), y espera a que `/health` responda antes de devolver el control.
 nunca otros procesos python del sistema. El detalle completo de cómo y por qué
 está en el docstring de cada script (`Get-Help .\scripts\start_bot.ps1 -Full`).
 
+`start_bot.ps1` también fija `TELEGRAM_COMMANDS_ENABLED=true` (el bot de comandos de
+Telegram, subfase 3.7; ver `docs/FASE3_7_TELEGRAM.md`) **solo con el puerto 8000**; con
+cualquier otro puerto lo fija en `false`, porque un token de Telegram admite un solo
+consumidor de `getUpdates`. El token y el chat_id siguen viniendo del `.env`. Una pausa
+pedida por Telegram (`/pause`, `/kill`) **persiste en la base**: si tras mudarte o
+reiniciar el bot ves el estado `stale` sin causa, revisa `GET /health` → `control.paused`
+y reanuda con `/resume`.
+
 **Límite conocido**: Windows no da una señal de apagado cooperativo real para
 un proceso sin consola -- `stop_bot.ps1` termina el proceso directo
 (`TerminateProcess`), no espera a que `ShadowLiveLabeler.shutdown()` corra de
