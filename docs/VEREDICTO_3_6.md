@@ -52,10 +52,11 @@ al instante exacto de los 300), por eso:
 2. **Placebo oficial** (sección f; lo exige el diseño antes de la primera decisión
    real) sobre esa copia, con 1.000 repeticiones (el valor por defecto). Con una fecha en
    el nombre, porque `--out` no sobrescribe y un resultado NO INFORMATIVO también se
-   guarda:
+   guarda. **Nombre propio del placebo, que NO cumple el patrón del registro del
+   veredicto** (si lo cumpliera, desbloquearía los resultados sin veredicto):
 
    ```powershell
-   .\.venv\Scripts\python.exe scripts\placebo_check.py --db data\backups\veredicto_copia.db --out docs\PLACEBO_REGISTRO_AAAAMMDD.txt
+   .\.venv\Scripts\python.exe scripts\placebo_check.py --db data\backups\veredicto_copia.db --out docs\PLACEBO_2026-12-05.txt
    ```
 
    Tarda unos 12 minutos (déjalo corriendo en segundo plano). Pega el bloque final en
@@ -63,16 +64,45 @@ al instante exacto de los 300), por eso:
    (→ esperar 7 días y repetir desde el paso 1), 6 NO calibrado (→ no se usa el criterio).
 
 3. **Solo si el placebo salió CALIBRADO**, el informe, una sola vez y sobre la misma
-   copia:
+   copia. El nombre del `--out` **debe** cumplir el patrón
+   `docs\VEREDICTO_3_6_REGISTRO*.txt` (con fecha): ese archivo es el **registro oficial**
+   que desbloquea los resultados en la API y el dashboard (ver la sección siguiente):
 
    ```powershell
-   .\.venv\Scripts\python.exe scripts\ai_value_report.py --db data\backups\veredicto_copia.db --out docs\VEREDICTO_3_6_REGISTRO.txt
+   .\.venv\Scripts\python.exe scripts\ai_value_report.py --db data\backups\veredicto_copia.db --out docs\VEREDICTO_3_6_REGISTRO_2026-12-05.txt
    ```
 
    Si el gate sigue cerrado, o si abrió pero tras excluir sombras no confiables
    (reconciliación fallida) y el piloto el N efectivo **limpio** sigue por debajo de
    300 en algún lado, el informe lo dice y no muestra nada (código 3); espera y
    repite. El archivo `--out` solo se crea cuando hay veredicto.
+
+## Cuándo se ven los resultados (API, dashboard y reportes)
+
+Una sola condición, `is_outcome_reveal_allowed` (`app/trading/measurement_status.py`):
+
+> **gate abierto Y existe un registro oficial del veredicto**: un archivo
+> `docs/VEREDICTO_3_6_REGISTRO*.txt` que contiene la línea `Veredicto: <X>` del informe
+> con `X` = `APORTA_VALOR`, `NO_APORTA_VALOR` o `INCONCLUSO`.
+
+Abrir el gate **no basta**: si el placebo sale NO INFORMATIVO se esperan 7 días y en ese
+tiempo no se deben ver resultados. La usan `GET /api/shadow-trades/recent` (campos de
+resultado: `pnl_*`, `exit_price`, `close_reason`, `closed_at`), el dashboard y
+`scripts/shadow_report.py`; `GET /api/measurement/status` expone `gate_open` y
+`outcome_reveal_allowed` por separado.
+
+| Gate | Registro oficial | API / dashboard / `shadow_report.py` |
+|---|---|---|
+| cerrado | (cualquiera) | nada; el dashboard explica que faltan los 300 conglomerados |
+| abierto | no existe, o sin un veredicto válido | nada; el dashboard dice **"Gate abierto: seguir docs/VEREDICTO_3_6.md"** |
+| abierto | válido | se muestran los resultados |
+
+El registro se lee en cada petición: aparece el archivo y los resultados se desbloquean
+**sin reiniciar el bot**. Un archivo vacío, ilegible, de más de 1 MB, sin la línea
+`Veredicto: <X>`, o con el nombre del placebo (`PLACEBO_<fecha>.txt`) **no cuenta**
+(falla cerrado). El dashboard además ignora cualquier campo de resultado si
+`outcome_reveal_allowed` no es `true` (también con un backend viejo sin el campo).
+Para volver a ocultar los resultados basta con mover o renombrar el registro.
 
 ## Placebo (`scripts/placebo_check.py`)
 

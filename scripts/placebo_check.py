@@ -29,7 +29,7 @@ Al final imprime un bloque listo para copiar al registro de docs/FASE3_6_LLM.md.
 `--out` guarda el informe completo (UTF-8) sin sobrescribir un archivo existente.
 
     python scripts/placebo_check.py --db <copia consistente de la base>
-    python scripts/placebo_check.py --db <copia> --out docs/PLACEBO_REGISTRO_AAAAMMDD.txt
+    python scripts/placebo_check.py --db <copia> --out docs/PLACEBO_2026-12-05.txt
 
 Codigos de salida: 0 = CALIBRADO; 6 = NO calibrado (el criterio no se usa; se revisa el
 diseno); 7 = NO INFORMATIVO (probabilidad de llegar < 50 %); 3 = nada que calibrar
