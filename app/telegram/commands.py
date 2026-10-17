@@ -23,10 +23,12 @@ from typing import Any
 
 from app.api.routes.health import STALE_AFTER_MINUTES
 from app.config import Settings
+from app.core.logging import get_logger
 from app.llm.budget import local_day_start_utc
 from app.persistence.database import Database
 from app.persistence.models import Trade
-from app.persistence.repositories import llm_logs_repo, trades_repo
+from app.persistence.repositories import llm_logs_repo, system_state_repo, trades_repo
+from app.telegram.confirmation import ConfirmationManager, is_yes
 from app.trading import control_state, risk_engine
 from app.trading.measurement_status import (
     APPROVAL_BAND,
@@ -36,6 +38,8 @@ from app.trading.measurement_status import (
     compute_status_async,
     is_measurement_gate_open,
 )
+
+logger = get_logger(__name__)
 
 HEADER = "MODO PAPER TRADING"
 COMMANDS = ("/status", "/positions", "/balance", "/metrics", "/pause", "/resume", "/kill")
@@ -268,6 +272,83 @@ async def cmd_metrics(ctx: BotContext) -> str:
     return "\n".join(lines)
 
 
+# --- /pause, /resume, /kill (con confirmacion) ------------------------------------------
+
+STOPS_MEASUREMENT = (
+    "DETIENE LA MEDICION en curso: sin senales, sin sombras y sin etiquetado del LLM "
+    "mientras dure (los cierres de posiciones siguen funcionando)."
+)
+CONTROL_WARNINGS = {
+    "/pause": f"ATENCION: /pause {STOPS_MEASUREMENT}",
+    "/kill": (
+        "ATENCION: /kill activa el kill switch (bloquea entradas reales nuevas) y ademas "
+        f"pausa el scheduler: {STOPS_MEASUREMENT} Se levanta con /resume."
+    ),
+    "/resume": (
+        "/resume levanta la pausa del scheduler Y el kill switch (la medicion se reanuda; "
+        "no levanta el stop por drawdown, que se resuelve aparte)."
+    ),
+}
+
+
+async def _record_control(ctx: BotContext, command: str) -> None:
+    """Rastro auditable de cada accion de control ejecutada (sin datos del chat)."""
+    stamp = f"{command} {ctx.now().isoformat()}"
+    await system_state_repo.set_state(ctx.db, "telegram_last_control_action", stamp)
+    logger.warning("Telegram: accion de control ejecutada: %s", stamp)
+
+
+async def execute_control(ctx: BotContext, command: str) -> str:
+    if command == "/pause":
+        await control_state.set_scheduler_paused(ctx.db, True)
+        await _record_control(ctx, command)
+        return (
+            f"{HEADER}\n"
+            "Scheduler PAUSADO. La medicion esta DETENIDA (sin senales, sombras ni etiquetado); "
+            "los cierres de posiciones siguen. Reanuda con /resume."
+        )
+    if command == "/kill":
+        await risk_engine.activate_kill_switch(ctx.db)
+        await control_state.set_scheduler_paused(ctx.db, True)
+        await _record_control(ctx, command)
+        return (
+            f"{HEADER}\n"
+            "KILL SWITCH ACTIVO y scheduler PAUSADO. La medicion esta DETENIDA y no se abren "
+            "entradas reales; los cierres de posiciones siguen. Levanta todo con /resume."
+        )
+    await control_state.set_scheduler_paused(ctx.db, False)
+    await risk_engine.deactivate_kill_switch(ctx.db)
+    await _record_control(ctx, command)
+    lines = [HEADER, "Scheduler REANUDADO y kill switch DESACTIVADO: la medicion sigue."]
+    if await risk_engine.is_drawdown_stop_active(ctx.db):
+        lines.append(
+            "OJO: el stop por drawdown sigue ACTIVO; se levanta aparte (resume_drawdown_stop), "
+            "no por Telegram."
+        )
+    return "\n".join(lines)
+
+
+async def cmd_control(
+    ctx: BotContext, command: str, args: list[str], confirmations: ConfirmationManager,
+) -> str:
+    if not args:
+        confirmations.request(command)
+        window = int(confirmations.window_seconds)
+        return (
+            f"{HEADER}\n{CONTROL_WARNINGS[command]}\n"
+            f"Para confirmar, envia en {window} s: {command} SI"
+        )
+    if is_yes(args):
+        if confirmations.confirm(command):
+            return await execute_control(ctx, command)
+        return (
+            f"{HEADER}\n"
+            f"No hay una solicitud vigente de {command} (nunca la pediste o expiro). Envia "
+            f"primero {command} y luego {command} SI. No se hizo ningun cambio."
+        )
+    return f"{HEADER}\nUso: {command} (y luego {command} SI). No se hizo ningun cambio."
+
+
 # --- enrutador ---------------------------------------------------------------------------
 
 Handler = Callable[[BotContext], Awaitable[str]]
@@ -283,16 +364,24 @@ class CommandRouter:
     """Callable `texto -> respuesta` para `TelegramBot`. Comando desconocido, `/start`
     y `/help`: la lista de comandos. Texto que no es un comando: sin respuesta."""
 
-    def __init__(self, ctx: BotContext) -> None:
+    def __init__(
+        self, ctx: BotContext, confirmations: ConfirmationManager | None = None,
+    ) -> None:
         self.ctx = ctx
+        self.confirmations = confirmations or ConfirmationManager()
 
     async def __call__(self, text: str) -> str | None:
         parsed = parse_command(text)
         if parsed is None:
             return None
-        name, _args = parsed
+        name, args = parsed
+        # Ningun comando puede quedarse colgado: tope de 20 s (solo lecturas locales
+        # y escrituras de milisegundos en `system_state`).
+        if name in CONTROL_WARNINGS:
+            return await asyncio.wait_for(
+                cmd_control(self.ctx, name, args, self.confirmations), timeout=20
+            )
         handler = READ_ONLY.get(name)
         if handler is None:
             return help_text()
-        # Una consulta no puede quedarse colgada: tope de 20 s (solo lecturas locales).
         return await asyncio.wait_for(handler(self.ctx), timeout=20)
