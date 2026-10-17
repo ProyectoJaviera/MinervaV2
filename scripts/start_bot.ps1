@@ -16,6 +16,10 @@
         AUTO_OPEN_WITHOUT_LLM=false
         LOG_LEVEL=INFO
         LLM_LIVE_LABELING_ENABLED=true
+        TELEGRAM_COMMANDS_ENABLED=true  (SOLO con -Port 8000; false con cualquier
+            otro puerto: un token de Telegram admite UN solo consumidor de
+            getUpdates, asi que una instancia de prueba nunca debe consumirlo.
+            Token y chat_id siguen viniendo de `.env`.)
 
     -Port/-DatabasePath/-LogDir son parametros SOLO para poder probar este
     script contra el puerto 8001 y una base/carpeta de log temporales
@@ -97,13 +101,16 @@ if (-not (Test-Path $pythonw)) {
     exit 1
 }
 
+$telegramCommands = if ($Port -eq 8000) { "true" } else { "false" }
 Write-OpLog ("Puerto $Port libre. Arrancando con DATABASE_PATH=$DatabaseFullPath " +
-    "AUTO_OPEN_WITHOUT_LLM=false LOG_LEVEL=INFO LLM_LIVE_LABELING_ENABLED=true")
+    "AUTO_OPEN_WITHOUT_LLM=false LOG_LEVEL=INFO LLM_LIVE_LABELING_ENABLED=true " +
+    "TELEGRAM_COMMANDS_ENABLED=$telegramCommands")
 
 $env:DATABASE_PATH = $DatabaseFullPath
 $env:AUTO_OPEN_WITHOUT_LLM = "false"
 $env:LOG_LEVEL = "INFO"
 $env:LLM_LIVE_LABELING_ENABLED = "true"
+$env:TELEGRAM_COMMANDS_ENABLED = $telegramCommands
 $env:LOG_DIR = $LogDirFullPath
 
 # Ver DESCRIPTION: cmd.exe fusiona stdout+stderr a $OutLog con "2>&1" (algo

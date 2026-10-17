@@ -37,6 +37,8 @@ from app.market.bitunix_ws import BitunixPublicWSClient
 from app.market.coingecko_client import CoinGeckoClient
 from app.market.universe import UniverseRefresher
 from app.persistence.database import Database
+from app.telegram.commands import BotContext
+from app.telegram.runtime import maybe_start_telegram_bot
 from app.trading.position_monitor import PositionMonitor
 from app.trading.shadow_book import ShadowBook
 from app.trading.shadow_live_labeler import ShadowLiveLabeler, build_decision_service
@@ -104,9 +106,21 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(universe_refresher.run_forever()),
         asyncio.create_task(heartbeat.run_forever()),
     ]
+    # Bot de Telegram (subfase 3.7): apagado por defecto y aislado -- nunca lanza
+    # ni impide arrancar el resto (ver app/telegram/runtime.py).
+    telegram_bot = maybe_start_telegram_bot(
+        settings,
+        BotContext(
+            db=db, settings=settings, paper_backend=paper_backend, scheduler=scheduler,
+            live_labeler=live_labeler, monitor=monitor,
+        ),
+        tasks,
+    )
     try:
         yield
     finally:
+        if telegram_bot is not None:
+            telegram_bot.stop()
         scheduler.stop()
         monitor.stop()
         ws_client.stop()

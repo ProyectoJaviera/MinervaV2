@@ -14,6 +14,9 @@ temporal, y fija `DATABASE_PATH`/`LOG_DIR` al entorno ANTES de importar nada
 de `app.*` (pydantic-settings lee el entorno al instanciar `Settings()`, que
 pasa recien dentro de `uvicorn.run` -- el orden es critico, no cosmetico).
 
+Fuerza tambien `TELEGRAM_COMMANDS_ENABLED=false` y `TELEGRAM_BOT_TOKEN=""` (un
+token admite un solo consumidor de long-polling; ver `app/telegram/runtime.py`).
+
 Fuerza `LLM_LIVE_LABELING_ENABLED=false` (y `ANTHROPIC_API_KEY=""`, como
 refuerzo redundante) SIN IMPORTAR lo que diga el `.env` real: el `.env` real
 de hoy tiene ese flag en `true`. Si este script heredara el entorno real tal
@@ -87,6 +90,10 @@ def main(source_db: str, port: int) -> None:
     os.environ["LOG_DIR"] = str(log_dir)
     os.environ["LLM_LIVE_LABELING_ENABLED"] = "false"
     os.environ["ANTHROPIC_API_KEY"] = ""
+    # Un token de Telegram admite UN solo consumidor de getUpdates: la instancia de
+    # desarrollo nunca debe competir con el bot real (candado codificado, como el del LLM).
+    os.environ["TELEGRAM_COMMANDS_ENABLED"] = "false"
+    os.environ["TELEGRAM_BOT_TOKEN"] = ""
 
     import uvicorn
 

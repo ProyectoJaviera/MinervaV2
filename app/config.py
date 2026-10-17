@@ -262,6 +262,10 @@ class Settings(BaseSettings):
     # --- Telegram (usado desde Fase 5) ---
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
+    # Bot de comandos por long-polling (subfase 3.7): APAGADO por defecto. Un token
+    # solo admite UN consumidor de getUpdates, asi que solo el bot real (puerto 8000,
+    # via start_bot.ps1) lo activa; el dev server y los tests lo mantienen apagado.
+    telegram_commands_enabled: bool = Field(default=False, alias="TELEGRAM_COMMANDS_ENABLED")
 
     # --- Frontend / API (usado desde Fase 5) ---
     auth_username: str = Field(default="", alias="AUTH_USERNAME")
