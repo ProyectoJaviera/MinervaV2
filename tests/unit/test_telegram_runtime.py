@@ -124,8 +124,12 @@ def test_start_bot_enables_the_commands_only_for_port_8000_and_the_dev_server_fo
     start_bot = (REPO_ROOT / "scripts" / "start_bot.ps1").read_text(encoding="utf-8")
     dev_server = (REPO_ROOT / "scripts" / "run_dev_server.py").read_text(encoding="utf-8")
 
-    assert 'if ($Port -eq 8000) { "true" } else { "false" }' in start_bot
+    assert "$isRealBot = ($Port -eq 8000)" in start_bot
+    assert '$telegramCommands = if ($isRealBot) { "true" } else { "false" }' in start_bot
+    assert '$llmLabeling = if ($isRealBot) { "true" } else { "false" }' in start_bot
     assert "$env:TELEGRAM_COMMANDS_ENABLED = $telegramCommands" in start_bot
+    assert "$env:LLM_LIVE_LABELING_ENABLED = $llmLabeling" in start_bot
+    assert '$env:LLM_LIVE_LABELING_ENABLED = "true"' not in start_bot  # ya no es fijo
     assert 'os.environ["TELEGRAM_COMMANDS_ENABLED"] = "false"' in dev_server
     assert 'os.environ["TELEGRAM_BOT_TOKEN"] = ""' in dev_server
 

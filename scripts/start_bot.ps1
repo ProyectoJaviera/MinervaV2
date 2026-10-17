@@ -15,7 +15,9 @@
     `.env` que puede haber quedado desactualizado:
         AUTO_OPEN_WITHOUT_LLM=false
         LOG_LEVEL=INFO
-        LLM_LIVE_LABELING_ENABLED=true
+        LLM_LIVE_LABELING_ENABLED=true  (SOLO con -Port 8000; false con cualquier
+            otro puerto: una instancia de prueba sobre una copia de la base no debe
+            llamar a la API de Anthropic -- gasto real -- al abrir una sombra nueva.)
         TELEGRAM_COMMANDS_ENABLED=true  (SOLO con -Port 8000; false con cualquier
             otro puerto: un token de Telegram admite UN solo consumidor de
             getUpdates, asi que una instancia de prueba nunca debe consumirlo.
@@ -101,15 +103,19 @@ if (-not (Test-Path $pythonw)) {
     exit 1
 }
 
-$telegramCommands = if ($Port -eq 8000) { "true" } else { "false" }
+# Solo el bot REAL (puerto 8000) etiqueta con el LLM y consume getUpdates de Telegram;
+# cualquier otro puerto es una instancia de prueba (ver DESCRIPTION).
+$isRealBot = ($Port -eq 8000)
+$telegramCommands = if ($isRealBot) { "true" } else { "false" }
+$llmLabeling = if ($isRealBot) { "true" } else { "false" }
 Write-OpLog ("Puerto $Port libre. Arrancando con DATABASE_PATH=$DatabaseFullPath " +
-    "AUTO_OPEN_WITHOUT_LLM=false LOG_LEVEL=INFO LLM_LIVE_LABELING_ENABLED=true " +
+    "AUTO_OPEN_WITHOUT_LLM=false LOG_LEVEL=INFO LLM_LIVE_LABELING_ENABLED=$llmLabeling " +
     "TELEGRAM_COMMANDS_ENABLED=$telegramCommands")
 
 $env:DATABASE_PATH = $DatabaseFullPath
 $env:AUTO_OPEN_WITHOUT_LLM = "false"
 $env:LOG_LEVEL = "INFO"
-$env:LLM_LIVE_LABELING_ENABLED = "true"
+$env:LLM_LIVE_LABELING_ENABLED = $llmLabeling
 $env:TELEGRAM_COMMANDS_ENABLED = $telegramCommands
 $env:LOG_DIR = $LogDirFullPath
 
