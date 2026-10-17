@@ -64,6 +64,66 @@ La tarea de alerta por Telegram (`scripts/telegram_alert.py`, cada 10 min, sin
 depender del login) se registra por separado con `schtasks /Create` -- ver el
 docstring de ese script para el comando exacto.
 
+## Tarea del Programador de Windows: resumen diario por Telegram (09:15)
+
+`scripts/telegram_daily.py` manda **un mensaje al día** con: estado de `/health`
+(ok/stale, `frozen_hash_ok`, etiquetado activo), etiquetadas y fallidas de las últimas
+24 h, costo del LLM en 24 h y acumulado de la medición, N efectivo por lado (x/300) y si
+el gate está abierto. **Nunca PnL ni resultados de sombras.** Si el bot no responde, el
+resumen lo dice y sigue informando lo que hay en la base.
+
+Los números salen de una **copia de solo lectura** de `data\minerva_estabilidad.db`
+(API de backup de sqlite, en un directorio temporal del sistema, nunca dentro de `data\`,
+borrada al terminar); `/health` se consulta en vivo. Usa **esa** base por defecto -- la
+misma que fija `start_bot.ps1` -- y no la de `DATABASE_PATH` del `.env`. Usa
+`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` del `.env` (los mismos de la alerta) sin
+imprimirlos.
+
+Probarlo a mano, sin enviar nada:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\telegram_daily.py --dry-run
+```
+
+**Registrar** `MinervaDailySummary` (todos los días a las 09:15, hora local del PC; el PC
+debe estar en la zona horaria de Chile -- Windows: "Pacific SA Standard Time" --, y
+`-StartWhenAvailable` lo corre en cuanto se pueda si el PC estaba apagado a esa hora):
+
+```powershell
+$RepoRoot = "D:\Estudio\IA\Minerva"
+$action = New-ScheduledTaskAction -Execute "$RepoRoot\.venv\Scripts\pythonw.exe" `
+    -Argument "`"$RepoRoot\scripts\telegram_daily.py`"" -WorkingDirectory $RepoRoot
+$trigger = New-ScheduledTaskTrigger -Daily -At 09:15
+# El cmdlet guarda la hora en UTC ("...12:15:00Z"), y en Chile cambia el horario de
+# verano: se fija la hora LOCAL sin "Z" para que siga siendo 09:15 todo el año.
+$trigger.StartBoundary = (Get-Date -Hour 9 -Minute 15 -Second 0).ToString("yyyy-MM-ddTHH:mm:ss")
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries
+
+Register-ScheduledTask -TaskName "MinervaDailySummary" -Action $action -Trigger $trigger `
+    -Settings $settings -Description "Resumen diario de Minerva por Telegram (09:15 hora de Chile)."
+```
+
+**Eliminar**:
+
+```powershell
+Unregister-ScheduledTask -TaskName "MinervaDailySummary" -Confirm:$false
+```
+
+**Verificar / probar la tarea ya registrada**:
+
+```powershell
+Get-ScheduledTask -TaskName "MinervaDailySummary" | Select-Object TaskName, State
+Start-ScheduledTask -TaskName "MinervaDailySummary"
+```
+
+La sintaxis (acción, disparador con la hora local fija y opciones) está verificada en
+esta máquina construyendo los objetos sin registrar; el registro en sí puede exigir una
+terminal con privilegios suficientes (si da "Acceso denegado", abre PowerShell como
+Administrador). `pythonw.exe` no muestra ventana ni salida: si la tarea falla, el
+historial del Programador marca la corrida (código de salida 1 = Telegram no confirmó el
+envío); para ver los errores, prueba primero con `python.exe` y `--dry-run`.
+
 ## Mudar el bot a otro PC sin perder la medición en vivo
 
 Checklist, en orden. La medición depende de que el hash del prompt congelado
@@ -106,9 +166,10 @@ importa (el código primero, los datos después).
    nombre y ponelo en `data\`); cambiar `DATABASE_PATH` en el `.env` no
    cambia qué base abre el bot arrancado con ese script.
 
-5. **Recrear las dos tareas programadas** en el PC nuevo: la alerta de
-   Telegram (`schtasks /Create`, ver `scripts/telegram_alert.py`) y el
-   arranque automático (`Register-ScheduledTask`, sección de arriba).
+5. **Recrear las tres tareas programadas** en el PC nuevo: la alerta de
+   Telegram (`schtasks /Create`, ver `scripts/telegram_alert.py`), el
+   arranque automático y el resumen diario (`Register-ScheduledTask`, secciones
+   de arriba; el resumen diario asume el PC en la zona horaria de Chile).
 
 6. **Arrancar y verificar**:
 
