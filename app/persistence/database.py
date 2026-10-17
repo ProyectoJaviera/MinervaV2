@@ -391,7 +391,8 @@ END;
 -- es UNICA (reclamo idempotente: un grupo nunca abre dos veces). `outcome` PENDING solo
 -- dura el instante entre el reclamo y la apertura (o hasta que el arranque lo resuelve);
 -- `reason` explica un SKIPPED (LATE_DECISION, SCHEDULER_PAUSED, POSITION_ALREADY_OPEN,
--- NO_CONTRACT_SPEC, BELOW_MIN_ORDER, RISK_<codigo>, OPEN_ERROR, ABORTED_RESTART). Sin PnL
+-- NO_CONTRACT_SPEC, BELOW_MIN_ORDER, LEVELS_INVALID, RISK_<codigo>, OPEN_ERROR,
+-- ABORTED_RESTART). Sin PnL
 -- ni ningun resultado: solo la decision de ejecucion, con sus detalles en `details_json`.
 CREATE TABLE IF NOT EXISTS paper_execution_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
