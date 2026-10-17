@@ -17,14 +17,21 @@ STALE = 1
 SIN_RESPUESTA = 2
 
 
-def main(host: str, port: int, timeout: float) -> int:
+def fetch_health(host: str, port: int, timeout: float) -> tuple[dict | None, str | None]:
+    """(JSON de /health, None) o (None, "<url>: <error>") si no hubo respuesta."""
     url = f"http://{host}:{port}/health"
     try:
         response = httpx.get(url, timeout=timeout)
         response.raise_for_status()
-        data = response.json()
+        return response.json(), None
     except Exception as exc:  # noqa: BLE001 - cualquier falla de red/HTTP es "sin respuesta"
-        print(f"SIN_RESPUESTA: {url}: {exc}")
+        return None, f"{url}: {exc}"
+
+
+def main(host: str, port: int, timeout: float) -> int:
+    data, error = fetch_health(host, port, timeout)
+    if data is None:
+        print(f"SIN_RESPUESTA: {error}")
         return SIN_RESPUESTA
 
     if data.get("status") == "ok":
