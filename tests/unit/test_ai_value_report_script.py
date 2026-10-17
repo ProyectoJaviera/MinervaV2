@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from app.config import settings
-from app.trading.verdict_record import find_verdict_record
+from app.trading.verdict_record import find_verdict_record, load_official_record
 from tests.unit.synthetic_measurement import (
     SYNTHETIC_HASH,
     create_schema,
@@ -91,6 +91,9 @@ async def test_the_official_record_written_by_the_cli_unlocks_the_outcome_reveal
     )
     assert right_name.returncode == 0, right_name.stderr
     assert find_verdict_record(docs).name == "VEREDICTO_3_6_REGISTRO_2026-12-05.txt"
+    info = load_official_record(docs)  # lo que usara el reporte de paso a dinero real
+    assert info.verdict == "APORTA_VALOR"
+    assert any("Aprobadas: N bruto" in line for line in info.quoted_lines)
 
 
 PRIOR_RECORD = (

@@ -8,7 +8,12 @@ import pytest
 
 from app.trading import verdict_record
 from app.trading.measurement_status import MeasurementStatus, is_outcome_reveal_allowed
-from app.trading.verdict_record import RECORD_GLOB, find_verdict_record
+from app.trading.verdict_record import (
+    RECORD_GLOB,
+    find_verdict_record,
+    load_official_record,
+    parse_verdict_record,
+)
 
 VALID_REPORT = (
     "Copia analizada: C:\\x.db\n=== Veredicto de valor de la IA (subfase 3.6) ===\n"
@@ -142,3 +147,57 @@ def test_the_function_reads_the_docs_dir_at_call_time(monkeypatch, docs):
 
     monkeypatch.setattr(verdict_record, "DOCS_DIR", docs / "otro")
     assert is_outcome_reveal_allowed(OPEN_STATUS) is False  # sin docs_dir usa DOCS_DIR vigente
+
+
+# --- parse_verdict_record / load_official_record ----------------------------------------
+
+
+def test_parse_extracts_the_verdict_the_magnitude_flag_and_quotes_the_block(docs):
+    text = (
+        "Copia analizada: x\n=== Veredicto de valor de la IA (subfase 3.6) ===\n\n"
+        "## Veredicto (bootstrap por conglomerados, regla de la seccion i)\n\n"
+        "- Aprobadas: N bruto 310, N efectivo 305\n"
+        "- Diferencia de esperanza APROBADA - RECHAZADA (% del margen): 2.10%, "
+        "IC 95 % [0.50%, 3.70%]\n"
+        "- **Veredicto: APORTA_VALOR (MAGNITUD_BAJA)** (efecto real y pequeno)\n\n"
+        "## Seccion (m): particion\n- otra cosa que no se cita\n"
+    )
+    path = docs / "VEREDICTO_3_6_REGISTRO_2026-12-05.txt"
+    path.write_text(text, encoding="utf-8")
+
+    info = parse_verdict_record(path)
+
+    assert info.verdict == "APORTA_VALOR" and info.magnitud_baja is True
+    assert info.path == path
+    assert info.quoted_lines[0] == "- Aprobadas: N bruto 310, N efectivo 305"
+    assert any("Diferencia de esperanza" in line for line in info.quoted_lines)
+    assert not any("otra cosa" in line for line in info.quoted_lines)
+
+
+@pytest.mark.parametrize("verdict", ["APORTA_VALOR", "NO_APORTA_VALOR", "INCONCLUSO"])
+def test_parse_reads_each_verdict_without_magnitude(docs, verdict):
+    path = docs / "VEREDICTO_3_6_REGISTRO_x.txt"
+    path.write_text(VALID_REPORT.format(verdict=verdict), encoding="utf-8")
+
+    info = parse_verdict_record(path)
+
+    assert info.verdict == verdict and info.magnitud_baja is False
+    assert info.quoted_lines  # al menos la linea del veredicto
+
+
+def test_parse_fails_closed_like_find(docs):
+    bad = docs / "VEREDICTO_3_6_REGISTRO_malo.txt"
+    bad.write_text("Calibrado: SI", encoding="utf-8")
+
+    assert parse_verdict_record(bad) is None
+    assert parse_verdict_record(docs / "no_existe.txt") is None
+    assert load_official_record(docs) is None
+
+
+def test_load_official_record_returns_the_parsed_valid_record(docs):
+    write(docs, "VEREDICTO_3_6_REGISTRO_a.txt", "basura")
+    write(docs, "VEREDICTO_3_6_REGISTRO_b.txt", VALID_REPORT.format(verdict="NO_APORTA_VALOR"))
+
+    info = load_official_record(docs)
+
+    assert info.verdict == "NO_APORTA_VALOR" and info.path.name.endswith("_b.txt")
