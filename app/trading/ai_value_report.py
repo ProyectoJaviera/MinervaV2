@@ -428,34 +428,71 @@ def compute_breakdown(
 # --- orquestacion ------------------------------------------------------------------------
 
 
-def build_report(
-    conn: sqlite3.Connection, *, frozen_hash: str = FROZEN_PROMPT_SHA256,
-    allow_synthetic_for_tests: bool = False,
-) -> ReportResult:
+@dataclass(frozen=True)
+class VerdictInputs:
+    """Todo lo que el veredicto (y el placebo, que debe usar EXACTAMENTE los mismos
+    filtros) necesita de la base: `trades` son todas las sombras (abiertas y
+    cerradas, con resultados) y `filtered` las que sobreviven a los tres filtros
+    (hash congelado, sin piloto, sin no confiables)."""
+
+    metas: list[LogMeta]
+    light: list[LightShadow]
+    trades: list[ShadowTrade]
+    filtered: list[ShadowTrade]
+    measurement_keys: set[str]
+    piloto_keys: set[str]
+    unreliable_keys: set[str]
+    repaired_keys: set[str]
+
+
+def check_frozen_hash_mode(
+    conn: sqlite3.Connection, frozen_hash: str, allow_synthetic_for_tests: bool,
+) -> None:
+    """Un hash distinto del congelado real solo se acepta con la bandera sintetica,
+    y esa bandera solo con una base positivamente sintetica."""
     if allow_synthetic_for_tests:
         assert_synthetic_database(conn)
     elif frozen_hash != FROZEN_PROMPT_SHA256:
         raise ValueError("un hash distinto del congelado solo se acepta con la bandera sintetica")
 
-    status = compute_status(conn, frozen_hash=frozen_hash)
-    if not is_measurement_gate_open(status):
-        return ReportResult(state=STATE_GATE_CLOSED, frozen_hash=frozen_hash, status=status)
 
-    # --- gate abierto: a partir de aqui se pueden leer resultados ---
+def load_verdict_inputs(conn: sqlite3.Connection, frozen_hash: str) -> VerdictInputs:
+    """LEE RESULTADOS (PnL): solo llamar con el gate abierto o desde una
+    herramienta que no revele la relacion etiqueta-resultado (el placebo)."""
     metas = _load_log_metas(conn)
     light = _load_light_shadows(conn)
-    partition = compute_partition(light, metas, frozen_hash)
-    profile = compute_omitted_profile(light, metas, frozen_hash)
-
     measurement_keys = {
         m.key for m in metas if m.fase == FASE_MEDICION and m.prompt_sha256 == frozen_hash
     }
     piloto_keys = {m.key for m in metas if m.fase != FASE_MEDICION}
     unreliable_keys = {s.key for s in light if s.unreliable}
     repaired_keys = {m.key for m in metas if m.json_repaired}
-
     trades = _load_outcome_trades(conn)
     filtered = _verdict_inputs(trades, measurement_keys, piloto_keys, unreliable_keys)
+    return VerdictInputs(
+        metas=metas, light=light, trades=trades, filtered=filtered,
+        measurement_keys=measurement_keys, piloto_keys=piloto_keys,
+        unreliable_keys=unreliable_keys, repaired_keys=repaired_keys,
+    )
+
+
+def build_report(
+    conn: sqlite3.Connection, *, frozen_hash: str = FROZEN_PROMPT_SHA256,
+    allow_synthetic_for_tests: bool = False,
+) -> ReportResult:
+    check_frozen_hash_mode(conn, frozen_hash, allow_synthetic_for_tests)
+
+    status = compute_status(conn, frozen_hash=frozen_hash)
+    if not is_measurement_gate_open(status):
+        return ReportResult(state=STATE_GATE_CLOSED, frozen_hash=frozen_hash, status=status)
+
+    # --- gate abierto: a partir de aqui se pueden leer resultados ---
+    inputs = load_verdict_inputs(conn, frozen_hash)
+    metas, light, trades, filtered = inputs.metas, inputs.light, inputs.trades, inputs.filtered
+    measurement_keys, piloto_keys = inputs.measurement_keys, inputs.piloto_keys
+    unreliable_keys, repaired_keys = inputs.unreliable_keys, inputs.repaired_keys
+    partition = compute_partition(light, metas, frozen_hash)
+    profile = compute_omitted_profile(light, metas, frozen_hash)
     clean_app, clean_rej = clean_effective_n(filtered)
 
     kept_keys = {t.signal_group_key for t in filtered}
