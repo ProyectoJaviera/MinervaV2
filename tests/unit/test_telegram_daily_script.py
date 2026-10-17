@@ -243,6 +243,21 @@ def test_message_flags_stale_unfrozen_and_disabled_labeling():
     assert "Base: no se pudo leer (OperationalError: unable to open)" in msg
 
 
+def test_message_flags_a_deliberate_pause_and_the_kill_switch():
+    msg = build_message(
+        health=_health(control={"paused": True, "kill_switch_active": True}),
+        health_error=None, snapshot=None, db_error=None, now=NOW,
+    )
+
+    assert "scheduler esta PAUSADO a proposito" in msg and "medicion esta DETENIDA" in msg
+    assert "KILL SWITCH ACTIVO" in msg
+    quiet = build_message(
+        health=_health(control={"paused": False, "kill_switch_active": False}),
+        health_error=None, snapshot=None, db_error=None, now=NOW,
+    )
+    assert "PAUSADO" not in quiet and "KILL SWITCH" not in quiet
+
+
 def test_message_without_any_cycle_yet():
     msg = build_message(
         health=_health(last_cycle_at=None), health_error=None, snapshot=None, db_error=None,

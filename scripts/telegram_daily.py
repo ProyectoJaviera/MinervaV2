@@ -178,6 +178,14 @@ def _health_lines(
                      "en vivo esta detenido.")
     if not labeling.get("enabled"):
         lines.append("ATENCION: el etiquetado en vivo esta desactivado: la medicion no avanza.")
+    control = health.get("control", {})
+    if control.get("paused"):
+        lines.append(
+            "ATENCION: el scheduler esta PAUSADO a proposito (comando de Telegram): la medicion "
+            "esta DETENIDA. Reanuda con /resume."
+        )
+    if control.get("kill_switch_active"):
+        lines.append("ATENCION: KILL SWITCH ACTIVO (no se abren entradas reales).")
     return lines
 
 
