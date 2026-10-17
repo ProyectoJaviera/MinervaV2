@@ -13,11 +13,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop_bot.ps1
 ```
 
 `start_bot.ps1` arranca con las variables fijas de hoy (`AUTO_OPEN_WITHOUT_LLM=
-false`, `LOG_LEVEL=INFO`, `LLM_LIVE_LABELING_ENABLED=true`), **rehúsa** arrancar
+false`, `LOG_LEVEL=INFO`, `LLM_LIVE_LABELING_ENABLED=true` -- esta y la de Telegram
+**solo con el puerto 8000**; con otro puerto, una instancia de prueba, van en `false`
+para no gastar API ni competir por el token), **rehúsa** arrancar
 si ya hay algo escuchando en el puerto 8000 (evita dos procesos escribiendo la
 misma base), y espera a que `/health` responda antes de devolver el control.
-`stop_bot.ps1` detiene solo el proceso que escucha ese puerto y su lanzador,
-nunca otros procesos python del sistema. El detalle completo de cómo y por qué
+`stop_bot.ps1` detiene solo el proceso que escucha ese puerto y su cadena de
+lanzadores (`cmd.exe` de `start_bot.ps1` → `.venv\Scripts\pythonw.exe` → proceso real),
+verificando antes de tocar cada padre que sea exactamente el de este repo, y confirma al
+final que no queda vivo ninguno; nunca otros procesos python del sistema. El detalle completo de cómo y por qué
 está en el docstring de cada script (`Get-Help .\scripts\start_bot.ps1 -Full`).
 
 `start_bot.ps1` también fija `TELEGRAM_COMMANDS_ENABLED=true` (el bot de comandos de
