@@ -17,7 +17,7 @@ mudar el bot, cómo cuidar las claves y qué hacer cuando la medición llegue a 
 | **Un solo proceso por base de datos.** Nunca levantes Docker y `start_bot.ps1` a la vez, ni dos instancias nativas. | Dos procesos escribiendo la misma base la corrompen; con el mismo token de Telegram solo uno recibe los comandos; y gastarías la clave de Anthropic dos veces. |
 | **Nunca copies el archivo `.db` a mano.** Usa `scripts/backup_db.py`. | La base va en modo WAL: un `.db` copiado sin su `-wal` puede quedar inconsistente. |
 | **Medición ciega.** Hasta que existan 300 conglomerados efectivos por lado **y** un registro oficial del veredicto, no mires PnL, tasas de acierto ni la comparación APROBADA/RECHAZADA, ni tú ni las herramientas. | Mirar y decidir cuándo parar sesga el veredicto. Las herramientas lo imponen, pero un ojo humano sobre la base cruda también cuenta. |
-| **No toques el prompt congelado ni el modelo.** No edites `app/llm/prompts.py` y no cambies `ANTHROPIC_SONNET_MODEL`. | El hash del prompt se comprueba en cada ciclo (si no coincide, el etiquetado se detiene solo). **El modelo no tiene esa vigilancia**: cambiarlo contaminaría la medición sin que nada avise (ver §7.6). |
+| **No toques el prompt congelado ni el modelo.** No edites `app/llm/prompts.py` y no cambies `ANTHROPIC_SONNET_MODEL`. | El hash del prompt se comprueba en cada ciclo (si no coincide, el etiquetado se detiene solo). **El modelo no tiene esa vigilancia**: cambiarlo contaminaría la medición sin que nada avise (ver §7.4). |
 | **Las credenciales viven solo en `.env`.** Nunca en el repositorio, en la imagen, en un chat, en un log ni en una captura. | Un secreto filtrado hay que revocarlo, y en un repositorio queda en el historial aunque se borre después. |
 | **Reinicia solo en la ventana segura** (§4). | Un reinicio en mal momento corta etiquetados en vuelo y deja sombras sin etiqueta. |
 | **`/pause` y `/kill` detienen la medición.** Úsalos solo si algo anda mal. | Con el scheduler pausado no hay señales, sombras ni etiquetado; cada hora pausada es medición perdida. |
@@ -65,8 +65,11 @@ recupera. En la última medición (octubre de 2026) había ~1,25 conglomerados p
    `logs/medicion_out.log` (salida de consola del arranque nativo) **no rota** (235 KB tras varios días hoy).
 3. **Avance por conteos**, sobre una copia (nunca sobre la base de trabajo):
    `.\.venv\Scripts\python.exe scripts\measurement_status.py --db data\backups\<el respaldo más reciente>.db`
-4. **Un solo modelo en la medición** (conteo, sin resultados), sobre la misma copia:
-   `SELECT model, COUNT(*) FROM llm_logs WHERE fase = 'MEDICION' GROUP BY model;` debe devolver una sola fila.
+4. **Un solo modelo y el prompt congelado en la medición** (solo conteos y fechas, sin resultados), sobre la misma
+   copia: `.\.venv\Scripts\python.exe scripts\measurement_identity.py --db data\backups\<el respaldo más reciente>.db`.
+   Sale con código 0 si hay una única combinación (modelo, prompt congelado, features) y con 1 si detecta una
+   anomalía o si el modelo configurado en el `.env` ya no es el que midió (un cambio que se haría efectivo al
+   reiniciar).
 5. **Árbol del repositorio limpio y commit esperado**: `git status` sin cambios en `app/` y `git log -1`; es lo que
    mantiene `frozen_hash_ok` en `true`.
 
@@ -369,8 +372,9 @@ reinicia. Cambiar `JWT_SECRET` cierra todas las sesiones abiertas. La API escuch
 `ANTHROPIC_SONNET_MODEL` (el modelo que etiqueta), `LLM_MAX_TOKENS`, `LLM_TIMEOUT_SECONDS`, los precios
 (`LLM_PRICE_*`, que solo afectan al costo mostrado) y el prompt. **El modelo es parte de lo que se mide, pero el
 veredicto y `/health` filtran por el hash del prompt, no por el modelo**: un cambio de modelo contaminaría la
-medición sin que nada lo señale. La comprobación semanal de §2 (una sola fila por modelo en `llm_logs`) existe para
-detectarlo. Si hubiera que cambiarlo, es una decisión que reinicia la medición, no un ajuste.
+medición sin que nada lo señale. La comprobación semanal de §2 (`scripts/measurement_identity.py`) existe para
+detectarlo, incluso **antes** de reiniciar (compara el modelo del `.env` con el de las filas medidas). Si hubiera
+que cambiarlo, es una decisión que reinicia la medición, no un ajuste.
 
 ## 8. Controles y riesgo
 
@@ -518,6 +522,7 @@ y trae el archivo a `docs/` con `docker compose cp`. Ninguna de las dos variante
 | `backup_db.py`, `restore_db.py` | Respaldar y restaurar | Seguro |
 | `resume_drawdown_stop.py` | Levantar el stop por drawdown | Seguro (no imprime el equity) |
 | `measurement_status.py` | Avance de la medición (sobre una copia) | Seguro (solo conteos) |
+| `measurement_identity.py` | ¿Un solo modelo, el prompt congelado y una sola versión de features en la medición? (sobre una copia) | Seguro (solo conteos y fechas) |
 | `paper_execution_status.py` | Aperturas y omisiones del brazo por motivo | Seguro (sin PnL) |
 | `news_status.py` | Salud de la recolección de noticias | Seguro |
 | `shadow_report.py`, `lessons_report.py`, `real_money_report.py` | Informes de resultados | Se niegan a mostrar resultados |
