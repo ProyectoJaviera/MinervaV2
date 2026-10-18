@@ -10,6 +10,7 @@ Esto LEE resultados (PnL): por eso solo corre con `LESSONS_MEMORY_ENABLED` o des
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 from app.memory.features import risk_reward
@@ -41,6 +42,28 @@ async def count_closed_reliable(db: Database) -> int:
     return row["n"]
 
 
+def atr_from_log(row) -> float | None:
+    """ATR(14) % que vio el modelo al decidir. El etiquetador en vivo no rellena
+    `llm_logs.atr_pct`, pero el mensaje completo queda en `prompt` (sistema, dos saltos de linea y
+    el mensaje como JSON de una sola linea): de ahi se lee `volatility_atr14_pct`, el MISMO dato
+    que usa la consulta de lecciones. Sin fila de log, o con un prompt ilegible, es `None` (nunca
+    se inventa)."""
+    if row is None:
+        return None
+    if row["atr_pct"] is not None:
+        return row["atr_pct"]
+    _, separator, tail = (row["prompt"] or "").rpartition("\n\n{")
+    if not separator:
+        return None
+    try:
+        value = json.loads("{" + tail).get("volatility_atr14_pct")
+    except (ValueError, AttributeError):
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
 async def _entry_from_shadow(db: Database, shadow: ShadowTrade) -> MemoryEntry:
     decision_time = shadow.candle_close_time or shadow.opened_at
     strategies = sorted(shadow.contributing_strategies) or [shadow.strategy or "n/d"]
@@ -48,7 +71,8 @@ async def _entry_from_shadow(db: Database, shadow: ShadowTrade) -> MemoryEntry:
         db, shadow.symbol, strategies[0], decision_time
     )
     log = await db.fetch_one(
-        "SELECT atr_pct FROM llm_logs WHERE signal_group_key = ?", (shadow.signal_group_key,)
+        "SELECT atr_pct, prompt FROM llm_logs WHERE signal_group_key = ?",
+        (shadow.signal_group_key,),
     )
     items = await news_repo.get_for_context(
         db, as_of=decision_time, since=decision_time - NEWS_WINDOW,
@@ -63,7 +87,7 @@ async def _entry_from_shadow(db: Database, shadow: ShadowTrade) -> MemoryEntry:
         symbol=shadow.symbol, side=shadow.side.value, strategy_set="+".join(strategies),
         timeframe=signal.timeframe if signal is not None else None,
         decision_time=decision_time, closed_at=closed_at, hour_utc=decision_time.hour,
-        atr_pct=log["atr_pct"] if log is not None else None,
+        atr_pct=atr_from_log(log),
         risk_reward=risk_reward(shadow.entry_price, shadow.sl_price, shadow.tp_price),
         sl_margin_loss_pct=shadow.sl_margin_loss_pct, llm_label=shadow.llm_decision,
         news_sentiment=sum(sentiments) / len(sentiments) if sentiments else None,

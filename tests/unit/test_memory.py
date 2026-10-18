@@ -311,6 +311,46 @@ async def test_news_and_fear_greed_in_the_entry_respect_the_decision_instant(mem
     assert stored.fear_greed == 30
 
 
+@pytest.mark.parametrize(("atr_column", "prompt", "expected"), [
+    (1.7, 'S\n\n{"volatility_atr14_pct": 0.5}', 1.7),  # si la columna esta, manda ella
+    (None, 'SISTEMA con {llaves}\n\n{"a": 1, "volatility_atr14_pct": 0.93}', 0.93),
+    (None, 'S\n\n{"volatility_atr14_pct": 2}', 2.0),
+    (None, 'S\n\n{"volatility_atr14_pct": null}', None),
+    (None, 'S\n\n{"volatility_atr14_pct": true}', None),
+    (None, 'S\n\n{"volatility_atr14_pct": "alto"}', None),
+    (None, 'S\n\n{roto', None),
+    (None, "sin mensaje", None),
+    (None, "", None),
+    (None, None, None),
+])
+def test_atr_is_read_from_the_logged_prompt_when_the_column_is_empty(atr_column, prompt, expected):
+    assert entries.atr_from_log({"atr_pct": atr_column, "prompt": prompt}) == expected
+
+
+def test_without_a_log_row_there_is_no_atr():
+    assert entries.atr_from_log(None) is None
+
+
+async def test_the_entry_takes_the_atr_the_model_saw_from_the_measurement_log(memory_db):
+    """El etiquetador en vivo no rellena `llm_logs.atr_pct`: el ATR sale del prompt registrado."""
+    insert_groups(memory_db, [
+        closed_group("con-prompt", 0, atr_pct=None), closed_group("sin-nada", 1, atr_pct=None),
+    ])
+    db = await open_db(memory_db)
+    try:
+        await db.execute(
+            "UPDATE llm_logs SET prompt = ? WHERE signal_group_key = 'con-prompt'",
+            ('SISTEMA\n\n{"symbol": "AAAUSDT", "volatility_atr14_pct": 1.234}',),
+        )
+        await entries.refresh_entries(db, now=T0)
+        stored = {e.signal_group_key: e for e in await memory_repo.get_entries_closed_before(db)}
+    finally:
+        await db.close()
+
+    assert stored["con-prompt"].atr_pct == pytest.approx(1.234)
+    assert stored["sin-nada"].atr_pct is None  # prompt 'p' de la siembra: ilegible, no se inventa
+
+
 # --- recuperacion --------------------------------------------------------------------------------
 
 
