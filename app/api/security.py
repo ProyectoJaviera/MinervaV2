@@ -1,10 +1,13 @@
 """Autenticacion de un solo usuario local (pre-Fase 5, item 2 del plan
-aprobado 2026-10-14) -- JWT HS256 (`PyJWT`) en una cookie `httpOnly`. Nunca
-protege una escritura: ningun endpoint de este proyecto abre, cierra ni
-controla el bot via HTTP (`AUTO_OPEN_WITHOUT_LLM` sigue en `false`); esto
-solo gatea LECTURA de datos mas detallados que `GET /health` (que queda
-deliberadamente sin auth, para que `scripts/telegram_alert.py` siga
-pudiendolo consultar sin login).
+aprobado 2026-10-14) -- JWT HS256 (`PyJWT`) en una cookie `httpOnly`. Ningun
+endpoint de este proyecto abre ni cierra posiciones via HTTP
+(`AUTO_OPEN_WITHOUT_LLM` sigue en `false`); esto gatea LECTURA de datos mas
+detallados que `GET /health` (que queda deliberadamente sin auth, para que
+`scripts/telegram_alert.py` siga pudiendolo consultar sin login). Unica
+excepcion, desde la Fase 5: las tres acciones de CONTROL del dashboard
+(pausar, reanudar, kill switch, `app/api/routes/control.py`), que exigen
+este login, mismo origen, JSON y una palabra de confirmacion, y quedan
+auditadas; no tocan posiciones.
 
 Hash de contraseña con `bcrypt` directo (no `passlib`). Token con `sub`
 (username), `iat`, `exp` = `iat` + `SESSION_DURATION` (24h, un solo usuario

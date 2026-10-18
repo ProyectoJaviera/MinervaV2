@@ -22,6 +22,7 @@ from app.api.routes import (
     arm,
     auth,
     backtest,
+    control,
     health,
     llm_decisions,
     measurement,
@@ -206,6 +207,9 @@ app.include_router(arm.router)
 app.include_router(risk.router)
 app.include_router(universe.router)
 app.include_router(backtest.router)
+# Controles del dashboard (pausar, reanudar, kill switch): las unicas escrituras de control de la
+# API; login + mismo origen + JSON + palabra de confirmacion + auditoria (ver control.py).
+app.include_router(control.router)
 
 # Subfase D (plan pre-Fase 5 aprobado 2026-10-14): el build estatico del
 # dashboard (`npm --prefix frontend run build`), si existe. Montado AL FINAL

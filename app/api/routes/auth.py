@@ -1,7 +1,8 @@
 """Login/logout de un solo usuario local (pre-Fase 5, item 2 del plan
-aprobado 2026-10-14). Solo abre o cierra una sesion -- nunca controla el bot
+aprobado 2026-10-14). Solo abre o cierra una sesion -- no controla el bot
 (`AUTO_OPEN_WITHOUT_LLM` sigue en `false`, nada de esto es un endpoint de
-escritura sobre el trading)."""
+escritura sobre el trading). Los controles del dashboard (Fase 5) viven en
+`app/api/routes/control.py`."""
 
 from __future__ import annotations
 
