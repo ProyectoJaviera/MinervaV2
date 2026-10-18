@@ -36,6 +36,7 @@ from app.market.bitunix_rest import BitunixRestClient
 from app.market.bitunix_ws import BitunixPublicWSClient
 from app.market.coingecko_client import CoinGeckoClient
 from app.market.universe import UniverseRefresher
+from app.memory.runtime import maybe_start_lessons_runner
 from app.news.runtime import maybe_start_news_collector
 from app.persistence.database import Database
 from app.telegram.commands import BotContext
@@ -136,11 +137,17 @@ async def lifespan(app: FastAPI):
     # Anthropic (docs/FASE4_PLAN.md). Nunca lanza ni impide arrancar el resto.
     news_collector = maybe_start_news_collector(settings, db, tasks)
     app.state.news_collector = news_collector
+    # Memoria de lecciones: APAGADA (no se activa en ningun puerto durante la medicion); lee
+    # resultados para aprender y no los muestra sin el registro oficial del veredicto.
+    lessons_runner = maybe_start_lessons_runner(settings, db, tasks)
+    app.state.lessons_runner = lessons_runner
     try:
         yield
     finally:
         if news_collector is not None:
             news_collector.stop()
+        if lessons_runner is not None:
+            lessons_runner.stop()
         if telegram_bot is not None:
             telegram_bot.stop()
         scheduler.stop()

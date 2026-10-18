@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from app.persistence.database import Database
+from app.persistence.repositories.timeutil import iso_utc
 
 
 @dataclass
@@ -90,9 +91,9 @@ async def insert_entry(db: Database, entry: MemoryEntry, *, built_at: datetime) 
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            entry.signal_group_key, entry.shadow_trade_id, built_at.isoformat(), entry.symbol,
-            entry.side, entry.strategy_set, entry.timeframe, entry.decision_time.isoformat(),
-            entry.closed_at.isoformat(), entry.hour_utc, entry.atr_pct, entry.risk_reward,
+            entry.signal_group_key, entry.shadow_trade_id, iso_utc(built_at), entry.symbol,
+            entry.side, entry.strategy_set, entry.timeframe, iso_utc(entry.decision_time),
+            iso_utc(entry.closed_at), entry.hour_utc, entry.atr_pct, entry.risk_reward,
             entry.sl_margin_loss_pct, entry.llm_label, entry.news_sentiment, entry.news_count,
             entry.fear_greed, entry.pnl_net_usdt, entry.margin_usdt, entry.return_pct,
             entry.outcome, entry.close_reason, entry.duration_hours,
@@ -120,7 +121,7 @@ async def get_entries_closed_before(
     else:
         rows = await db.fetch_all(
             "SELECT * FROM memory_entries WHERE closed_at < ? ORDER BY closed_at, id",
-            (cutoff.isoformat(),),
+            (iso_utc(cutoff),),
         )
     return [_row_to_entry(r) for r in rows]
 

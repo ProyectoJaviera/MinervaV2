@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.persistence.database import Database
+from app.persistence.repositories.timeutil import iso_utc
 
 
 @dataclass
@@ -69,8 +70,8 @@ async def insert_item(db: Database, rec: NewsRecord) -> int | None:
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            rec.source, rec.fetched_at.isoformat(),
-            rec.published_at.isoformat() if rec.published_at else None, rec.domain, rec.title,
+            rec.source, iso_utc(rec.fetched_at),
+            iso_utc(rec.published_at) if rec.published_at else None, rec.domain, rec.title,
             rec.url, rec.url_hash, rec.title_hash, rec.language, rec.source_country,
             json.dumps(rec.assets), rec.query_tag, rec.sentiment, rec.sentiment_method, rec.dup_of,
         ),
@@ -82,25 +83,35 @@ async def get_recent_originals(db: Database, since: datetime) -> list[NewsRecord
     """Titulares NO duplicados vistos desde `since` (para detectar casi duplicados al insertar)."""
     rows = await db.fetch_all(
         "SELECT * FROM news_items WHERE dup_of IS NULL AND fetched_at >= ? ORDER BY id",
-        (since.isoformat(),),
+        (iso_utc(since),),
     )
     return [_row_to_record(r) for r in rows]
 
 
 async def get_for_context(
     db: Database, *, as_of: datetime, since: datetime, symbol: str | None = None, limit: int = 20,
+    source: str | None = None, exclude_source: str | None = None, untagged_only: bool = False,
 ) -> list[NewsRecord]:
     """Noticias NO duplicadas que existian en `as_of`: publicadas Y vistas por el bot en o antes de
     ese instante, y no mas viejas que `since`. `symbol` filtra por activo detectado en el titular
-    (None = todas). Mas recientes primero."""
+    (None = todas); `untagged_only` deja solo las que no mencionan ningun activo; `source` /
+    `exclude_source` filtran por fuente. Mas recientes primero."""
     query = (
         "SELECT * FROM news_items WHERE dup_of IS NULL AND fetched_at <= ? "
         "AND published_at IS NOT NULL AND published_at <= ? AND published_at >= ?"
     )
-    params: list = [as_of.isoformat(), as_of.isoformat(), since.isoformat()]
+    params: list = [iso_utc(as_of), iso_utc(as_of), iso_utc(since)]
     if symbol is not None:
         query += " AND assets_json LIKE ?"
         params.append(f'%"{symbol}"%')
+    if untagged_only:
+        query += " AND (assets_json IS NULL OR assets_json = '[]')"
+    if source is not None:
+        query += " AND source = ?"
+        params.append(source)
+    if exclude_source is not None:
+        query += " AND source != ?"
+        params.append(exclude_source)
     query += " ORDER BY published_at DESC, id DESC LIMIT ?"
     params.append(limit)
     return [_row_to_record(r) for r in await db.fetch_all(query, tuple(params))]
@@ -124,14 +135,14 @@ async def count_since(db: Database, since: datetime) -> dict[str, int]:
     rows = await db.fetch_all(
         "SELECT source, COUNT(*) AS n FROM news_items WHERE dup_of IS NULL AND fetched_at >= ? "
         "GROUP BY source",
-        (since.isoformat(),),
+        (iso_utc(since),),
     )
     return {r["source"]: r["n"] for r in rows}
 
 
 async def prune_older_than(db: Database, cutoff: datetime) -> int:
     cursor = await db.execute(
-        "DELETE FROM news_items WHERE fetched_at < ?", (cutoff.isoformat(),)
+        "DELETE FROM news_items WHERE fetched_at < ?", (iso_utc(cutoff),)
     )
     return cursor.rowcount
 
@@ -173,7 +184,7 @@ async def upsert_fear_greed(
     cursor = await db.execute(
         "INSERT OR IGNORE INTO fear_greed (ts, value, classification, fetched_at) "
         "VALUES (?, ?, ?, ?)",
-        (ts.isoformat(), value, classification, fetched_at.isoformat()),
+        (iso_utc(ts), value, classification, iso_utc(fetched_at)),
     )
     return cursor.rowcount == 1
 
@@ -183,7 +194,7 @@ async def latest_fear_greed(db: Database, as_of: datetime) -> dict | None:
     row = await db.fetch_one(
         "SELECT ts, value, classification, fetched_at FROM fear_greed "
         "WHERE ts <= ? AND fetched_at <= ? ORDER BY ts DESC LIMIT 1",
-        (as_of.isoformat(), as_of.isoformat()),
+        (iso_utc(as_of), iso_utc(as_of)),
     )
     if row is None:
         return None
