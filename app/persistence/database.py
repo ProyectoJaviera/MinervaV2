@@ -537,6 +537,22 @@ CREATE TABLE IF NOT EXISTS lessons_reports (
     body_json TEXT NOT NULL
 );
 
+-- Fase 5 (docs/FASE5_PLAN.md): rastro auditable de cada accion de control (pausar, reanudar,
+-- kill switch) pedida por el dashboard o por Telegram: quien, cuando y el estado antes/despues.
+-- No guarda datos del chat de Telegram ni ningun resultado de operaciones.
+CREATE TABLE IF NOT EXISTS control_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    channel TEXT NOT NULL CHECK (channel IN ('DASHBOARD', 'TELEGRAM')),
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('pause', 'resume', 'kill')),
+    paused_before INTEGER NOT NULL,
+    kill_before INTEGER NOT NULL,
+    paused_after INTEGER NOT NULL,
+    kill_after INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_control_audit_created ON control_audit (created_at);
+
 CREATE TABLE IF NOT EXISTS backtest_verdicts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     strategy TEXT NOT NULL,

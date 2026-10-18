@@ -102,6 +102,9 @@ def main(source_db: str, port: int) -> None:
     # Fase 4: ni la recoleccion de noticias (red) ni la memoria de lecciones en el dev server.
     os.environ["NEWS_COLLECTION_ENABLED"] = "false"
     os.environ["LESSONS_MEMORY_ENABLED"] = "false"
+    # Fase 5: las notificaciones push de Telegram solo las envia el bot real; una instancia de
+    # desarrollo sobre una copia nunca debe escribirle al chat.
+    os.environ["TELEGRAM_PUSH_ENABLED"] = "false"
 
     import uvicorn
 

@@ -279,6 +279,18 @@ async def is_drawdown_stop_active(db: Database) -> bool:
     return await _get_bool(db, _KEY_DRAWDOWN_STOP_ACTIVE, False)
 
 
+async def is_daily_loss_limit_locked(db: Database) -> bool:
+    """Si el limite de perdida diaria ya se alcanzo hoy (queda enganchado hasta el cambio de dia
+    local). Solo lectura: lo usan el dashboard y las notificaciones (Fase 5)."""
+    return await _daily_loss_breached(db)
+
+
+async def get_consecutive_losses(db: Database) -> int:
+    """Racha actual de perdidas consecutivas. Es un dato derivado de RESULTADOS: quien lo muestre
+    debe pasar por la puerta `app.trading.reveal.reveal_allowed`."""
+    return await _get_int(db, _KEY_CONSECUTIVE_LOSSES, 0)
+
+
 async def get_active_circuit_breaker_until(db: Database) -> datetime | None:
     """Hasta cuando dura el circuit breaker si sigue vigente; `None` si no hay o ya vencio."""
     raw = await system_state_repo.get_state(db, _KEY_CIRCUIT_BREAKER_UNTIL)

@@ -33,6 +33,15 @@ from app.persistence.models import Trade
 from app.persistence.repositories import llm_logs_repo, system_state_repo, trades_repo
 from app.telegram.confirmation import ConfirmationManager, is_yes
 from app.trading import control_state, risk_engine
+from app.trading.control_actions import (
+    CHANNEL_TELEGRAM,
+    KILL,
+    PAUSE,
+    RESUME,
+    RESUME_LIFTS,
+    STOPS_MEASUREMENT,
+    apply_control,
+)
 from app.trading.measurement_status import (
     APPROVAL_BAND,
     MIN_EFFECTIVE_N,
@@ -322,21 +331,17 @@ async def cmd_metrics(ctx: BotContext) -> str:
 
 # --- /pause, /resume, /kill (con confirmacion) ------------------------------------------
 
-STOPS_MEASUREMENT = (
-    "DETIENE LA MEDICION en curso: sin senales, sin sombras y sin etiquetado del LLM "
-    "mientras dure (los cierres de posiciones siguen funcionando)."
-)
+# El nucleo de la advertencia (`STOPS_MEASUREMENT`) es el MISMO que muestra el dashboard: vive en
+# `app/trading/control_actions.py`, junto a la logica que aplican los dos canales.
 CONTROL_WARNINGS = {
     "/pause": f"ATENCION: /pause {STOPS_MEASUREMENT}",
     "/kill": (
         "ATENCION: /kill activa el kill switch (bloquea entradas reales nuevas) y ademas "
         f"pausa el scheduler: {STOPS_MEASUREMENT} Se levanta con /resume."
     ),
-    "/resume": (
-        "/resume levanta la pausa del scheduler Y el kill switch (la medicion se reanuda; "
-        "no levanta el stop por drawdown, que se resuelve aparte)."
-    ),
+    "/resume": f"/resume {RESUME_LIFTS}",
 }
+ACTION_OF_COMMAND = {"/pause": PAUSE, "/kill": KILL, "/resume": RESUME}
 
 
 async def _record_control(ctx: BotContext, command: str) -> None:
@@ -347,26 +352,24 @@ async def _record_control(ctx: BotContext, command: str) -> None:
 
 
 async def execute_control(ctx: BotContext, command: str) -> str:
+    # La logica (y el registro en `control_audit`) es la misma que usa el dashboard.
+    await apply_control(
+        ctx.db, ACTION_OF_COMMAND[command], channel=CHANNEL_TELEGRAM, actor="telegram",
+        now=ctx.now(),
+    )
+    await _record_control(ctx, command)
     if command == "/pause":
-        await control_state.set_scheduler_paused(ctx.db, True)
-        await _record_control(ctx, command)
         return (
             f"{HEADER}\n"
             "Scheduler PAUSADO. La medicion esta DETENIDA (sin senales, sombras ni etiquetado); "
             "los cierres de posiciones siguen. Reanuda con /resume."
         )
     if command == "/kill":
-        await risk_engine.activate_kill_switch(ctx.db)
-        await control_state.set_scheduler_paused(ctx.db, True)
-        await _record_control(ctx, command)
         return (
             f"{HEADER}\n"
             "KILL SWITCH ACTIVO y scheduler PAUSADO. La medicion esta DETENIDA y no se abren "
             "entradas reales; los cierres de posiciones siguen. Levanta todo con /resume."
         )
-    await control_state.set_scheduler_paused(ctx.db, False)
-    await risk_engine.deactivate_kill_switch(ctx.db)
-    await _record_control(ctx, command)
     lines = [HEADER, "Scheduler REANUDADO y kill switch DESACTIVADO: la medicion sigue."]
     if await risk_engine.is_drawdown_stop_active(ctx.db):
         lines.append(

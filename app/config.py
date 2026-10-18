@@ -291,11 +291,20 @@ class Settings(BaseSettings):
     # solo admite UN consumidor de getUpdates, asi que solo el bot real (puerto 8000,
     # via start_bot.ps1) lo activa; el dev server y los tests lo mantienen apagado.
     telegram_commands_enabled: bool = Field(default=False, alias="TELEGRAM_COMMANDS_ENABLED")
+    # Fase 5 (docs/FASE5_PLAN.md): notificaciones push al chat permitido. APAGADO por defecto;
+    # solo start_bot.ps1 lo activa, y solo para el puerto 8000. Aislado del nucleo: sondea la base
+    # de solo lectura y solo escribe su propia clave `push_state`.
+    telegram_push_enabled: bool = Field(default=False, alias="TELEGRAM_PUSH_ENABLED")
+    telegram_push_poll_seconds: float = Field(default=10.0, alias="TELEGRAM_PUSH_POLL_SECONDS")
 
     # --- Frontend / API (usado desde Fase 5) ---
     auth_username: str = Field(default="", alias="AUTH_USERNAME")
     auth_password_hash: str = Field(default="", alias="AUTH_PASSWORD_HASH")
     jwt_secret: str = Field(default="", alias="JWT_SECRET")
+    # Controles del dashboard (pausar, reanudar, kill switch). Verdadero por defecto: son la
+    # funcion pedida y exigen login, mismo origen y una palabra de confirmacion; en falso la API
+    # rechaza esas acciones con 403 sin tocar codigo.
+    dashboard_controls_enabled: bool = Field(default=True, alias="DASHBOARD_CONTROLS_ENABLED")
 
     # --- Base de datos ---
     database_path: str = Field(default="./data/minerva.db", alias="DATABASE_PATH")

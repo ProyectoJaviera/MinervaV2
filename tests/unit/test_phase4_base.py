@@ -133,8 +133,11 @@ async def test_the_migration_on_a_copy_of_the_real_database_changes_nothing_else
         await database.close()
 
     after = _tables(copy)
-    assert set(after) - set(before) <= NEW_TABLES
-    assert all(after[t] == 0 for t in NEW_TABLES if t not in before)
+    created = set(after) - set(before)
+    # Tablas aditivas de esta fase y de las posteriores (Fase 5: `control_audit`): todas nacen
+    # vacias y ninguna fila de lo que ya existia cambia.
+    assert created <= NEW_TABLES | {"control_audit"}
+    assert all(after[t] == 0 for t in created)
     assert {k: v for k, v in after.items() if k in before} == before
     conn = sqlite3.connect(str(copy))
     try:

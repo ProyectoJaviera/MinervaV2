@@ -32,6 +32,11 @@
             apagada tambien en el bot real, cambia la linea de $newsCollection.)
         LESSONS_MEMORY_ENABLED=false  (siempre; la memoria de lecciones no se activa
             durante la medicion.)
+        TELEGRAM_PUSH_ENABLED=true  (SOLO con -Port 8000; false con cualquier otro
+            puerto. Fase 5: notificaciones push al chat permitido -- posicion abierta o
+            cerrada, cambio de universo y alertas de riesgo --, en una tarea aislada que
+            solo lee la base. Necesita TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID de `.env`.
+            Para dejarlas apagadas tambien en el bot real, cambia la linea de $telegramPush.)
 
     -Port/-DatabasePath/-LogDir son parametros SOLO para poder probar este
     script contra el puerto 8001 y una base/carpeta de log temporales
@@ -120,10 +125,12 @@ $telegramCommands = if ($isRealBot) { "true" } else { "false" }
 $llmLabeling = if ($isRealBot) { "true" } else { "false" }
 $paperExecution = if ($isRealBot) { "true" } else { "false" }
 $newsCollection = if ($isRealBot) { "true" } else { "false" }
+$telegramPush = if ($isRealBot) { "true" } else { "false" }
 Write-OpLog ("Puerto $Port libre. Arrancando con DATABASE_PATH=$DatabaseFullPath " +
     "AUTO_OPEN_WITHOUT_LLM=false LOG_LEVEL=INFO LLM_LIVE_LABELING_ENABLED=$llmLabeling " +
     "TELEGRAM_COMMANDS_ENABLED=$telegramCommands PAPER_EXECUTION_ENABLED=$paperExecution " +
-    "NEWS_COLLECTION_ENABLED=$newsCollection LESSONS_MEMORY_ENABLED=false")
+    "NEWS_COLLECTION_ENABLED=$newsCollection LESSONS_MEMORY_ENABLED=false " +
+    "TELEGRAM_PUSH_ENABLED=$telegramPush")
 
 $env:DATABASE_PATH = $DatabaseFullPath
 $env:AUTO_OPEN_WITHOUT_LLM = "false"
@@ -133,6 +140,7 @@ $env:TELEGRAM_COMMANDS_ENABLED = $telegramCommands
 $env:PAPER_EXECUTION_ENABLED = $paperExecution
 $env:NEWS_COLLECTION_ENABLED = $newsCollection
 $env:LESSONS_MEMORY_ENABLED = "false"
+$env:TELEGRAM_PUSH_ENABLED = $telegramPush
 $env:LOG_DIR = $LogDirFullPath
 
 # Ver DESCRIPTION: cmd.exe fusiona stdout+stderr a $OutLog con "2>&1" (algo
