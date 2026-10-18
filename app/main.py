@@ -48,6 +48,7 @@ from app.memory.runtime import maybe_start_lessons_runner
 from app.news.runtime import maybe_start_news_collector
 from app.persistence.database import Database
 from app.telegram.commands import BotContext
+from app.telegram.push_runtime import maybe_start_push_notifier
 from app.telegram.runtime import maybe_start_telegram_bot
 from app.trading.paper_execution import PaperExecutionArm
 from app.trading.position_monitor import PositionMonitor
@@ -141,6 +142,11 @@ async def lifespan(app: FastAPI):
         ),
         tasks,
     )
+    # Fase 5: notificaciones push de Telegram (posiciones, universo, alertas de riesgo), apagadas
+    # por defecto y en su PROPIA tarea. Sondean la base de solo lectura: nada del nucleo sabe que
+    # existen, y un fallo suyo no alcanza al scheduler, al etiquetado, al brazo ni al monitor.
+    push_notifier = maybe_start_push_notifier(settings, db, tasks)
+    app.state.push_notifier = push_notifier
     # Fase 4: recoleccion de noticias, apagada por defecto, en su PROPIA tarea y sin costo de
     # Anthropic (docs/FASE4_PLAN.md). Nunca lanza ni impide arrancar el resto.
     news_collector = maybe_start_news_collector(settings, db, tasks)
@@ -152,6 +158,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if push_notifier is not None:
+            push_notifier.stop()
         if news_collector is not None:
             news_collector.stop()
         if lessons_runner is not None:
@@ -174,6 +182,8 @@ async def lifespan(app: FastAPI):
         await paper_arm.shutdown()
         if news_collector is not None:
             await news_collector.aclose()
+        if push_notifier is not None:
+            await push_notifier.aclose()
         await monitor.shutdown()
         await coingecko_client.aclose()
         await rest_client.aclose()

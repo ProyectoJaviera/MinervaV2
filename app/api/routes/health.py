@@ -23,7 +23,10 @@ cuando y las aperturas/omisiones del dia. Nunca trae PnL ni resultados.
 
 El bloque `news` (Fase 4) informa la recoleccion de noticias: interruptor, si el colector quedo
 armado, salud por fuente (`data_source_health`) y titulares de 24 h, con la atribucion de cada
-fuente. Es solo informativo: ninguna operacion depende de las noticias."""
+fuente. Es solo informativo: ninguna operacion depende de las noticias.
+
+El bloque `telegram_push` (Fase 5) informa las notificaciones push: interruptor, si quedaron
+activas, enviadas, fallos y el TIPO del ultimo error (nunca el token, el chat ni el texto)."""
 
 from __future__ import annotations
 
@@ -37,6 +40,7 @@ from app.api.deps import (
     get_live_labeler,
     get_news_collector,
     get_paper_arm,
+    get_push_notifier,
     get_scheduler,
 )
 from app.core.heartbeat import Heartbeat
@@ -55,6 +59,7 @@ from app.news.collector import NewsCollector
 from app.news.health import news_health_block
 from app.persistence.database import Database
 from app.persistence.repositories import llm_logs_repo
+from app.telegram.push import PushNotifier
 from app.trading import control_state, risk_engine
 from app.trading.paper_execution import PaperExecutionArm
 from app.trading.shadow_live_labeler import ShadowLiveLabeler
@@ -66,6 +71,10 @@ STALE_AFTER_MINUTES = 90
 NO_PAPER_EXECUTION = {
     "enabled": False, "active": False, "armed_since": None, "opened_today": 0, "skipped_today": 0,
 }
+NO_TELEGRAM_PUSH = {
+    "enabled": False, "active": False, "sent_total": 0, "failed_total": 0, "dropped_total": 0,
+    "consecutive_failures": 0, "last_sent_at": None, "last_error": None,
+}
 
 
 @router.get("/health")
@@ -76,6 +85,7 @@ async def health(
     db: Database = Depends(get_db),
     paper_arm: PaperExecutionArm | None = Depends(get_paper_arm),
     news_collector: NewsCollector | None = Depends(get_news_collector),
+    push_notifier: PushNotifier | None = Depends(get_push_notifier),
 ) -> dict:
     last_cycle_at = scheduler.last_cycle_at
     stale = (
@@ -124,5 +134,11 @@ async def health(
         # Fase 4: salud de la recoleccion de noticias (informativa; no bloquea nada).
         "news": await news_health_block(
             db, live_labeler.settings, active=news_collector is not None
+        ),
+        # Fase 5: notificaciones push de Telegram (informativo; el nucleo no depende de ellas).
+        "telegram_push": (
+            push_notifier.health_block() if push_notifier is not None else {
+                **NO_TELEGRAM_PUSH, "enabled": live_labeler.settings.telegram_push_enabled,
+            }
         ),
     }

@@ -140,7 +140,7 @@ async def test_health_reports_the_control_block(db):
 
     kwargs = dict(
         heartbeat=heartbeat, scheduler=scheduler, live_labeler=labeler, db=db, paper_arm=None,
-        news_collector=None,
+        news_collector=None, push_notifier=None,
     )
     normal = await health(**kwargs)
     await control_state.set_scheduler_paused(db, True)

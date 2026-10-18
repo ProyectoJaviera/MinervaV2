@@ -40,7 +40,7 @@ async def test_health_is_ok_with_a_recent_cycle(db):
 
     result = await health(
         heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db,
-        paper_arm=None, news_collector=None,
+        paper_arm=None, news_collector=None, push_notifier=None,
     )
 
     assert result["status"] == "ok"
@@ -68,7 +68,7 @@ async def test_health_is_stale_when_last_cycle_at_is_too_old(db):
 
     result = await health(
         heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db,
-        paper_arm=None, news_collector=None,
+        paper_arm=None, news_collector=None, push_notifier=None,
     )
 
     assert result["status"] == "stale"
@@ -83,7 +83,7 @@ async def test_health_is_stale_when_no_cycle_has_ever_completed(db):
 
     result = await health(
         heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db,
-        paper_arm=None, news_collector=None,
+        paper_arm=None, news_collector=None, push_notifier=None,
     )
 
     assert result["status"] == "stale"
@@ -99,7 +99,7 @@ async def test_health_is_not_stale_just_under_the_threshold(db):
 
     result = await health(
         heartbeat=heartbeat, scheduler=scheduler, live_labeler=_live_labeler(db), db=db,
-        paper_arm=None, news_collector=None,
+        paper_arm=None, news_collector=None, push_notifier=None,
     )
 
     assert result["status"] == "ok"

@@ -25,11 +25,30 @@ SEND_TIMEOUT_SECONDS = 15.0
 
 
 class TelegramApiError(Exception):
-    """Fallo de la Bot API o de la red. Nunca incluye el token ni la URL."""
+    """Fallo de la Bot API o de la red. Nunca incluye el token ni la URL.
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    `retry_after` (segundos) viene de `ResponseParameters.retry_after` de la Bot API: ante un
+    error de flood control (429) dice cuanto falta para poder repetir la peticion."""
+
+    def __init__(
+        self, message: str, *, status_code: int | None = None, retry_after: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.retry_after = retry_after
+
+
+def _retry_after(body: Any) -> float | None:
+    """`parameters.retry_after` de una respuesta de error, o `None` si no viene o no es valido."""
+    if not isinstance(body, dict):
+        return None
+    parameters = body.get("parameters")
+    if not isinstance(parameters, dict):
+        return None
+    value = parameters.get("retry_after")
+    if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
+        return None
+    return float(value)
 
 
 class TelegramClient:
@@ -62,6 +81,7 @@ class TelegramClient:
             raise TelegramApiError(
                 f"{method}: HTTP {response.status_code}{suffix}",
                 status_code=response.status_code,
+                retry_after=_retry_after(body),
             )
         return body.get("result")
 

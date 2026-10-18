@@ -67,3 +67,6 @@ def patch_lifespan(monkeypatch, db_path) -> None:
     monkeypatch.setattr(main.settings, "llm_live_labeling_enabled", True)
     monkeypatch.setattr(main.settings, "news_collection_enabled", False)
     monkeypatch.setattr(main.settings, "lessons_memory_enabled", False)
+    # `main.settings` lee el `.env` real: aunque ahi estuviera encendido, una prueba NUNCA debe
+    # escribirle al chat de Telegram.
+    monkeypatch.setattr(main.settings, "telegram_push_enabled", False)
