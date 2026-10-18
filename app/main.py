@@ -22,6 +22,8 @@ from app.api.routes import (
     health,
     llm_decisions,
     measurement,
+    memory,
+    news,
     positions,
     shadow_trades,
     trades,
@@ -190,6 +192,8 @@ app.include_router(auth.router)
 app.include_router(measurement.router)
 app.include_router(llm_decisions.router)
 app.include_router(shadow_trades.router)
+app.include_router(news.router)
+app.include_router(memory.router)
 
 # Subfase D (plan pre-Fase 5 aprobado 2026-10-14): el build estatico del
 # dashboard (`npm --prefix frontend run build`), si existe. Montado AL FINAL
