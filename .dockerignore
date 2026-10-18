@@ -1,0 +1,41 @@
+# Contexto de build de Docker (Fase 6). Lo que NO esta aqui puede terminar en una capa de la imagen:
+# por eso se excluyen los SECRETOS (.env), los datos y logs, el control de versiones y todo lo que no
+# sirve en ejecucion.
+
+# --- secretos y configuracion local: NUNCA en la imagen ---
+.env
+.env.*
+.claude
+
+# --- datos y registros del bot (viven en volumenes, no en la imagen) ---
+data
+logs
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# --- control de versiones y entornos ---
+.git
+.gitignore
+.gitattributes
+.venv*
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+
+# --- no hace falta en ejecucion ---
+tests
+docs
+*.md
+Dockerfile
+docker-compose.yml
+.dockerignore
+pyproject.toml
+frontend/node_modules
+frontend/dist
+# scripts solo de Windows o de desarrollo (el resto de scripts/ SI va: son las herramientas de operacion)
+scripts/*.ps1
+scripts/export_docker_requirements.py
+scripts/run_dev_server.py

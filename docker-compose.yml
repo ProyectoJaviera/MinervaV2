@@ -1,22 +1,83 @@
-# Esqueleto minimo de Fase 1 -- no es obligatorio levantarlo en esta fase.
-# La configuracion final (multi-stage, frontend, healthchecks) es Fase 6.
+# Minerva -- Docker Compose (Fase 6, docs/FASE6_PLAN.md). PAPER TRADING: nunca ordenes reales.
+#
+# ESTO NO REEMPLAZA a scripts/start_bot.ps1. Hasta la migracion al PC 24/7 el bot real corre con
+# start_bot.ps1 en el puerto 8000; NO levantes los dos a la vez (dos procesos con el mismo token de
+# Telegram, la misma clave de Anthropic y datos duplicados). El puerto 8000 publicado aqui choca a
+# proposito con el bot real: si lo levantas por error, Docker falla al enlazar el puerto ANTES de
+# arrancar el proceso.
+#
+# Uso (detalle en docs/MANUAL_OPERACION.md):
+#   docker compose build
+#   docker compose up -d
+#   docker compose ps                  # STATUS debe pasar a "healthy" (hasta ~5 min la primera vez)
+#   docker compose logs -f minerva
+#
+# Variables de este archivo (todas opcionales; se pueden poner en el entorno o en el `.env`):
+#   MINERVA_PORT      puerto del host (127.0.0.1). Por defecto 8000.
+#   MINERVA_REAL_BOT  true (por defecto) = los mismos interruptores que start_bot.ps1 con -Port 8000.
+#                     false = los de un puerto de prueba: SIN etiquetado del LLM, Telegram, brazo
+#                     ejecutado, noticias ni push (una instancia de prueba nunca gasta API ni compite
+#                     por el token).
+#   MINERVA_RESTART   `no` (por defecto) o `unless-stopped` (en el PC 24/7).
+#   MINERVA_ENV_FILE  archivo con las credenciales. Por defecto `.env` (fuera de la imagen).
+name: minerva
+
 services:
-  backend:
+  minerva:
     build:
       context: .
-      dockerfile: docker/Dockerfile.backend
+      dockerfile: Dockerfile
+    image: minerva:local
+    init: true
+    # `no` por defecto: en este PC un reinicio automatico podria levantar un segundo bot al iniciar
+    # Docker. En el PC 24/7: MINERVA_RESTART=unless-stopped.
+    restart: "${MINERVA_RESTART:-no}"
     env_file:
-      - .env
+      - ${MINERVA_ENV_FILE:-.env}
+    # Las MISMAS variables fijas que scripts/start_bot.ps1 (no dependen de lo que diga el `.env`, y
+    # `environment` tiene prioridad sobre `env_file`). Una prueba verifica la paridad.
+    environment:
+      DATABASE_PATH: /app/data/minerva_estabilidad.db
+      LOG_DIR: /app/logs
+      AUTO_OPEN_WITHOUT_LLM: "false"
+      LOG_LEVEL: INFO
+      LLM_LIVE_LABELING_ENABLED: "${MINERVA_REAL_BOT:-true}"
+      TELEGRAM_COMMANDS_ENABLED: "${MINERVA_REAL_BOT:-true}"
+      PAPER_EXECUTION_ENABLED: "${MINERVA_REAL_BOT:-true}"
+      NEWS_COLLECTION_ENABLED: "${MINERVA_REAL_BOT:-true}"
+      LESSONS_MEMORY_ENABLED: "false"
+      TELEGRAM_PUSH_ENABLED: "${MINERVA_REAL_BOT:-true}"
     ports:
-      # Publicado SOLO en loopback: la API nunca queda expuesta a la LAN/red
-      # externa. Dentro del contenedor el proceso escucha en 0.0.0.0 (ver
-      # docker/Dockerfile.backend) porque Docker solo puede enrutar trafico
-      # de puertos publicados hacia esa interfaz, no hacia 127.0.0.1 del
-      # propio contenedor; el aislamiento real lo da este binding "127.0.0.1:"
-      # del lado del host, no el host dentro del contenedor.
-      - "127.0.0.1:8000:8000"
+      # Publicado SOLO en loopback: la API nunca queda expuesta a la LAN ni a internet. Dentro del
+      # contenedor el proceso escucha en 0.0.0.0 (asi funciona el port-forwarding de Docker); el
+      # aislamiento lo da este "127.0.0.1:" del lado del host.
+      - "127.0.0.1:${MINERVA_PORT:-8000}:8000"
     volumes:
-      - minerva_data:/app/data
+      # Volumenes con nombre, NO carpetas del host: SQLite en modo WAL no es fiable sobre el sistema
+      # de archivos compartido de Docker Desktop, y asi este compose nunca abre la base real de data/.
+      - data:/app/data
+      - logs:/app/logs
+      # El registro oficial del veredicto (docs/VEREDICTO_3_6_REGISTRO*.txt) se lee en cada peticion:
+      # al crearlo en el host se desbloquean los resultados sin reconstruir la imagen. Solo lectura.
+      - ./docs:/app/docs:ro
+    healthcheck:
+      test: ["CMD", "python", "docker/healthcheck.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+    # El lifespan cancela tareas y cierra la base de datos: dale tiempo antes del SIGKILL.
+    stop_grace_period: 30s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
-  minerva_data:
+  data:
+  logs:

@@ -7,14 +7,14 @@ Usa `truststore` (almacen de certificados del sistema operativo) en vez del
 bundle embebido de `certifi`, para funcionar tambien en redes con
 inspeccion TLS corporativa -- y exactamente igual en redes sin proxy.
 
-Nota para Fase 6 (Docker): un contenedor recien construido NO tiene el
-certificado raiz de una inspeccion TLS corporativa en su almacen de
-confianza del sistema operativo (a diferencia de la maquina host, que si lo
-tiene instalado). Si el bot corre detras de un proxy con inspeccion TLS,
-la imagen Docker debera montar/instalar ese certificado raiz en el
-contenedor (ver PROGRESS.md, pendiente de Fase 6) o las llamadas a Bitunix/
-CoinGecko fallaran con `CERTIFICATE_VERIFY_FAILED` dentro del contenedor
-aunque funcionen en la maquina host.
+Docker: un contenedor recien construido NO tiene el certificado raiz de una
+inspeccion TLS corporativa en su almacen de confianza del sistema operativo
+(a diferencia de la maquina host, que si lo tiene instalado), y `truststore`
+lee el almacen de la IMAGEN. Si el bot corre detras de un proxy con inspeccion
+TLS, el certificado raiz se instala al construir la imagen: se deja un `.crt`
+en `docker/certs/` (ver `docker/certs/README.md`); sin eso las llamadas a
+Bitunix/CoinGecko fallan con `CERTIFICATE_VERIFY_FAILED` dentro del
+contenedor aunque funcionen en la maquina host.
 
 Keep-alive deshabilitado (`max_keepalive_connections=0`): se observo en la
 corrida real de Fase 2 una conexion persistente reutilizada que quedaba

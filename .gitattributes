@@ -1,0 +1,6 @@
+# Los archivos de Docker van siempre con saltos de linea LF (un CRLF ensucia los diffs y rompe scripts de
+# shell dentro de la imagen). El resto sigue la configuracion de cada PC (core.autocrlf).
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+docker-compose.yml text eol=lf
+docker/** text eol=lf

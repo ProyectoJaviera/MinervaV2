@@ -21,3 +21,11 @@ frontend/dist/
 
 # Logs
 *.log
+
+# Certificados locales de la imagen Docker (especificos de cada red; ver docker/certs/README.md)
+docker/certs/*.crt
+docker/certs/*.pem
+docker/certs/*.key
+
+# Configuracion local de Claude Code (permisos y rutas de este PC)
+.claude/settings.local*.json
