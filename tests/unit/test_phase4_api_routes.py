@@ -35,9 +35,14 @@ from tests.unit.synthetic_measurement import (
 from tests.unit.test_real_money_report import REPORT_TEXT
 
 PASSWORD = "correcta-123"
-NOW = datetime.now(UTC)
 H = timedelta(hours=1)
 HIDDEN = "ocultos hasta el registro oficial del veredicto"
+
+
+def now() -> datetime:
+    """La hora se calcula al EJECUTAR cada prueba, no al importar el modulo: la suite completa
+    tarda minutos y las rutas miden las edades contra su propio `datetime.now`."""
+    return datetime.now(UTC)
 
 
 def make_settings(**overrides) -> Settings:
@@ -70,7 +75,8 @@ def make_client(
 
 def item(n: int, **kw) -> NewsRecord:
     values = {
-        "source": GDELT, "fetched_at": NOW - H, "published_at": NOW - H, "title": f"Titular {n}",
+        "source": GDELT, "fetched_at": now() - H, "published_at": now() - H,
+        "title": f"Titular {n}",
         "url": f"https://x.test/{n}", "url_hash": f"u{n}", "title_hash": f"h{n}",
         "domain": "x.test", "assets": ["BTC"], "sentiment": 0.2, "sentiment_method": "LEXICON_V1",
     }
@@ -80,7 +86,7 @@ def item(n: int, **kw) -> NewsRecord:
 
 def lesson_row(pattern="ema_cross_9_21", status="ACTIVE") -> LessonRow:
     return LessonRow(
-        build_id="b1", built_at=NOW, dimension="strategy_set", pattern=pattern, n=60, wins=50,
+        build_id="b1", built_at=now(), dimension="strategy_set", pattern=pattern, n=60, wins=50,
         winrate=0.83, ci_low=0.7, ci_high=0.92, base_winrate=0.5, mean_return_pct=2.5,
         half1_delta=0.3, half2_delta=0.32, status=status,
     )
@@ -114,12 +120,15 @@ async def test_news_status_when_the_collector_is_off_says_so_and_keeps_the_attri
 
 @pytest.mark.asyncio
 async def test_news_status_reports_source_health_items_and_fear_greed(db):
-    await health_repo.record_success(db, SOURCES[GDELT].health_key, NOW - 10 * timedelta(minutes=1))
+    start = now()
+    await health_repo.record_success(
+        db, SOURCES[GDELT].health_key, start - 10 * timedelta(minutes=1)
+    )
     await health_repo.record_failure(db, SOURCES["fed_monetary"].health_key, "HTTP 503")
     await news_repo.insert_item(db, item(1))
-    await news_repo.insert_item(db, item(2, fetched_at=NOW - 30 * H, published_at=NOW - 30 * H))
+    await news_repo.insert_item(db, item(2, fetched_at=start - 30 * H, published_at=start - 30 * H))
     await news_repo.upsert_fear_greed(
-        db, ts=NOW - 3 * H, value=27, classification="Fear", fetched_at=NOW - 2 * H
+        db, ts=start - 3 * H, value=27, classification="Fear", fetched_at=start - 2 * H
     )
     client = make_client(db, make_settings(NEWS_COLLECTION_ENABLED=True), collector=object())
 
@@ -193,10 +202,11 @@ async def seeded_memory(path, *, n_approved=300, n_rejected=300) -> Database:
     post-mortem guardado."""
     insert_groups(path, scenario(n_approved, n_rejected, approved_ret=0.30))
     db = await open_db(path)
-    await entries.refresh_entries(db, now=NOW)
-    await lessons.rebuild_lessons(db, min_sample=30, now=NOW)
+    stamp = now()
+    await entries.refresh_entries(db, now=stamp)
+    await lessons.rebuild_lessons(db, min_sample=30, now=stamp)
     await memory_repo.save_report(
-        db, kind="POSTMORTEM", created_at=NOW, dedupe_key="s1",
+        db, kind="POSTMORTEM", created_at=stamp, dedupe_key="s1",
         body={"losses": 4, "total_pnl_net_usdt": -4.2, "in_common": {"side": "LONG"}},
     )
     return db
@@ -247,7 +257,7 @@ async def test_with_the_gate_closed_nothing_with_results_comes_out_even_if_it_is
 ):
     write_record(docs)  # aunque exista el registro oficial, el gate de la medicion esta cerrado
     db = await seeded_memory(memory_db, n_approved=299, n_rejected=300)
-    await memory_repo.replace_lessons(db, "b9", NOW, [lesson_row()])
+    await memory_repo.replace_lessons(db, "b9", now(), [lesson_row()])
     patch_gate(monkeypatch, memory_db, docs)
     try:
         client = make_client(db)
@@ -326,7 +336,7 @@ async def test_the_gate_fails_closed_when_it_cannot_be_evaluated(db, monkeypatch
         raise RuntimeError("base ilegible con clave=SECRETO")
 
     monkeypatch.setattr(gate, "compute_status_async", broken)
-    await memory_repo.replace_lessons(db, "b1", NOW, [lesson_row()])
+    await memory_repo.replace_lessons(db, "b1", now(), [lesson_row()])
     client = make_client(db)
 
     with caplog.at_level("ERROR", logger="app.memory.gate"):
