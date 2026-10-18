@@ -120,3 +120,93 @@ queda en segundos, así que se prueba también la regla de 60 s.
 
 Se confirma al terminar (lista definitiva en "Implementación"). Adelanto: Docker, pruebas, documentación y scripts nuevos **no** requieren
 reiniciar el bot real; solo lo haría una limpieza de código muerto en `app/`, y aun así sin cambio de comportamiento.
+
+---
+
+# Implementación (2026-10-18)
+
+Subfases 6.1 a 6.6 hechas y en `master`. Commits: `eebf2ad` (plan), `b9bfa11` (6.1 Docker), `d7f91bf` (6.2 y 6.3, pruebas de punta a
+punta), `6877449` (herramientas de operación y esquema), `85ee8e9` (README), `2092d23` (manual), `37820f2`, `713d377` y `4ce4456`
+(limpieza y vigilancia de la identidad de la medición) y el de la documentación final. **No se tocó el prompt congelado, la medición ni el
+bot del puerto 8000** (solo se comprobó que seguía escuchando).
+
+## Lo construido
+
+| Pieza | Dónde |
+|---|---|
+| Imagen multietapa (frontend, dependencias con versiones exactas, runtime sin privilegios), `.dockerignore`, compose, healthcheck, certificados raíz opcionales | `Dockerfile`, `docker-compose.yml`, `docker/`, `.dockerignore` (90 pruebas estáticas en `tests/unit/test_docker_setup.py`) |
+| Pruebas de punta a punta con el sistema real y el exterior simulado | `tests/e2e/` (51 pruebas, ~18 s) |
+| Respaldo y restauración consistentes y verificados; levantar el stop por drawdown; esquema de la base generado | `scripts/backup_db.py`, `scripts/restore_db.py`, `scripts/resume_drawdown_stop.py`, `scripts/export_schema_doc.py` → `docs/ESQUEMA_BD.md` |
+| Vigilancia de la identidad de la medición (modelo, prompt congelado, features) | `scripts/measurement_identity.py` |
+| Documentación final | `README.md`, `docs/MANUAL_OPERACION.md`, `docs/INFORME_FINAL.md` |
+| Limpieza y pruebas de higiene | `tests/unit/test_env_example.py`, `tests/unit/test_repo_hygiene.py`, `tests/unit/test_final_docs.py`; `.env.example` completo; `.gitignore` reforzado |
+
+## Ajustes respecto al plan y decisiones (anotadas según Autonomía)
+
+1. **Tres adiciones fuera de la lista pedida**, todas nacidas de hallazgos y todas de solo lectura o sin efecto sobre la medición:
+   `resume_drawdown_stop.py` (el stop duro era irreversible en la práctica: los avisos prometían una acción que no existía),
+   `measurement_identity.py` (el hash congelado no cubre el modelo) y las pruebas de higiene del repositorio.
+2. **`.env.example`**: se interpretó "todas las variables, sin valores" como *todas las variables de `Settings`*, con las credenciales
+   vacías y los demás valores iguales a los del código (una prueba exige que copiar la plantilla dé exactamente los defaults). Faltaban 31.
+3. **Siete campos de configuración sin ninguna referencia se retiraron** (ver el docstring de `app/config.py`); un `.env` que aún los tenga
+   no falla.
+4. **El código muerto se contrastó a mano**: vulture no ve decoradores (rutas), ni nombres repetidos en otros módulos (`symbols`), así que
+   cada hallazgo se verificó antes de borrar. Se conservó lo que es interfaz exigida por la especificación o vocabulario documentado.
+5. **Los documentos históricos no se reescribieron** (`PROGRESS.md`, `docs/FASE*_PLAN.md`): son bitácora. Las pruebas de documentación
+   solo revisan los documentos vivos (README, manual, informe final, migración, veredicto y esquema).
+6. **El README reemplaza al de la Fase 1**; el manual reemplaza a las instrucciones sueltas y enlaza a `docs/MIGRACION_PC.md`, que
+   conserva el detalle de las tareas del Programador de Windows (con un aviso al inicio y la mención de los scripts nuevos).
+7. **`docker/Dockerfile.backend`** (esqueleto de la Fase 1) se eliminó; el `docker-compose.yml` anterior se reemplazó.
+
+## Verificación
+
+| Qué | Resultado |
+|---|---|
+| `pytest` | **1.796 pasaron y 4 se omitieron** (las 4 de red real, que exigen `MINERVA_RUN_LIVE_TESTS=1`) en 5 min 24 s; 1.800 recogidas: 1.745 unitarias, 4 de integración y 51 de punta a punta (antes de la Fase 6: 1.552 pasaron) |
+| `ruff check .` | limpio |
+| `npm --prefix frontend run test -- --run` | 106 pasaron (10 archivos) |
+| `npm --prefix frontend run build` | `tsc --noEmit` y `vite build` limpios |
+| `docker compose config` (sin demonio, con un `.env` falso en un directorio temporal) | válido; sin secretos en la salida |
+| Dependencias para Linux (`uv pip compile --python-platform`) | el `docker/requirements.lock` está al día (`export_docker_requirements.py --check`) |
+| Esquema de la base | `export_schema_doc.py --check`: `docs/ESQUEMA_BD.md` al día |
+| Respaldo / restauración sobre **copia real** (ruta distinta verificada) | mismas filas en las 28 tablas; el origen no cambia; sin `--force` se niega a pisar un destino existente (código 5) |
+| `resume_drawdown_stop.py` sobre copia real | informativo sin escribir; con el stop inactivo se niega (código 3); forzado el stop en la copia, lo levanta, deja el contador intacto y no imprime el equity |
+| `measurement_identity.py` sobre copia real | una sola combinación (`claude-sonnet-5-5`, `signal_review_v4`, `features_v2`, hash congelado) en las filas de MEDICION; solo conteos y fechas |
+| **Arranque real en el 8001** tras la limpieza (`run_dev_server.py` sobre una copia, sondeo de solo lectura) | arranca completo; `frozen_hash_ok` verdadero; push, etiquetado y brazo apagados; 22 rutas, las únicas de escritura son login, logout y `/api/control/{action}`; sin sesión todo da 401; frontend servido. Lo detuvo el propio script que lo lanzó; el 8000 siguió escuchando |
+| Historial de git | 0 coincidencias de patrones de credenciales y 0 archivos prohibidos entre los 374 que alguna vez se añadieron (solo conteos) |
+
+## Qué no se pudo verificar (qué falta probar)
+
+Nada de esto lo toqué: **Docker Desktop estaba apagado** y no lo encendí por mi cuenta.
+
+1. `docker compose build` (resolución real de las imágenes base, `pip install --only-binary` en Linux, `npm ci`, el flujo de certificados).
+2. Que el contenedor arranque y quede `healthy` (healthcheck real, `start_period`).
+3. Que el volumen `minerva_data` herede el dueño del usuario `minerva` y que SQLite en modo WAL funcione sobre él.
+4. El montaje de `./docs` en solo lectura y que el registro oficial del veredicto se vea dentro del contenedor.
+5. `restore_db.py` y `backup_db.py` dentro del contenedor, y `docker compose cp`.
+6. Comportamiento específico de Linux (rutas, señales: la parada ordenada con SIGTERM).
+
+**Procedimiento de prueba sin riesgo** (no toca el bot real: puerto 8001, sin LLM, sin Telegram, sin brazo, sin noticias ni push, y con volúmenes
+propios y vacíos; después lo borras con `down -v`):
+
+```powershell
+$env:MINERVA_REAL_BOT = "false"; $env:MINERVA_PORT = "8001"
+docker compose build
+docker compose up -d
+docker compose ps                                  # STATUS → healthy (hasta ~5 min)
+Invoke-RestMethod http://127.0.0.1:8001/health     # mode PAPER_TRADING; telegram_push.enabled false
+docker compose exec minerva ls -ld /app/data /app/logs   # dueño: minerva
+docker compose exec minerva python scripts/backup_db.py
+docker compose exec minerva python scripts/measurement_identity.py --db /app/data/backups/<el respaldo>.db
+docker compose down -v                             # borra los volúmenes de PRUEBA
+```
+
+## Qué requiere reinicio (definitiva)
+
+| Pieza | ¿Reinicio del bot real? |
+|---|---|
+| Docker, pruebas, documentación, scripts nuevos (`backup_db`, `restore_db`, `resume_drawdown_stop`, `export_schema_doc`, `export_docker_requirements`, `measurement_identity`) | No |
+| 9 archivos de `app/`: docstrings (`core/http.py`, `llm/__init__.py`, `market/bitunix_ws.py`, `strategies/base.py`, `trading/signal_generator.py`) y retirada de código sin uso (`config.py`, `strategies/registry.py`, `backtest_repo.py`, `funding_repo.py`) | No lo exigen; **se cargan con el reinicio ya pendiente de la Fase 5** y no cambian el comportamiento |
+| Backend de la Fase 5 (rutas nuevas, `control_audit`, push, cambios de `/pause` `/resume` `/kill`) | **Sí, un solo reinicio**, en :10-:40 de una hora UTC que no sea de cierre de 4 h (ver `docs/MANUAL_OPERACION.md`, §4) |
+
+El frontend compilado (`frontend/dist`) se sirve en caliente; esta fase lo reconstruyó con las mismas fuentes (sin cambios).

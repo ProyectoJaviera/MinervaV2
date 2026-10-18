@@ -136,7 +136,7 @@ Después de arrancar abre `http://127.0.0.1:8000/` (dashboard) y verifica `GET /
 ## Pruebas
 
 ```bash
-pytest                              # ~1.700 pruebas: unitarias, de integración y de punta a punta
+pytest                              # 1.800 pruebas: unitarias, de integración y de punta a punta
 ruff check .
 npm --prefix frontend run test      # Vitest
 npm --prefix frontend run build

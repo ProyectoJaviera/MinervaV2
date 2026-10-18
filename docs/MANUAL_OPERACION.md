@@ -70,8 +70,9 @@ recupera. En la última medición (octubre de 2026) había ~1,25 conglomerados p
    Sale con código 0 si hay una única combinación (modelo, prompt congelado, features) y con 1 si detecta una
    anomalía o si el modelo configurado en el `.env` ya no es el que midió (un cambio que se haría efectivo al
    reiniciar).
-5. **Árbol del repositorio limpio y commit esperado**: `git status` sin cambios en `app/` y `git log -1`; es lo que
-   mantiene `frozen_hash_ok` en `true`.
+5. **Árbol del repositorio limpio y commit esperado**: `git status` sin cambios en `app/` y `git log -1`. El proceso en
+   marcha ya cargó su código, pero el **próximo reinicio** cargaría lo que haya en disco: un cambio accidental en
+   `app/llm/` dejaría `frozen_hash_ok` en `false` justo después de reiniciar.
 
 ### Qué no mirar (mientras el gate esté cerrado)
 
@@ -190,10 +191,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop_bot.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_bot.ps1
 ```
 
-Docker: `docker compose restart minerva` (cierre ordenado, mismo contenedor) o, si cambiaste el `.env` o el
-compose, `docker compose up -d --force-recreate`.
-Los cambios del `.env` se leen **solo al arrancar el proceso**; para asegurarte de que el contenedor los relea usa
-`docker compose up -d --force-recreate` (un simple `restart` no vuelve a leer el archivo de entorno).
+Docker: `docker compose restart minerva` (cierre ordenado, mismo contenedor). Los cambios del `.env` o del compose se
+leen **solo al crear el contenedor**: si cambiaste alguno, usa `docker compose up -d --force-recreate` (un simple
+`restart` no vuelve a leer el archivo de entorno).
 
 Verifica después (≤ 2 min): `GET /health` con `status: ok`, `llm_labeling.frozen_hash_ok: true`,
 `llm_labeling.enabled: true`, `paper_execution.active: true` y, pasada la siguiente hora en punto, que suben las
@@ -496,7 +496,7 @@ y trae el archivo a `docs/` con `docker compose cp`. Ninguna de las dos variante
 | `data/minerva_estabilidad.db` | Base del bot real (nativo) | **No** |
 | `data/backups/` | Respaldos y copias de trabajo | **No** |
 | `logs/minerva.log` | Log principal (rota: 5 × 10 MB) | No |
-| `logs/medicion.log` | Bitácora de `start_bot.ps1` / `stop_bot.ps1` | No |
+| `logs/medicion.log` | Bitácora de `start_bot.ps1` (cada arranque, rechazo o error) | No |
 | `logs/medicion_out.log` | Salida de consola del arranque nativo (no rota) | No |
 | `docs/VEREDICTO_3_6_REGISTRO*.txt` | Registro oficial del veredicto | Sí (recomendado) |
 | Volúmenes `minerva_data`, `minerva_logs` | Base y logs del contenedor | No |
