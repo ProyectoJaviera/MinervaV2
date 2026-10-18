@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DashboardView } from "./DashboardView";
-import { jsonResponse, withQueryClient } from "./testUtils";
+import { calledPaths, jsonResponse, mockFetch, withQueryClient } from "./testUtils";
 
 const HEALTH_BODY = {
   status: "ok",
@@ -264,5 +264,209 @@ describe("DashboardView: columnas de PnL de las sombras", () => {
     await screen.findByText("BTCUSDT LONG");
     expect(screen.getByText(/junte 300 conglomerados efectivos por lado/i)).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+});
+
+describe("DashboardView: pestanas (Fase 5)", () => {
+  const SUMMARY_ROUTES = {
+    "/health": { status: 200, body: HEALTH_BODY },
+    "/api/measurement/status": { status: 200, body: MEASUREMENT_BODY },
+    "/api/llm/decisions/recent": { status: 200, body: [] },
+    "/api/shadow-trades/recent": { status: 200, body: [] },
+  };
+  const CONTROL = (paused: boolean, kill: boolean) => ({
+    ...HEALTH_BODY,
+    control: { paused, kill_switch_active: kill },
+  });
+  const NEW_TAB_PATHS = [
+    "/api/account", "/api/arm", "/api/risk", "/api/universe", "/api/backtest/verdicts",
+    "/api/control/info", "/api/control/audit",
+  ];
+  const UNIVERSE_MIN = {
+    refreshed_at: "2026-10-18T11:12:13+00:00", age_hours: 1, stale: false,
+    staleness_limit_hours: 48, refresh_hours: 24, universe_size: 10, last_refresh_error: null,
+    included: ["BTCUSDT"], changes: [], rule: "regla",
+    candidates: [
+      {
+        rank: 1, coingecko_id: "bitcoin", symbol: "BTCUSDT", market_cap_usd: 1648722303443,
+        included: true, excluded_category: null, excluded_manual: false, has_bitunix_perp: true,
+        price_sanity_ok: true, exclusion_reason: null, mark_price: 64000.5,
+      },
+    ],
+    attribution: { text: "Data provided by CoinGecko", url: "https://www.coingecko.com" },
+  };
+  const PUSH = {
+    enabled: true, active: true, sent_total: 4, failed_total: 1, dropped_total: 0,
+    consecutive_failures: 0, last_sent_at: null, last_error: null,
+  };
+
+  function open(routes: Record<string, { status: number; body: unknown }> = {}) {
+    const fetchMock = mockFetch({ ...SUMMARY_ROUTES, ...routes });
+    vi.stubGlobal("fetch", fetchMock);
+    render(withQueryClient(<DashboardView username="renzo" />));
+    return fetchMock;
+  }
+
+  const tab = (name: string) => screen.getByRole("tab", { name });
+
+  it("ofrece las cinco secciones y abre en Resumen", async () => {
+    open();
+
+    await screen.findByText("Avance de la medicion");
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
+      "Resumen", "Cuenta paper", "Brazo ejecutado", "Riesgo y controles", "Universo y backtest",
+    ]);
+    expect(tab("Resumen")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel")).toHaveAccessibleName("Resumen");
+  });
+
+  it("las pestanas nuevas no piden nada hasta que se abren", async () => {
+    const fetchMock = open();
+
+    await screen.findByText("Avance de la medicion");
+    await waitFor(() => expect(calledPaths(fetchMock)).toContain("/api/shadow-trades/recent"));
+
+    for (const path of NEW_TAB_PATHS) expect(calledPaths(fetchMock)).not.toContain(path);
+  });
+
+  it("cada pestana pide sus datos solo al abrirse", async () => {
+    const fetchMock = open({
+      "/api/account": { status: 404, body: {} },
+      "/api/arm": { status: 404, body: {} },
+    });
+    await screen.findByText("Avance de la medicion");
+
+    fireEvent.click(tab("Cuenta paper"));
+    expect(await screen.findByText(/Cuenta paper: no disponible todavia/)).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel")).toHaveAccessibleName("Cuenta paper");
+    expect(calledPaths(fetchMock)).toContain("/api/account");
+    expect(calledPaths(fetchMock)).not.toContain("/api/arm");
+
+    fireEvent.click(tab("Brazo ejecutado"));
+    expect(await screen.findByText(/Brazo ejecutado: no disponible todavia/)).toBeInTheDocument();
+    expect(calledPaths(fetchMock)).toContain("/api/arm");
+    expect(screen.queryByText(/Cuenta paper: no disponible/)).not.toBeInTheDocument();
+  });
+
+  it("volver al Resumen muestra otra vez la medicion", async () => {
+    open({ "/api/account": { status: 404, body: {} } });
+    await screen.findByText("Avance de la medicion");
+
+    fireEvent.click(tab("Cuenta paper"));
+    await screen.findByText(/Cuenta paper: no disponible todavia/);
+    expect(screen.queryByText("Avance de la medicion")).not.toBeInTheDocument();
+    fireEvent.click(tab("Resumen"));
+
+    expect(await screen.findByText("Avance de la medicion")).toBeInTheDocument();
+  });
+
+  it("sin pausa ni kill switch no hay aviso de medicion detenida", async () => {
+    open();
+
+    await screen.findByText("Avance de la medicion");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("un backend viejo sin el bloque control tampoco muestra el aviso", async () => {
+    open({ "/health": { status: 200, body: HEALTH_BODY } }); // HEALTH_BODY no trae control
+
+    await screen.findByText("Avance de la medicion");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("en pausa avisa que la medicion esta detenida, en todas las pestanas", async () => {
+    open({
+      "/health": { status: 200, body: CONTROL(true, false) },
+      "/api/account": { status: 404, body: {} },
+    });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/LA MEDICION ESTA DETENIDA/);
+    expect(banner).toHaveTextContent(/sin senales, sombras ni etiquetado/);
+    expect(banner).not.toHaveTextContent(/KILL SWITCH/);
+    fireEvent.click(tab("Cuenta paper"));
+    await screen.findByText(/Cuenta paper: no disponible todavia/);
+    expect(screen.getByRole("alert")).toHaveTextContent(/LA MEDICION ESTA DETENIDA/);
+  });
+
+  it("con el kill switch activo lo dice sin afirmar que la medicion esta detenida", async () => {
+    open({ "/health": { status: 200, body: CONTROL(false, true) } });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/KILL SWITCH ACTIVO: no se abren entradas nuevas/);
+    expect(banner).not.toHaveTextContent(/MEDICION ESTA DETENIDA/);
+  });
+
+  it("en pausa y con kill switch muestra ambos avisos en un solo recuadro", async () => {
+    open({ "/health": { status: 200, body: CONTROL(true, true) } });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/LA MEDICION ESTA DETENIDA/);
+    expect(banner).toHaveTextContent(/KILL SWITCH ACTIVO/);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("la atribucion de CoinGecko esta en el pie de cada pestana", async () => {
+    open({
+      "/api/account": { status: 404, body: {} },
+      "/api/arm": { status: 404, body: {} },
+      "/api/risk": { status: 404, body: {} },
+      "/api/control/info": { status: 404, body: {} },
+      "/api/control/audit": { status: 404, body: {} },
+      "/api/universe": { status: 404, body: {} },
+      "/api/backtest/verdicts": { status: 404, body: {} },
+    });
+    await screen.findByText("Avance de la medicion");
+
+    for (const name of [
+      "Resumen", "Cuenta paper", "Brazo ejecutado", "Riesgo y controles", "Universo y backtest",
+    ]) {
+      fireEvent.click(tab(name));
+      const footer = screen.getByRole("contentinfo");
+      const link = within(footer).getByRole("link", { name: "Data provided by CoinGecko" });
+      expect(link).toHaveAttribute("href", "https://www.coingecko.com");
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link.getAttribute("rel")).toContain("noopener");
+    }
+  });
+
+  it("en Universo la atribucion esta junto a los datos y tambien en el pie", async () => {
+    open({
+      "/api/universe": { status: 200, body: UNIVERSE_MIN },
+      "/api/backtest/verdicts": { status: 404, body: {} },
+    });
+    await screen.findByText("Avance de la medicion");
+
+    fireEvent.click(tab("Universo y backtest"));
+
+    await screen.findByText("BTCUSDT");
+    expect(screen.getAllByRole("link", { name: "Data provided by CoinGecko" })).toHaveLength(2);
+  });
+
+  it.each([
+    ["activas con sus conteos", PUSH, "activas (4 enviadas, 1 fallos)"],
+    ["activas sin fallos no mencionan fallos", { ...PUSH, failed_total: 0 }, "activas (4 enviadas)"],
+    ["apagadas si el interruptor esta en false", { ...PUSH, enabled: false, active: false }, "apagadas"],
+    ["sin armar si esta habilitado pero no arranco", { ...PUSH, active: false }, "sin armar"],
+    ["n/d en un backend que aun no las tiene", undefined, "n/d"],
+  ])("el Resumen muestra las notificaciones de Telegram: %s", async (_name, push, expected) => {
+    open({
+      "/health": { status: 200, body: push ? { ...HEALTH_BODY, telegram_push: push } : HEALTH_BODY },
+    });
+
+    const label = await screen.findByText("Notificaciones Telegram");
+    expect(label.nextSibling).toHaveTextContent(expected);
+  });
+
+  it("el estado de las notificaciones nunca muestra texto de mensajes ni credenciales", async () => {
+    open({
+      "/health": {
+        status: 200,
+        body: { ...HEALTH_BODY, telegram_push: { ...PUSH, last_error: "TelegramApiError" } },
+      },
+    });
+
+    await screen.findByText("Notificaciones Telegram");
+    expect(document.body.textContent).not.toMatch(/token|chat_id|bot\d+:/i);
   });
 });
