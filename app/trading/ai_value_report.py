@@ -30,6 +30,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from app.persistence.llm_log_fields import atr_value
 from app.persistence.models import ShadowTrade
 from app.persistence.repositories.shadow_repo import row_to_shadow
 from app.trading.ai_value import (
@@ -190,15 +191,19 @@ def assert_synthetic_database(conn: sqlite3.Connection) -> None:
 
 
 def _load_log_metas(conn: sqlite3.Connection) -> list[LogMeta]:
+    # `atr_pct`: el etiquetador en vivo no rellena la columna, pero el mensaje que vio el modelo
+    # (con `volatility_atr14_pct`) queda en `prompt`; solo se trae el prompt de las filas con la
+    # columna nula (ver `app/persistence/llm_log_fields.py`). Solo lectura.
     rows = conn.execute(
         "SELECT signal_group_key, fase, prompt_sha256, status, json_repaired, hour_utc, "
-        "atr_pct, created_at FROM llm_logs"
+        "atr_pct, CASE WHEN atr_pct IS NULL THEN prompt END AS prompt_for_atr, created_at "
+        "FROM llm_logs"
     ).fetchall()
     return [
         LogMeta(
             key=r["signal_group_key"], fase=r["fase"], prompt_sha256=r["prompt_sha256"],
             status=r["status"], json_repaired=bool(r["json_repaired"]),
-            hour_utc=r["hour_utc"], atr_pct=r["atr_pct"],
+            hour_utc=r["hour_utc"], atr_pct=atr_value(r["atr_pct"], r["prompt_for_atr"]),
             created_at=datetime.fromisoformat(r["created_at"]),
         )
         for r in rows

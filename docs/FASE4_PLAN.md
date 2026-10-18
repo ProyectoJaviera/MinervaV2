@@ -164,9 +164,10 @@ Hallazgos y correcciones durante la construcción (cada uno con su prueba):
    14 días, con la edad (`minutes_ago`) en cada titular.
 3. **ATR de la memoria**: el etiquetador en vivo **no rellena `llm_logs.atr_pct`** (las 17 filas de medición
    lo tienen nulo). La memoria lo recupera del mensaje guardado en `llm_logs.prompt` (el mismo valor que vio
-   el modelo). *Efecto colateral fuera de esta fase*: `compute_sin_llm_diagnostics`
-   (`app/trading/ai_value_report.py`, sección m) estratifica los SIN_LLM por tercil de `atr_pct` y saldrá
-   vacío por esa causa; ver PROGRESS.md (decisión pendiente tuya).
+   el modelo). *Efecto colateral, RESUELTO en la revisión de b62d261 (2026-10-18)*:
+   `compute_sin_llm_diagnostics` (`app/trading/ai_value_report.py`, sección m) estratifica los SIN_LLM por
+   tercil de `atr_pct` y habría salido vacío; ahora `_load_log_metas` recupera el ATR del prompt guardado
+   cuando la columna es nula (solo lectura; helper compartido `app/persistence/llm_log_fields.py`).
 4. **Puerta que falla cerrada**: `app.memory.gate.results_visible` devuelve `False` ante cualquier error al
    evaluar la puerta (gate de la medición + registro oficial), y todas las salidas con resultados pasan por
    ella (API, `scripts/lessons_report.py`, contexto de lecciones, informes).

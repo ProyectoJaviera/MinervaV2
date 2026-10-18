@@ -10,12 +10,12 @@ Esto LEE resultados (PnL): por eso solo corre con `LESSONS_MEMORY_ENABLED` o des
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime, timedelta
 
 from app.memory.features import risk_reward
 from app.news.assets import base_ticker
 from app.persistence.database import Database
+from app.persistence.llm_log_fields import atr_value
 from app.persistence.models import ShadowTrade
 from app.persistence.repositories import memory_repo, news_repo, shadow_repo, signals_repo
 from app.persistence.repositories.memory_repo import MemoryEntry
@@ -43,25 +43,13 @@ async def count_closed_reliable(db: Database) -> int:
 
 
 def atr_from_log(row) -> float | None:
-    """ATR(14) % que vio el modelo al decidir. El etiquetador en vivo no rellena
-    `llm_logs.atr_pct`, pero el mensaje completo queda en `prompt` (sistema, dos saltos de linea y
-    el mensaje como JSON de una sola linea): de ahi se lee `volatility_atr14_pct`, el MISMO dato
-    que usa la consulta de lecciones. Sin fila de log, o con un prompt ilegible, es `None` (nunca
-    se inventa)."""
+    """ATR(14) % que vio el modelo al decidir: la columna `llm_logs.atr_pct` si esta y, si no, el
+    `volatility_atr14_pct` del mensaje guardado en `prompt` (el etiquetador en vivo no rellena la
+    columna; ver `app/persistence/llm_log_fields.py`, compartido con el informe del veredicto).
+    Sin fila de log, o con un prompt ilegible, es `None` (nunca se inventa)."""
     if row is None:
         return None
-    if row["atr_pct"] is not None:
-        return row["atr_pct"]
-    _, separator, tail = (row["prompt"] or "").rpartition("\n\n{")
-    if not separator:
-        return None
-    try:
-        value = json.loads("{" + tail).get("volatility_atr14_pct")
-    except (ValueError, AttributeError):
-        return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return float(value)
+    return atr_value(row["atr_pct"], row["prompt"])
 
 
 async def _entry_from_shadow(db: Database, shadow: ShadowTrade) -> MemoryEntry:
