@@ -52,12 +52,19 @@ def integrity_check(path: Path) -> str:
 
 
 def copy_consistently(source: Path, destination: Path) -> None:
-    """Copia con la API de backup, el origen en solo lectura."""
+    """Copia con la API de backup, el origen en solo lectura.
+
+    La copia hereda del origen el modo WAL en su cabecera, y un archivo asi NO se puede abrir desde
+    un medio de solo lectura (SQLite necesita crear el `-shm`): lo comprobo la prueba real con
+    Docker, donde el respaldo se monta `:ro` en el contenedor que lo restaura. Se guarda en modo
+    de diario clasico (`DELETE`): un archivo suelto, sin `-wal`/`-shm`, que abre en cualquier parte.
+    El bot lo vuelve a poner en WAL al conectarse (`Database.connect`)."""
     src = sqlite3.connect(f"file:{source.as_posix()}?mode=ro", uri=True)
     try:
         dst = sqlite3.connect(str(destination))
         try:
             src.backup(dst)
+            dst.execute("PRAGMA journal_mode=DELETE").fetchone()
         finally:
             dst.close()
     finally:

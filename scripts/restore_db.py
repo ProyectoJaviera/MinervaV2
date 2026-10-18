@@ -43,14 +43,46 @@ REQUIRED_TABLES = frozenset({
 
 EXIT_OK, EXIT_USAGE, EXIT_NO_BACKUP, EXIT_INVALID, EXIT_EXISTS = 0, 2, 3, 4, 5
 EXIT_WRITE_FAILED = 6
+# Mensajes de SQLite cuando no puede crear el `-shm` de un archivo WAL en un medio de solo lectura.
+READ_ONLY_MEDIUM_ERRORS = ("readonly", "unable to open")
+
+
+def connect_readonly(path: Path) -> sqlite3.Connection:
+    """Abre `path` en solo lectura, tambien desde un medio de solo lectura (p. ej. un montaje
+    `:ro` de Docker).
+
+    Un respaldo anterior a la Fase 7 trae el modo WAL en su cabecera y, desde un medio de solo
+    lectura, `mode=ro` falla ("attempt to write a readonly database"): SQLite necesita crear el
+    `-shm`. Un respaldo es un archivo suelto sin escritor, asi que en ese caso se abre
+    `immutable=1`, SALVO que tenga al lado un `-wal` con contenido (entonces ese contenido importa y
+    ignorarlo daria datos viejos: se deja fallar). Cualquier otro error (p. ej. `database is
+    locked`) tampoco se esquiva: con un escritor presente `immutable` podria leer datos a medias."""
+    uri = f"file:{path.as_posix()}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    try:
+        conn.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()  # fuerza a tocar el archivo
+        return conn
+    except sqlite3.OperationalError as exc:
+        conn.close()
+        if not any(text in str(exc).lower() for text in READ_ONLY_MEDIUM_ERRORS):
+            raise
+        wal = path.with_name(path.name + "-wal")
+        if wal.exists() and wal.stat().st_size > 0:
+            raise
+        return sqlite3.connect(f"{uri}&immutable=1", uri=True)
+    except sqlite3.Error:
+        conn.close()
+        raise
 
 
 def validate_backup(path: Path) -> str | None:
     """`None` si `path` es una base de Minerva integra; si no, el motivo del rechazo."""
     try:
-        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
-    except sqlite3.Error as exc:
+        conn = connect_readonly(path)
+    except sqlite3.OperationalError as exc:
         return f"no se pudo abrir ({type(exc).__name__})"
+    except sqlite3.Error as exc:
+        return f"no es una base SQLite valida ({type(exc).__name__})"
     try:
         verdict = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
         if verdict != "ok":
@@ -111,11 +143,13 @@ def run(
     temporary.unlink(missing_ok=True)
     moved: list[tuple[Path, Path]] = []
     try:
-        src = sqlite3.connect(f"file:{source.as_posix()}?mode=ro", uri=True)
+        src = connect_readonly(source)
         try:
             dst = sqlite3.connect(str(temporary))
             try:
                 src.backup(dst)
+                # Archivo suelto, sin -wal/-shm: el bot lo pone en WAL al conectarse.
+                dst.execute("PRAGMA journal_mode=DELETE").fetchone()
             finally:
                 dst.close()
         finally:

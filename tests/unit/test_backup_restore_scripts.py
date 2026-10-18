@@ -310,3 +310,133 @@ def test_the_restore_script_runs_standalone(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert count(tmp_path / "out" / "bot.db") == 4
+
+
+# --- Fase 7: respaldos que abren desde un medio de solo lectura -------------------------------
+# Hallazgo de la prueba real con Docker: el respaldo se monta `:ro` en el contenedor que lo
+# restaura y, como la copia heredaba el modo WAL en su cabecera, SQLite no podia abrirla
+# ("attempt to write a readonly database": necesita crear el -shm).
+
+
+def journal_flags(path: Path) -> tuple[int, int]:
+    """Bytes 18 y 19 de la cabecera: 1 = diario clasico, 2 = WAL."""
+    header = path.read_bytes()[:100]
+    return header[18], header[19]
+
+
+class ReadOnlyMediumConnection:
+    """Una conexion que falla en la primera lectura, como SQLite en un montaje de solo lectura."""
+
+    def __init__(self, message: str = "attempt to write a readonly database") -> None:
+        self.message = message
+        self.closed = False
+
+    def execute(self, *_args, **_kwargs):
+        raise sqlite3.OperationalError(self.message)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def patch_read_only_medium(monkeypatch, message: str = "attempt to write a readonly database"):
+    """`mode=ro` falla como en el montaje `:ro`; `immutable=1` y los archivos normales, no."""
+    real_connect = sqlite3.connect
+    uris: list[str] = []
+
+    def connect(target, *args, **kwargs):
+        uris.append(str(target))
+        if str(target).startswith("file:") and "immutable=1" not in str(target):
+            return ReadOnlyMediumConnection(message)
+        return real_connect(target, *args, **kwargs)
+
+    monkeypatch.setattr(restore_db.sqlite3, "connect", connect)
+    return uris
+
+
+def test_a_backup_is_a_standalone_rollback_journal_file_even_when_the_source_is_wal(tmp_path):
+    source = tmp_path / "bot.db"
+    live = sqlite3.connect(str(source))
+    live.execute("PRAGMA journal_mode=WAL")
+    live.execute("CREATE TABLE trades (id INTEGER PRIMARY KEY, valor TEXT)")
+    live.execute("INSERT INTO trades (valor) VALUES ('x')")
+    live.commit()
+    try:
+        assert journal_flags(source) == (2, 2)
+
+        code, message = backup_db.run(str(source), str(tmp_path / "r"), "minerva", 0, T0)
+
+        assert code == backup_db.EXIT_OK, message
+        backup = tmp_path / "r" / "minerva_20261018_120000.db"
+        assert journal_flags(backup) == (1, 1)  # ya no dice WAL
+        assert count(backup) == 1
+        # y abrirlo no deja archivos al lado (un -shm ya impedia abrirlo desde un medio de solo
+        # lectura)
+        assert [p.name for p in (tmp_path / "r").iterdir()] == [backup.name]
+    finally:
+        live.close()
+
+
+def test_a_restored_database_is_also_a_standalone_file(tmp_path):
+    source = tmp_path / "bot.db"
+    live = sqlite3.connect(str(source))
+    live.execute("PRAGMA journal_mode=WAL")
+    for table in restore_db.REQUIRED_TABLES:
+        live.execute(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, valor TEXT)")
+    live.commit()
+    try:
+        # un respaldo de antes de la Fase 7: copiado tal cual, con WAL en la cabecera
+        old_style = tmp_path / "viejo.db"
+        copy = sqlite3.connect(str(old_style))
+        sqlite3.connect(f"file:{source.as_posix()}?mode=ro", uri=True).backup(copy)
+        copy.close()
+        assert journal_flags(old_style) == (2, 2)
+
+        code, message = restore_db.run(str(old_style), str(tmp_path / "out" / "bot.db"))
+
+        assert code == restore_db.EXIT_OK, message
+        assert journal_flags(tmp_path / "out" / "bot.db") == (1, 1)
+        assert sorted(p.name for p in (tmp_path / "out").iterdir()) == ["bot.db"]
+    finally:
+        live.close()
+
+
+def test_a_wal_flagged_backup_is_read_through_the_immutable_fallback_on_a_read_only_medium(
+    tmp_path, monkeypatch,
+):
+    make_minerva_db(tmp_path / "resp.db", rows=5)
+    uris = patch_read_only_medium(monkeypatch)
+
+    code, message = restore_db.run(str(tmp_path / "resp.db"), str(tmp_path / "out" / "bot.db"))
+
+    monkeypatch.undo()
+    assert code == restore_db.EXIT_OK, message
+    assert count(tmp_path / "out" / "bot.db") == 5  # los datos llegaron enteros
+    assert any("immutable=1" in u for u in uris)  # y se leyeron por el camino de respaldo
+
+
+def test_the_immutable_fallback_is_not_used_when_a_wal_with_content_sits_next_to_the_file(
+    tmp_path, monkeypatch,
+):
+    make_minerva_db(tmp_path / "resp.db", rows=5)
+    (tmp_path / "resp.db-wal").write_bytes(b"cambios confirmados que immutable ignoraria")
+    uris = patch_read_only_medium(monkeypatch)
+
+    code, message = restore_db.run(str(tmp_path / "resp.db"), str(tmp_path / "out" / "bot.db"))
+
+    monkeypatch.undo()
+    assert code == restore_db.EXIT_INVALID and "rechazado" in message
+    assert not any("immutable=1" in u for u in uris)  # nunca leyo datos viejos en silencio
+    assert not (tmp_path / "out" / "bot.db").exists()
+
+
+def test_the_immutable_fallback_is_not_used_for_unrelated_errors_like_a_locked_database(
+    tmp_path, monkeypatch,
+):
+    make_minerva_db(tmp_path / "resp.db", rows=5)
+    uris = patch_read_only_medium(monkeypatch, message="database is locked")
+
+    code, _message = restore_db.run(str(tmp_path / "resp.db"), str(tmp_path / "out" / "bot.db"))
+
+    monkeypatch.undo()
+    assert code == restore_db.EXIT_INVALID
+    assert not any("immutable=1" in u for u in uris)  # con un escritor podria leer a medias
