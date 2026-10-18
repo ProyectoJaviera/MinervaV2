@@ -27,7 +27,10 @@ STATUS_NO_DATA = "NO_DATA"
 STATUS_STALE = "STALE"
 
 CONTEXT_TITLE_CHARS = 160
-MACRO_WINDOW = timedelta(hours=72)
+# Los comunicados de la Fed son escasos (un FOMC cada ~6 semanas): con 72 h el bloque macro estaria
+# casi siempre vacio. 14 dias deja ver el ultimo comunicado/acta vigente; cada titular lleva su edad
+# (`minutes_ago`) para que el modelo la pese.
+MACRO_WINDOW = timedelta(days=14)
 MACRO_MAX_ITEMS = 3
 LIVE_TOLERANCE = timedelta(minutes=5)
 

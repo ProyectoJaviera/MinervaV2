@@ -80,6 +80,22 @@ async def test_headlines_split_into_asset_market_and_macro_with_attribution(db):
     json.dumps(ctx)  # serializable tal cual
 
 
+async def test_macro_headlines_use_a_two_week_window_unlike_the_24_hour_asset_news(db):
+    for n, days in ((1, 1), (2, 10), (3, 15)):
+        await news_repo.insert_item(db, record(
+            n, source=FED_MONETARY, assets=(), published=AS_OF - timedelta(days=days),
+            title=f"Comunicado de la Fed {n}",
+        ))
+    await news_repo.insert_item(db, record(4, published=AS_OF - timedelta(days=10)))  # GDELT viejo
+
+    ctx = (await build(db)).context
+
+    assert [h["title"] for h in ctx["macro_headlines"]] == [
+        "Comunicado de la Fed 1", "Comunicado de la Fed 2"]  # la de 15 dias ya no
+    assert ctx["macro_headlines"][1]["minutes_ago"] == 10 * 24 * 60  # lleva su edad
+    assert ctx["asset_headlines"] == []  # el titular de GDELT de hace 10 dias esta fuera de 24 h
+
+
 async def test_attribution_only_lists_the_sources_that_contributed(db):
     await news_repo.insert_item(db, record(1))
 

@@ -79,7 +79,8 @@ class NewsCollector:
         self._symbols = symbols_provider or (lambda: universe_repo.get_included_symbols(db))
         self._stop = asyncio.Event()
         self._last_prune: datetime | None = None
-        self._recent: list[tuple[int, frozenset[str]]] = []
+        # (id, tokens del titular, instante de publicacion o, si falta, de descarga)
+        self._recent: list[tuple[int, frozenset[str], datetime]] = []
 
     def stop(self) -> None:
         self._stop.set()
@@ -281,7 +282,10 @@ class NewsCollector:
 
     async def _load_recent(self, now: datetime) -> None:
         rows = await news_repo.get_recent_originals(self.db, now - DEDUP_WINDOW)
-        self._recent = [(r.id, title_tokens(r.title)) for r in rows if r.id is not None]
+        self._recent = [
+            (r.id, title_tokens(r.title), r.published_at or r.fetched_at)
+            for r in rows if r.id is not None
+        ]
 
     async def _store_headlines(
         self, source: NewsSource, items: list[parsers.ParsedItem], now: datetime,
@@ -303,7 +307,17 @@ class NewsCollector:
             # el cuerpo del articulo). `query_tag` se guarda aparte, como dato de procedencia.
             assets = extract_assets(title)
             score = sentiment.score_headline(title)
-            duplicate_of = find_near_duplicate(tokens, self._recent)
+            # Casi duplicado = mismo titular publicado con pocas horas de diferencia (una noticia
+            # replicada por varios medios). Dos comunicados con el mismo titulo pero publicados
+            # con semanas de diferencia ("Federal Reserve issues FOMC statement") son hechos
+            # distintos, aunque se descarguen juntos en la primera carga.
+            when = published or now
+            candidates = [
+                (candidate_id, candidate_tokens)
+                for candidate_id, candidate_tokens, candidate_when in self._recent
+                if abs(when - candidate_when) <= DEDUP_WINDOW
+            ]
+            duplicate_of = find_near_duplicate(tokens, candidates)
             record = NewsRecord(
                 source=source.id, fetched_at=now, published_at=published,
                 domain=item.domain or domain_of(canonical), title=title, url=canonical,
@@ -317,7 +331,7 @@ class NewsCollector:
                 continue
             stored += 1
             if duplicate_of is None:
-                self._recent.append((new_id, tokens))
+                self._recent.append((new_id, tokens, when))
         return stored
 
     async def _maybe_prune(self, now: datetime) -> None:

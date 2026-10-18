@@ -171,6 +171,68 @@ async def test_a_full_cycle_stores_clean_tagged_and_deduplicated_headlines(db):
     assert sleeps == [10.0, 10.0, 10.0]
 
 
+def fed_feed(*items: tuple[str, str, str]) -> str:
+    body = "".join(
+        f"<item><title>{title}</title><link>{link}</link><pubDate>{pub}</pubDate></item>"
+        for title, link, pub in items
+    )
+    return (
+        '<?xml version="1.0" encoding="utf-8"?><rss version="2.0"><channel>' + body
+        + "</channel></rss>"
+    )
+
+
+async def test_the_same_title_published_weeks_apart_is_a_different_event_not_a_duplicate(db):
+    """Regresion hallada con el RSS real de la Fed: 'Federal Reserve issues FOMC statement' sale
+    en abril, junio, julio y septiembre. En la primera carga se descargan todos juntos, pero solo
+    es un casi duplicado lo que se PUBLICO con pocas horas de diferencia."""
+    title = "Federal Reserve issues FOMC statement"
+    internet = FakeInternet()
+    internet.fed = lambda request: httpx.Response(200, content=fed_feed(
+        (title, "https://www.federalreserve.gov/sep.htm", "Wed, 16 Sep 2026 18:00:00 GMT"),
+        (title, "https://www.federalreserve.gov/jul.htm", "Wed, 29 Jul 2026 18:00:00 GMT"),
+        (title, "https://www.federalreserve.gov/jul-bis.htm", "Wed, 29 Jul 2026 20:00:00 GMT"),
+        (title, "https://www.federalreserve.gov/jun.htm", "Wed, 17 Jun 2026 18:00:00 GMT"),
+    ).encode("utf-8"))
+    coll, _, _ = make_collector(db, internet)
+
+    await coll.run_once()
+
+    rows = await db.fetch_all(
+        "SELECT url, published_at, dup_of FROM news_items WHERE source = 'fed_monetary' "
+        "ORDER BY id"
+    )
+    by_url = {r["url"].rsplit("/", 1)[1]: r for r in rows}
+    assert by_url["sep.htm"]["dup_of"] is None
+    assert by_url["jul.htm"]["dup_of"] is None
+    assert by_url["jun.htm"]["dup_of"] is None
+    assert by_url["jul-bis.htm"]["dup_of"] is not None  # 2 h despues del de julio: replica
+
+
+async def test_a_duplicate_is_found_against_what_was_stored_in_a_previous_cycle(db):
+    title = "Bitcoin ETF approval sparks massive rally across crypto markets"
+    internet = FakeInternet()
+    clock = Clock()
+    coll, _, _ = make_collector(db, internet, clock=clock)
+    internet.gdelt = lambda request: httpx.Response(200, text=json.dumps({"articles": [
+        gdelt_article("https://one.test/a", title, seen="20261101T110000Z"),
+    ]}))
+    await coll.run_once()
+
+    clock.now = NOW + timedelta(hours=2)
+    internet.gdelt = lambda request: httpx.Response(200, text=json.dumps({"articles": [
+        gdelt_article("https://two.test/b", title + " today", seen="20261101T120000Z"),
+        gdelt_article("https://three.test/c", title, seen="20261030T080000Z"),  # 2 dias antes
+    ]}))
+    await coll.run_once()
+
+    rows = await db.fetch_all("SELECT url, dup_of FROM news_items WHERE source = 'gdelt'")
+    by_host = {r["url"].split("//")[1].split(".")[0]: r["dup_of"] for r in rows}
+    assert by_host["one"] is None
+    assert by_host["two"] is not None  # misma noticia, 1 h despues
+    assert by_host["three"] is None  # mismo titular pero publicado >48 h antes: otro hecho
+
+
 async def test_requests_go_only_to_the_verified_hosts_with_our_user_agent(db):
     internet = FakeInternet()
     coll, _, _ = make_collector(db, internet)
