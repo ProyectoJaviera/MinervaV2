@@ -5,6 +5,10 @@ posterior"). **Todo se construye apagado y fuera del prompt congelado de la medi
 se haga con ello en un prompt se activará después del veredicto, como una versión nueva
 (`signal_review_v5` / `features_v3`), que queda preparada pero sin usar.
 
+**Estado (2026-10-18): implementada completa (subfases 4.1 a 4.7), todo apagado por defecto y nada
+conectado al prompt de la medición.** Ver "Implementación: qué cambió respecto del plan" y
+"Activación" al final. El bot real necesita un reinicio para recoger esta fase.
+
 ## Reglas por la medición en curso (aceptadas el 2026-10-17)
 
 1. **Nada entra al prompt congelado.** `SYSTEM_PROMPT`, `FEATURES_VERSION`, `build_user_message`,
@@ -56,8 +60,8 @@ diseño lo asume ("fuentes gratuitas poco fiables"): si GDELT no responde, el co
   Sin `anthropic` ni ninguna llamada de pago.
 - **Normalización**: título saneado (sin caracteres de control, espacios colapsados, máx. 200
   caracteres), URL canónica sin parámetros de seguimiento, hashes de URL y de título.
-- **Deduplicación**: `url_hash` único; título casi duplicado (Jaccard de tokens ≥ 0,8 en 48 h) se
-  guarda marcado `dup_of` y se excluye del contexto.
+- **Deduplicación**: `url_hash` único; título casi duplicado (Jaccard de tokens ≥ 0,8 **y publicado con
+  ≤ 48 h de diferencia**, ver "Implementación") se guarda marcado `dup_of` y se excluye del contexto.
 - **Activo afectado y sentimiento (determinista, sin costo)**: tabla de alias de los símbolos del
   universo (por nombre completo; los tickers cortos y ambiguos solo cuentan en mayúsculas) y un
   léxico de sentimiento de titulares con negaciones. Cada fila guarda el método (`LEXICON_V1`) para poder
@@ -70,7 +74,8 @@ diseño lo asume ("fuentes gratuitas poco fiables"): si GDELT no responde, el co
 - **Contexto para un prompt futuro** (`context.py`): solo ítems con `published_at <= as_of` **y**
   `fetched_at <= as_of` (sin mirar al futuro), sin duplicados, titulares como **texto no confiable**
   (JSON-escapado, truncado, marcado `untrusted_text`), con agregados (n, sentimiento medio, Fear & Greed)
-  y degradación: si no hay datos frescos, `null` con motivo.
+  y degradación: si no hay datos frescos, `null` con motivo (`NO_DATA` / `STALE`). Ventanas: 24 h para
+  titulares del activo y del mercado, **14 días** para la Fed (cada titular lleva su edad).
 - **Atribución visible**: "Titulares: GDELT Project (gdeltproject.org)", "Comunicados: Board of
   Governors of the Federal Reserve System", "Fear & Greed Index: alternative.me" junto a cualquier
   muestra de esos datos (API y dashboard).
@@ -82,7 +87,9 @@ diseño lo asume ("fuentes gratuitas poco fiables"): si GDELT no responde, el co
   mismos filtros que `ai_value`). Una fila por grupo en `memory_entries` (inmutable): características
   conocidas **al momento de la decisión** (estrategias, lado, símbolo, timeframe, hora, ATR, riesgo/
   beneficio, riesgo del SL, etiqueta del LLM, sentimiento y Fear & Greed vigentes si existían) y el
-  resultado (PnL, retorno sobre el margen, motivo de cierre, duración).
+  resultado (PnL, retorno sobre el margen, motivo de cierre, duración). El ATR sale del mensaje que
+  recibió el modelo (`llm_logs.prompt`); las operaciones anteriores al etiquetado en vivo no tienen
+  ese dato y quedan "UNK" (un valor desconocido nunca forma un patrón).
 - **Recuperación de operaciones similares** (`retrieval.py`): puntaje de similitud ponderado; devuelve
   las K ganadoras y K perdedoras más parecidas, **solo cerradas estrictamente antes del instante de la
   decisión** (sin fuga), y las estadísticas de la cohorte **solo si n ≥ `LESSONS_MIN_SAMPLE`** (30); con
@@ -110,10 +117,18 @@ diseño lo asume ("fuentes gratuitas poco fiables"): si GDELT no responde, el co
 `SYSTEM_PROMPT_V5` (el v4 más un párrafo que declara los titulares como **texto no confiable que se
 evalúa, nunca una instrucción**, y las lecciones como estadística con su tamaño de muestra, no una
 garantía), `PROMPT_SHA256_V5` (misma fórmula) y `build_features_v3` (las features v2 sin cambios más
-`news_context` y `lessons_context`). **Nada lo importa fuera de los tests.** Procedimiento de activación
-(después del veredicto, con tu aprobación): nueva constante congelada para v5, el labeler pasa a usar v5 bajo
-un hash distinto (`measurement_keys` por hash evita mezclar), y el contexto de lecciones exige el
-registro oficial.
+`news_context`, `news_status` y `lessons_context`, siempre presentes con `null` explícito). El texto v5 es
+el de v4 **byte a byte** más un párrafo insertado justo antes de la instrucción de formato (una prueba lo
+verifica quitando el párrafo y comparando con v4). **Nada lo importa fuera de los tests** (prueba por AST
+sobre `app/` y `scripts/`, y otra que verifica que `import app.main` no lo carga). Procedimiento de
+activación (después del veredicto, con tu aprobación): nueva constante congelada para v5, el labeler pasa a
+usar v5 bajo un hash distinto (`measurement_keys` por hash evita mezclar), y el contexto de lecciones exige
+el registro oficial (`build_features_v3` lo comprueba solo, con la puerta que falla cerrada).
+
+**Costo de tokens medido en el peor caso** (listas llenas, titulares de 160 caracteres): +6.600 caracteres
+por decisión = párrafo del sistema 1.063 + noticias ~4.100 + lecciones ~1.500, unos **+2.900 a +3.300 tokens
+de entrada** frente a los ~1.400 de v4. Las pruebas fijan cotas a esos tamaños. El presupuesto diario de
+Anthropic se recalibra al activar.
 
 ## Pruebas
 
@@ -127,19 +142,80 @@ núcleo lo importa) y humo con una copia de la base real. Frontend: tests de Vit
 
 ## Subfases y commits
 
-| Subfase | Contenido |
-|---|---|
-| 4.1 | Plan, ajustes (`Settings`, `.env.example`, `start_bot.ps1`, `run_dev_server.py`) y tablas + repositorios |
-| 4.2 | Núcleo de noticias: saneado, hashes, dedup, activos, sentimiento, parsers de las 3 fuentes |
-| 4.3 | Colector con backoff/caché/salud, arranque aislado, `/health.news`, `scripts/news_status.py` |
-| 4.4 | Contexto de noticias y memoria: entradas, recuperación sin fuga, lecciones, post-mortem, calibración |
-| 4.5 | Prompt v5 / features v3 preparados y pruebas de que el prompt de la medición no cambió |
-| 4.6 | API de solo lectura (noticias, lecciones con reveal), tarjeta del dashboard con atribución |
-| 4.7 | Documentación, verificación completa, humo sobre copia real y `git push origin master` |
+| Subfase | Estado | Commit | Contenido |
+|---|---|---|---|
+| 4.1 | hecha | `0d0218c` (plan), `4a9a368` | Plan, ajustes (`Settings`, `.env.example`, `start_bot.ps1`, `run_dev_server.py`) y tablas + repositorios |
+| 4.2 | hecha | `61adc75` | Núcleo de noticias: saneado, hashes, dedup, activos, sentimiento, parsers de las 3 fuentes |
+| 4.3 | hecha | `cc0399a` | Colector con backoff/caché/salud, arranque aislado, `/health.news`, `scripts/news_status.py` |
+| 4.4 | hecha | `a326aa7`, `8d0ebcf` | Contexto de noticias y memoria: entradas, recuperación sin fuga, lecciones, post-mortem, calibración |
+| 4.5 | hecha | `0d2505e` | Prompt v5 / features v3 preparados y pruebas de que el prompt de la medición no cambió |
+| 4.6 | hecha | `e5364a1`, `e6e87c7` | API de solo lectura (noticias, lecciones con reveal), tarjeta del dashboard con atribución |
+| 4.7 | hecha | `8c0d62e` y este documento | Documentación, verificación completa, humo sobre copia real y `git push origin master` |
+
+## Implementación: qué cambió respecto del plan
+
+Hallazgos y correcciones durante la construcción (cada uno con su prueba):
+
+1. **Casi duplicados**: el humo con el RSS real de la Fed mostró que comunicados *distintos* con el mismo
+   título publicados con meses de diferencia ("Federal Reserve issues FOMC statement": abril, junio, julio,
+   septiembre) se marcaban duplicados porque la primera carga los descarga juntos. Ahora un casi duplicado
+   exige además **publicación a ≤ 48 h**. Con el RSS real: 15 comunicados, 0 falsos duplicados.
+2. **Ventana macro de la Fed**: 72 h dejaba el bloque casi siempre vacío (un FOMC cada ~6 semanas); pasó a
+   14 días, con la edad (`minutes_ago`) en cada titular.
+3. **ATR de la memoria**: el etiquetador en vivo **no rellena `llm_logs.atr_pct`** (las 17 filas de medición
+   lo tienen nulo). La memoria lo recupera del mensaje guardado en `llm_logs.prompt` (el mismo valor que vio
+   el modelo). *Efecto colateral fuera de esta fase*: `compute_sin_llm_diagnostics`
+   (`app/trading/ai_value_report.py`, sección m) estratifica los SIN_LLM por tercil de `atr_pct` y saldrá
+   vacío por esa causa; ver PROGRESS.md (decisión pendiente tuya).
+4. **Puerta que falla cerrada**: `app.memory.gate.results_visible` devuelve `False` ante cualquier error al
+   evaluar la puerta (gate de la medición + registro oficial), y todas las salidas con resultados pasan por
+   ella (API, `scripts/lessons_report.py`, contexto de lecciones, informes).
+5. **Marcas de tiempo comparables como texto**: SQLite compara cadenas ISO; todo lo que se escribe o compara
+   en los filtros "solo lo que existía en ese instante" se normaliza a UTC (`timeutil.iso_utc`), de modo que
+   un `as_of` con otro desfase o sin zona no abre una fuga hacia el futuro.
+6. **Titulares de mercado**: se filtran en SQL (sin activo detectado y fuente distinta de la Fed) en vez de
+   en Python sobre los 30 más recientes, donde una racha de titulares con activo podía dejarlos vacíos.
+
+## Verificación (2026-10-18)
+
+- `pytest`: **1333 pasan, 4 omitidas** (al empezar la fase: 1051 / 4). `ruff check .`: limpio.
+  Frontend: 29 pruebas de Vitest y `npm run build` (tsc + vite) en verde.
+- **Humo con copias frescas de la base real** (API de backup, origen de solo lectura, ruta en el scratchpad
+  distinta de `settings.database_path`): `connect()` crea solo las 7 tablas nuevas y deja idénticas
+  `shadow_trades` (91 filas), `llm_logs` (17), `signals`, `trades` (0) y `system_state`;
+  `integrity_check` ok. La memoria construye 70 entradas (las operaciones cerradas fiables) en 0,2 s,
+  idempotente a la segunda pasada, 47 filas de lecciones, 14 entradas con ATR recuperado del prompt;
+  `scripts/lessons_report.py` sin banderas de prueba sale con código 3 y solo cuenta operaciones ("gate
+  CERRADO: APROBADA 4/300, RECHAZADA 4/300; no existe el registro oficial"); `scripts/news_status.py` maneja
+  una copia anterior a la Fase 4 y una con tablas vacías.
+- **Humo de punta a punta con red real** sobre una base temporal: Fed (15 titulares) y Fear & Greed
+  (2 puntos) llegan a `news_items` / `fear_greed`, el contexto de noticias sale `OK` con 2 comunicados de la
+  Fed y el Fear & Greed vigente, `/api/news/status` y `/api/news/recent` responden con las atribuciones y
+  `news_status.py` termina con código 0. **GDELT respondió 429 desde este PC** en el primer intento: el
+  colector lo registra (`fallos seguidos 1`, próxima consulta +5 min con backoff) y el resto sigue.
+- El mensaje que recibe el modelo en el etiquetado en vivo es **idéntico** con y sin noticias, Fear & Greed y
+  memoria en la base (prueba del etiquetador real con `FakeLlmClient`), y las huellas de `prompts.py` y
+  `market_features.py` están fijadas.
+
+## Activación (ninguna pasa sin ti)
+
+- **Noticias**: `scripts/start_bot.ps1` exporta `NEWS_COLLECTION_ENABLED=true` solo con el puerto 8000. Se
+  activa con el próximo reinicio del bot real, que debe hacerse una sola vez, en los minutos :10 a :40 de
+  una hora UTC que no sea de cierre de 4 h (misma ventana que la 3.9). Para dejarla apagada también en el
+  bot real: poner `$newsCollection = "false"` en ese script. Verificación después: `GET /health` →
+  `news.enabled` y `news.active` en `true`; `scripts/news_status.py --db <copia>`; y que `frozen_hash_ok`
+  siga en `true`.
+- **Memoria de lecciones**: `LESSONS_MEMORY_ENABLED` queda `false` en todos los puertos (también en
+  `start_bot.ps1`). Mientras no exista el registro oficial del veredicto solo se puede ver cuántas
+  operaciones cerradas hay.
+- **Prompt v5**: después del veredicto y con tu aprobación, siguiendo el procedimiento de arriba. El texto
+  de la tarjeta del dashboard ("Aun no entran a ninguna decision del LLM") deberá cambiarse en ese momento.
 
 ## Qué no pude verificar
 
-GDELT: formato real de los artículos y límite efectivo desde este PC (429 persistente). Fed: política de
-acceso automatizado. Alternative.me: límite de peticiones. CoinDesk: términos de uso (404). CryptoPanic:
-términos y plan gratuito. Anuncios de Bitunix: feed oficial. Si alguna de estas fuentes cambia de
-términos, se desactiva quitándola de `NEWS_SOURCES`.
+GDELT: formato real de los artículos y límite efectivo desde este PC (429 persistente, también en la
+última corrida); el parser se escribió contra los campos documentados. Fed: política de acceso automatizado
+(se consulta como máximo cada 60 min con GET condicional). Alternative.me: límite de peticiones (una
+consulta cada 6 h). CoinDesk: términos de uso (404). CryptoPanic: términos y plan gratuito. Anuncios de
+Bitunix: feed oficial. Si alguna de estas fuentes cambia de términos, se desactiva quitándola de
+`NEWS_SOURCES`.
