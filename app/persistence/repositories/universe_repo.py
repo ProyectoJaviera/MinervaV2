@@ -68,3 +68,29 @@ async def get_latest_snapshot(db: Database) -> list[AssetUniverseEntry]:
 
 async def get_included_symbols(db: Database) -> list[str]:
     return [e.symbol for e in await get_latest_snapshot(db) if e.included]
+
+
+async def get_included_history(
+    db: Database, limit_snapshots: int = 30,
+) -> list[tuple[datetime, frozenset[str]]]:
+    """Los ultimos `limit_snapshots` snapshots como (instante, simbolos incluidos), del mas VIEJO
+    al mas nuevo. Un snapshot sin ningun incluido aparece con el conjunto vacio."""
+    time_rows = await db.fetch_all(
+        "SELECT DISTINCT refreshed_at FROM asset_universe ORDER BY refreshed_at DESC LIMIT ?",
+        (limit_snapshots,),
+    )
+    stamps = [r["refreshed_at"] for r in time_rows]
+    if not stamps:
+        return []
+    placeholders = ", ".join("?" for _ in stamps)
+    rows = await db.fetch_all(
+        f"SELECT refreshed_at, symbol FROM asset_universe WHERE included = 1 "  # noqa: S608
+        f"AND refreshed_at IN ({placeholders})",
+        tuple(stamps),
+    )
+    included: dict[str, set[str]] = {stamp: set() for stamp in stamps}
+    for row in rows:
+        included[row["refreshed_at"]].add(row["symbol"])
+    return [
+        (datetime.fromisoformat(stamp), frozenset(included[stamp])) for stamp in reversed(stamps)
+    ]

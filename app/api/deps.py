@@ -39,3 +39,18 @@ def get_news_collector(request: Request) -> NewsCollector | None:
 def get_paper_arm(request: Request) -> PaperExecutionArm | None:
     """El brazo ejecutado de la cuenta paper (subfase 3.9); `None` si el proceso no lo creo."""
     return getattr(request.app.state, "paper_execution", None)
+
+
+def get_scheduler_or_none(request: Request) -> Scheduler | None:
+    """El scheduler si el proceso lo tiene; `None` en una app minima (pruebas)."""
+    return getattr(request.app.state, "scheduler", None)
+
+
+def get_paper_backend(request: Request):
+    """El `PaperBackend` de la cuenta paper; `None` en una app sin el (p.ej. pruebas)."""
+    return getattr(request.app.state, "paper_backend", None)
+
+
+def get_monitor(request: Request):
+    """El `PositionMonitor` (sus `marks` son los precios en vivo); `None` si no esta."""
+    return getattr(request.app.state, "monitor", None)

@@ -87,6 +87,94 @@ def trade_to_public_dict(trade: Trade, *, reveal_outcome: bool) -> dict:
     return data
 
 
+# --- Fase 5: vista de la cuenta paper del dashboard (`/api/account`) ---------------------------
+#
+# Misma regla que `trade_to_public_dict`, con UNA diferencia pedida para el dashboard: la hora de
+# cierre (`closed_at`) se ve siempre ("posiciones abiertas y cerradas con simbolo, lado, estrategia,
+# niveles y horas"). Sugiere cuanto duro la operacion pero no su resultado. El precio de salida, el
+# motivo de cierre, el PnL, los costos y el resto de lo que revela un resultado NO viajan en el
+# JSON mientras `is_outcome_reveal_allowed` sea falso.
+_ACCOUNT_TRADE_VISIBLE_FIELDS = (*_TRADE_ALWAYS_VISIBLE_FIELDS, "closed_at")
+_ACCOUNT_TRADE_OUTCOME_FIELDS = tuple(f for f in _TRADE_OUTCOME_FIELDS if f != "closed_at")
+
+
+def account_trade_to_dict(trade: Trade, *, reveal_outcome: bool) -> dict:
+    data = {
+        field: _serialize_value(getattr(trade, field)) for field in _ACCOUNT_TRADE_VISIBLE_FIELDS
+    }
+    if reveal_outcome:
+        data.update({
+            field: _serialize_value(getattr(trade, field))
+            for field in _ACCOUNT_TRADE_OUTCOME_FIELDS
+        })
+    return data
+
+
+# --- Fase 5: registro del brazo ejecutado y rechazos de riesgo ------------------------------------
+#
+# `paper_execution_log.details_json` y `risk_rejections.details_json` guardan los valores exactos
+# que motivaron la decision. Casi todos son estructura (cupos, tamanos minimos, retrasos), pero
+# algunos son numeros derivados de RESULTADOS: `MARGIN_UNAVAILABLE` guarda el `equity`. Por eso
+# los detalles pasan por una lista BLANCA de claves: una clave nueva no sale hasta agregarla aqui.
+ARM_DETAIL_KEYS = frozenset({
+    "decision_delay_s", "limit_s", "symbol", "price", "qty", "qty_floored", "min_trade_volume",
+    "base_precision", "message", "error_type", "entry_delay_s", "shadow_entry_price",
+    "executed_entry_price", "adverse_gap_bps", "margin_usdt", "open", "limit",
+    "same_direction_open", "sl_margin_loss_pct", "cap_pct", "eligible", "until",
+    "max_drawdown_pct", "max_daily_loss_pct", "ws_stale_after_seconds", "committed_total",
+    "resolved_at_startup",
+})
+_MAX_DETAIL_TEXT = 200
+
+
+def _safe_detail_value(value):
+    if isinstance(value, str):
+        return value[:_MAX_DETAIL_TEXT]
+    if isinstance(value, bool | int | float) or value is None:
+        return value
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return [item[:_MAX_DETAIL_TEXT] for item in value[:20]]
+    return None
+
+
+def safe_arm_details(details: dict | None) -> dict:
+    """Solo las claves de la lista blanca, con valores simples (nunca estructuras anidadas)."""
+    if not isinstance(details, dict):
+        return {}
+    return {
+        key: _safe_detail_value(value) for key, value in details.items() if key in ARM_DETAIL_KEYS
+    }
+
+
+def arm_entry_to_dict(entry) -> dict:
+    """Una fila de `paper_execution_log` (`PaperExecutionEntry`) para el dashboard."""
+    return {
+        "id": entry.id,
+        "created_at": _serialize_value(entry.created_at),
+        "resolved_at": _serialize_value(entry.resolved_at),
+        "symbol": entry.symbol,
+        "side": entry.side,
+        "strategy": entry.strategy,
+        "decision_delay_s": entry.decision_delay_s,
+        "outcome": entry.outcome,
+        "reason": entry.reason,
+        "trade_id": entry.trade_id,
+        "details": safe_arm_details(entry.details),
+    }
+
+
+def rejection_to_dict(rejection) -> dict:
+    """Un rechazo del motor de riesgo SIN sus detalles (pueden traer el equity)."""
+    return {
+        "id": rejection.id,
+        "created_at": _serialize_value(rejection.created_at),
+        "symbol": rejection.symbol,
+        "side": _serialize_value(rejection.side),
+        "strategy": rejection.strategy,
+        "reason": rejection.reason,
+    }
+
+
 def _serialize_value(value):
     if isinstance(value, datetime):
         return value.isoformat()

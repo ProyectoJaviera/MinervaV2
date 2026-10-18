@@ -18,15 +18,20 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import (
+    account,
+    arm,
     auth,
+    backtest,
     health,
     llm_decisions,
     measurement,
     memory,
     news,
     positions,
+    risk,
     shadow_trades,
     trades,
+    universe,
 )
 from app.api.security import warn_if_jwt_secret_is_unsafe
 from app.config import settings
@@ -194,6 +199,13 @@ app.include_router(llm_decisions.router)
 app.include_router(shadow_trades.router)
 app.include_router(news.router)
 app.include_router(memory.router)
+# Fase 5: vistas de solo lectura del dashboard (cuenta paper, brazo ejecutado, riesgo, universo y
+# veredictos de backtest). Todas con login; los resultados de la cuenta pasan por la puerta.
+app.include_router(account.router)
+app.include_router(arm.router)
+app.include_router(risk.router)
+app.include_router(universe.router)
+app.include_router(backtest.router)
 
 # Subfase D (plan pre-Fase 5 aprobado 2026-10-14): el build estatico del
 # dashboard (`npm --prefix frontend run build`), si existe. Montado AL FINAL

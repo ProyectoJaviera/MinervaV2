@@ -199,6 +199,22 @@ async def get_trades(db: Database, limit: int = 100) -> list[Trade]:
     return [row_to_trade(r) for r in rows]
 
 
+async def get_closed_trades(db: Database, limit: int = 100) -> list[Trade]:
+    """Las operaciones CERRADAS mas recientes primero (por hora de cierre)."""
+    rows = await db.fetch_all(
+        "SELECT * FROM trades WHERE status = 'CLOSED' "
+        "ORDER BY COALESCE(closed_at, opened_at) DESC, id DESC LIMIT ?",
+        (limit,),
+    )
+    return [row_to_trade(r) for r in rows]
+
+
+async def count_closed(db: Database) -> int:
+    """Cuantas operaciones cerradas hay (un conteo: no lee PnL)."""
+    row = await db.fetch_one("SELECT COUNT(*) AS n FROM trades WHERE status = 'CLOSED'")
+    return int(row["n"])
+
+
 async def get_trade(db: Database, trade_id: int) -> Trade | None:
     row = await db.fetch_one("SELECT * FROM trades WHERE id = ?", (trade_id,))
     return row_to_trade(row) if row else None

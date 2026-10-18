@@ -48,11 +48,22 @@ async def get_rejections(
 ) -> list[RiskRejection]:
     if reason:
         rows = await db.fetch_all(
-            "SELECT * FROM risk_rejections WHERE reason = ? ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM risk_rejections WHERE reason = ? "
+            "ORDER BY created_at DESC, id DESC LIMIT ?",
             (reason, limit),
         )
     else:
         rows = await db.fetch_all(
-            "SELECT * FROM risk_rejections ORDER BY created_at DESC LIMIT ?", (limit,)
+            "SELECT * FROM risk_rejections ORDER BY created_at DESC, id DESC LIMIT ?", (limit,)
         )
     return [_row_to_rejection(r) for r in rows]
+
+
+async def count_by_reason_since(db: Database, since: datetime) -> dict[str, int]:
+    """Rechazos desde `since` agrupados por motivo (solo conteos: no lee los detalles)."""
+    rows = await db.fetch_all(
+        "SELECT reason, COUNT(*) AS n FROM risk_rejections WHERE created_at >= ? "
+        "GROUP BY reason ORDER BY n DESC",
+        (since.isoformat(),),
+    )
+    return {r["reason"]: r["n"] for r in rows}
