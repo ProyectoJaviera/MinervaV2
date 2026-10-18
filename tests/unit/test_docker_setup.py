@@ -285,33 +285,52 @@ def test_the_compose_publishes_the_port_only_on_loopback():
         assert str(entry).endswith(":8000")  # el puerto interno de la imagen
 
 
-def test_the_compose_keeps_secrets_out_of_the_file_and_reads_them_from_the_env_file():
+def test_the_compose_keeps_secrets_out_of_the_file_and_mounts_the_env_file_read_only():
     service = _service()
 
-    assert service["env_file"] == ["${MINERVA_ENV_FILE:-.env}"]
     secret_like = re.compile(r"TOKEN|SECRET|PASSWORD|API_KEY|HASH|CHAT_ID", re.IGNORECASE)
     assert [k for k in service["environment"] if secret_like.search(k)] == []
+    mounts = [v for v in service["volumes"] if isinstance(v, dict)]
+    env_mount = next(m for m in mounts if m["target"] == "/app/.env")
+    assert env_mount["type"] == "bind" and env_mount["source"] == "${MINERVA_ENV_FILE:-.env}"
+    assert env_mount["read_only"] is True
+
+
+def test_the_compose_never_uses_env_file_because_compose_mangles_bcrypt_hashes():
+    # Hallazgo de la prueba real (Fase 7): Compose interpola los `$` de un env_file y el hash
+    # bcrypt de AUTH_PASSWORD_HASH (`$2b$12$...`) llegaba al contenedor de 56 caracteres en vez de
+    # 60: el login del dashboard fallaba con la contrasena correcta. El `.env` se monta y lo lee la
+    # aplicacion con el mismo analizador que en modo nativo.
+    assert "env_file" not in _service()
+
+
+def test_the_compose_restarts_unless_stopped_by_default():
+    # El bot real corre aqui tras la mudanza: vuelve solo tras reiniciar Docker o el PC, salvo que
+    # alguien lo haya detenido a mano. Las instancias de prueba pasan MINERVA_RESTART=no.
+    assert _service()["restart"] == "${MINERVA_RESTART:-unless-stopped}"
 
 
 def test_the_compose_uses_named_volumes_for_data_and_logs_never_the_hosts_folders():
     service = _service()
-    volumes = [str(v) for v in service["volumes"]]
+    strings = [str(v) for v in service["volumes"] if isinstance(v, str)]
 
-    assert "data:/app/data" in volumes and "logs:/app/logs" in volumes
+    assert "data:/app/data" in strings and "logs:/app/logs" in strings
     assert set(_compose()["volumes"]) == {"data", "logs"}
     # Ningun montaje de carpeta del host sobre los datos: abriria la base real de data/ (y SQLite
-    # WAL no es fiable sobre el sistema de archivos compartido de Docker Desktop).
-    host_binds = [v for v in volumes if v.startswith(("./", "../", "/", "~"))]
+    # WAL no es fiable sobre el sistema de archivos compartido de Docker Desktop). Las UNICAS
+    # rutas del host son docs/ (solo lectura) y el archivo de credenciales (solo lectura).
+    host_binds = [v for v in strings if v.startswith(("./", "../", "/", "~"))]
     assert host_binds == ["./docs:/app/docs:ro"]
+    binds = [v for v in service["volumes"] if isinstance(v, dict) and v["type"] == "bind"]
+    assert [b["target"] for b in binds] == ["/app/.env"]
+    assert all(b["read_only"] is True for b in binds)
 
 
-def test_the_compose_hardens_the_container_and_does_not_restart_by_default():
+def test_the_compose_hardens_the_container():
     service = _service()
 
     assert service["cap_drop"] == ["ALL"]
     assert "no-new-privileges:true" in service["security_opt"]
-    # no levanta un segundo bot al iniciar Docker
-    assert service["restart"] == "${MINERVA_RESTART:-no}"
     assert service["init"] is True
     assert str(service["stop_grace_period"]).endswith("s")
     assert service["logging"]["options"]["max-size"]  # los logs de Docker no crecen sin limite
@@ -360,7 +379,20 @@ def test_the_final_image_runs_as_an_unprivileged_user_and_never_switches_back_to
     assert "USER root" not in " ".join(lines)
     assert any("useradd" in line and "--uid" in line for line in runtime)
     # /app/data y /app/logs nacen con su dueno: un volumen nuevo hereda ese dueno.
-    assert any("chown -R minerva:minerva /app" in line for line in runtime)
+    assert any("chown minerva:minerva /app/data /app/logs" in line for line in runtime)
+
+
+def test_the_application_code_is_owned_by_root_and_only_data_and_logs_belong_to_the_user():
+    # Hallazgo de la prueba real (Fase 7): con `chown -R minerva /app` el proceso podia reescribir
+    # su propio codigo. Ahora solo /app/data y /app/logs son suyos.
+    lines = _dockerfile_lines()
+    runtime = lines[max(i for i, line in enumerate(lines) if line.startswith("FROM ")):]
+
+    assert not any("--chown" in line for line in runtime if line.startswith("COPY "))
+    assert not any(re.search(r"chown\s+-R", line) for line in runtime)
+    chowned = [line for line in runtime if "chown " in line]
+    assert len(chowned) == 1 and chowned[0].count("minerva:minerva") == 1
+    assert "/app/data /app/logs" in chowned[0] and "/app " not in chowned[0].split("chown")[1]
 
 
 def test_the_image_never_receives_the_env_file_nor_any_secret():
@@ -696,26 +728,29 @@ def test_docker_compose_accepts_the_file_and_resolves_the_real_bot_defaults(tmp_
 
     assert service["ports"][0]["host_ip"] == "127.0.0.1"
     assert service["ports"][0]["published"] == "8000" and service["ports"][0]["target"] == 8000
-    assert service["restart"] == "no"
+    assert service["restart"] == "unless-stopped"
     env = service["environment"]
-    assert env["TELEGRAM_BOT_TOKEN"] == "000000:FAKE"  # vino del .env FALSO
+    # el .env FALSO no entra al entorno del contenedor: se monta y lo lee la aplicacion
+    assert "TELEGRAM_BOT_TOKEN" not in env and "AUTH_PASSWORD_HASH" not in env
     for name in ("LLM_LIVE_LABELING_ENABLED", "TELEGRAM_COMMANDS_ENABLED",
                  "PAPER_EXECUTION_ENABLED", "NEWS_COLLECTION_ENABLED", "TELEGRAM_PUSH_ENABLED"):
         assert env[name] == "true", name
     assert env["LESSONS_MEMORY_ENABLED"] == "false" and env["AUTO_OPEN_WITHOUT_LLM"] == "false"
-    binds = [v for v in service["volumes"] if v["type"] == "bind"]
-    assert [(b["target"], b["read_only"]) for b in binds] == [("/app/docs", True)]
+    binds = {b["target"]: b for b in service["volumes"] if b["type"] == "bind"}
+    assert set(binds) == {"/app/docs", "/app/.env"}
+    assert all(b["read_only"] for b in binds.values())
+    assert binds["/app/.env"]["source"].endswith("fake.env")
 
 
 @pytest.mark.skipif(not _compose_cli_available(), reason="falta el CLI de docker compose")
 def test_docker_compose_applies_the_test_instance_overrides(tmp_path):
     service = _compose_config(
-        tmp_path, MINERVA_REAL_BOT="false", MINERVA_PORT="8001", MINERVA_RESTART="unless-stopped",
+        tmp_path, MINERVA_REAL_BOT="false", MINERVA_PORT="8001", MINERVA_RESTART="no",
     )["services"]["minerva"]
 
     port = service["ports"][0]
     assert port["published"] == "8001" and port["host_ip"] == "127.0.0.1"
-    assert service["restart"] == "unless-stopped"
+    assert service["restart"] == "no"
     for name in ("LLM_LIVE_LABELING_ENABLED", "TELEGRAM_COMMANDS_ENABLED",
                  "PAPER_EXECUTION_ENABLED", "NEWS_COLLECTION_ENABLED", "TELEGRAM_PUSH_ENABLED"):
         assert service["environment"][name] == "false", name

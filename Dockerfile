@@ -57,19 +57,22 @@ RUN find /tmp/extra-certs -maxdepth 1 -name '*.crt' -exec cp {} /usr/local/share
     && update-ca-certificates \
     && rm -rf /tmp/extra-certs
 
-# Usuario sin privilegios. /app/data y /app/logs nacen con su dueno: un volumen vacio hereda ese dueno.
+# Usuario sin privilegios. SOLO /app/data y /app/logs son suyos (un volumen vacio hereda ese dueno);
+# el codigo de /app pertenece a root y es de solo lectura para el: un proceso comprometido no puede
+# reescribir la aplicacion. Hallazgo de la prueba real de permisos (Fase 7): antes todo /app era del
+# usuario y el proceso podia modificar su propio codigo.
 RUN groupadd --system --gid ${APP_GID} minerva \
     && useradd --system --uid ${APP_UID} --gid minerva --home-dir /app --shell /usr/sbin/nologin minerva \
     && mkdir -p /app/data /app/logs /app/docs \
-    && chown -R minerva:minerva /app
+    && chown minerva:minerva /app/data /app/logs
 
 COPY --from=python-deps /opt/venv /opt/venv
 
 WORKDIR /app
-COPY --chown=minerva:minerva app/ ./app/
-COPY --chown=minerva:minerva scripts/ ./scripts/
-COPY --chown=minerva:minerva docker/healthcheck.py ./docker/healthcheck.py
-COPY --from=frontend --chown=minerva:minerva /frontend/dist ./frontend/dist
+COPY app/ ./app/
+COPY scripts/ ./scripts/
+COPY docker/healthcheck.py ./docker/healthcheck.py
+COPY --from=frontend /frontend/dist ./frontend/dist
 
 USER minerva
 

@@ -1,24 +1,25 @@
-# Minerva -- Docker Compose (Fase 6, docs/FASE6_PLAN.md). PAPER TRADING: nunca ordenes reales.
+# Minerva -- Docker Compose (Fase 6 y Fase 7, docs/FASE6_PLAN.md y docs/MUDANZA_DOCKER.md).
+# PAPER TRADING: nunca ordenes reales.
 #
-# ESTO NO REEMPLAZA a scripts/start_bot.ps1. Hasta la migracion al PC 24/7 el bot real corre con
-# start_bot.ps1 en el puerto 8000; NO levantes los dos a la vez (dos procesos con el mismo token de
-# Telegram, la misma clave de Anthropic y datos duplicados). El puerto 8000 publicado aqui choca a
-# proposito con el bot real: si lo levantas por error, Docker falla al enlazar el puerto ANTES de
-# arrancar el proceso.
+# Este compose es la forma de correr el bot real una vez hecha la mudanza (scripts/migrate_to_docker.ps1);
+# antes de ella el bot real corre con scripts/start_bot.ps1 en el puerto 8000. NO levantes los dos a la
+# vez (dos procesos con el mismo token de Telegram, la misma clave de Anthropic y datos duplicados). El
+# puerto 8000 publicado aqui choca a proposito con el bot nativo: si lo levantas por error, Docker falla
+# al enlazar el puerto ANTES de arrancar el proceso.
 #
 # Uso (detalle en docs/MANUAL_OPERACION.md):
-#   docker compose build
-#   docker compose up -d
-#   docker compose ps                  # STATUS debe pasar a "healthy" (hasta ~5 min la primera vez)
+#   docker compose up -d               # UN comando: construye la imagen si falta y arranca el bot
+#   docker compose ps                  # STATUS debe pasar a "healthy" (~1 min; hasta 5 la primera vez)
 #   docker compose logs -f minerva
 #
-# Variables de este archivo (todas opcionales; se pueden poner en el entorno o en el `.env`):
+# Variables de este archivo (todas opcionales; se pueden poner en el entorno):
 #   MINERVA_PORT      puerto del host (127.0.0.1). Por defecto 8000.
 #   MINERVA_REAL_BOT  true (por defecto) = los mismos interruptores que start_bot.ps1 con -Port 8000.
 #                     false = los de un puerto de prueba: SIN etiquetado del LLM, Telegram, brazo
 #                     ejecutado, noticias ni push (una instancia de prueba nunca gasta API ni compite
 #                     por el token).
-#   MINERVA_RESTART   `no` (por defecto) o `unless-stopped` (en el PC 24/7).
+#   MINERVA_RESTART   `unless-stopped` (por defecto: vuelve solo tras reiniciar Docker o el PC, salvo
+#                     que lo hayas detenido a mano) o `no` (instancias de prueba).
 #   MINERVA_ENV_FILE  archivo con las credenciales. Por defecto `.env` (fuera de la imagen).
 name: minerva
 
@@ -29,13 +30,19 @@ services:
       dockerfile: Dockerfile
     image: minerva:local
     init: true
-    # `no` por defecto: en este PC un reinicio automatico podria levantar un segundo bot al iniciar
-    # Docker. En el PC 24/7: MINERVA_RESTART=unless-stopped.
-    restart: "${MINERVA_RESTART:-no}"
-    env_file:
-      - ${MINERVA_ENV_FILE:-.env}
-    # Las MISMAS variables fijas que scripts/start_bot.ps1 (no dependen de lo que diga el `.env`, y
-    # `environment` tiene prioridad sobre `env_file`). Una prueba verifica la paridad.
+    # Por defecto vuelve solo tras reiniciar Docker o el PC (Docker Desktop debe iniciar con Windows: ver
+    # docs/MANUAL_OPERACION.md). Una parada a mano (`docker compose stop`) NO se deshace sola. Docker no
+    # reinicia un contenedor "unhealthy" por si mismo: lo avisa la alerta externa (MinervaHealthAlert).
+    # Las instancias de prueba usan MINERVA_RESTART=no.
+    restart: "${MINERVA_RESTART:-unless-stopped}"
+    # Las MISMAS variables fijas que scripts/start_bot.ps1 (no dependen de lo que diga el `.env`;
+    # el entorno del proceso tiene prioridad sobre el archivo `.env`). Una prueba verifica la paridad.
+    #
+    # NO se usa `env_file:` a proposito (hallazgo de la prueba real, Fase 7): Compose interpola los `$`
+    # de los valores de un env_file, y un hash bcrypt (`$2b$12$...`, el formato de AUTH_PASSWORD_HASH)
+    # llega al contenedor MUTILADO (56 caracteres en vez de 60) y el login del dashboard falla. El
+    # `.env` se monta de solo lectura en /app/.env y lo lee la aplicacion con el MISMO analizador que
+    # en modo nativo.
     environment:
       DATABASE_PATH: /app/data/minerva_estabilidad.db
       LOG_DIR: /app/logs
@@ -57,6 +64,17 @@ services:
       # de archivos compartido de Docker Desktop, y asi este compose nunca abre la base real de data/.
       - data:/app/data
       - logs:/app/logs
+      # Las credenciales: el `.env` del host, de solo lectura, en la ruta donde la aplicacion lo busca
+      # (ver el comentario de `environment`). OJO: si el archivo NO existe, Docker Desktop for Windows
+      # crea una CARPETA con ese nombre y el contenedor arranca SIN credenciales y sin avisar
+      # (comprobado en la prueba real de la Fase 7; `create_host_path: false` no lo evita ahi). Por eso
+      # los scripts de la Fase 7 comprueban que el archivo exista ANTES de llamar a Compose.
+      - type: bind
+        source: ${MINERVA_ENV_FILE:-.env}
+        target: /app/.env
+        read_only: true
+        bind:
+          create_host_path: false
       # El registro oficial del veredicto (docs/VEREDICTO_3_6_REGISTRO*.txt) se lee en cada peticion:
       # al crearlo en el host se desbloquean los resultados sin reconstruir la imagen. Solo lectura.
       - ./docs:/app/docs:ro
