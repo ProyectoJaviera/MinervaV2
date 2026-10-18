@@ -5,6 +5,11 @@ PC actual es de pruebas y se apaga de tanto en tanto; esto deja arrancar el
 bot real con un solo comando tras un reinicio, y documenta cómo mudarlo a un
 PC 24/7 sin perder la medición en vivo en curso.
 
+> **Fase 6:** la rutina diaria, los reinicios, los respaldos (`scripts/backup_db.py` y
+> `scripts/restore_db.py`, que verifican la copia), la mudanza —nativa o con Docker— y las claves están
+> reunidos en [`docs/MANUAL_OPERACION.md`](MANUAL_OPERACION.md). Este documento conserva el detalle de
+> las tareas del Programador de Windows y de la mudanza nativa.
+
 ## Arrancar y detener el bot real
 
 ```powershell
@@ -158,6 +163,11 @@ importa (el código primero, los datos después).
    ```
 
    Llevá `respaldo_migracion.db` al PC nuevo (USB, red, lo que sea).
+
+   Desde la Fase 6 hay una herramienta equivalente que además **verifica** la copia con
+   `PRAGMA integrity_check` y no deja a medias un respaldo corrupto:
+   `.\.venv\Scripts\python.exe scripts\backup_db.py` (deja `data\backups\minerva_AAAAMMDD_HHMMSS.db`) y, en el PC
+   nuevo, `scripts\restore_db.py <respaldo>` en lugar de renombrar el archivo a mano (paso 4).
 
 2. **Mismo commit del repo en el PC nuevo**: `git clone` (o `git pull`) y
    `git log -1` para confirmar que es el MISMO commit que tenía el PC viejo
