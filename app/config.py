@@ -1,11 +1,15 @@
 """Configuracion central de Minerva (pydantic-settings).
 
-Todas las variables se leen desde `.env` (ver `.env.example`). Algunos campos
-(modelos LLM, presupuesto diario, umbral de confluencia) no se usan todavia
-en Fase 1 -- se declaran ahora para no reabrir esta configuracion en Fase 4.
+Todas las variables se leen desde `.env` (ver `.env.example`, que tiene TODAS las variables: una
+prueba lo comprueba) y las variables de entorno del proceso tienen prioridad sobre el archivo.
 
 Ninguna credencial tiene un valor por defecto no vacio; en v1 no se usan
 credenciales de Bitunix (solo endpoints publicos de mercado).
+
+Fase 6: se retiraron los campos que ningun modulo leia (`TRADING_SYMBOLS`, `KLINE_INTERVAL`,
+`STRATEGY_HISTORY_BARS`, `ACTIVE_STRATEGY`, `MARGIN_MODE`, `ANTHROPIC_HAIKU_MODEL` y
+`CONFLUENCE_SCORE_THRESHOLD`: vestigios de la vertical minima de la Fase 1 o previstos y nunca
+usados). Un `.env` que aun los tenga no falla (`extra="ignore"`), pero tampoco hacen nada.
 """
 
 from __future__ import annotations
@@ -60,11 +64,7 @@ class Settings(BaseSettings):
         default="wss://fapi.bitunix.com/public/", alias="BITUNIX_WS_PUBLIC_URL"
     )
     bitunix_rate_limit_per_sec: int = Field(default=10, alias="BITUNIX_RATE_LIMIT_PER_SEC")
-    trading_symbols: str = Field(default="BTCUSDT", alias="TRADING_SYMBOLS")
-    kline_interval: str = Field(default="4h", alias="KLINE_INTERVAL")
     scheduler_poll_seconds: int = Field(default=60, alias="SCHEDULER_POLL_SECONDS")
-    strategy_history_bars: int = Field(default=100, alias="STRATEGY_HISTORY_BARS")
-    active_strategy: str = Field(default="ema_cross_9_21", alias="ACTIVE_STRATEGY")
 
     # --- Comisiones simuladas (FRACCION 0-1: 0.0006 = 0.06%) ---
     maker_fee_pct: float = Field(default=0.0002, alias="MAKER_FEE_PCT")
@@ -79,8 +79,8 @@ class Settings(BaseSettings):
     # no se tocan; una recorrida futura del backtest sin fijar esta variable
     # usara 5, no 10.
     default_margin_usdt: float = Field(default=5.0, alias="DEFAULT_MARGIN_USDT")
+    # El simulador solo modela margen AISLADO (SPEC); no hay modo cruzado que configurar.
     leverage: int = Field(default=10, alias="LEVERAGE")
-    margin_mode: str = Field(default="ISOLATED", alias="MARGIN_MODE")
 
     # --- Gestion de riesgo (motor en vivo desde Fase 3 subfase 3.2) ---
     # FRACCION 0-1 (0.20 = 20%) -- ver la nota de unidades al inicio del archivo.
@@ -130,8 +130,10 @@ class Settings(BaseSettings):
     candle_stale_tolerance_seconds: float = Field(
         default=300.0, alias="CANDLE_STALE_TOLERANCE_SECONDS"
     )
-    # Sin LLM (subfase 3.6 aun no existe) la apertura automatica en la cuenta
-    # real esta desactivada; las senales se registran igual en `signals`.
+    # Apertura automatica SIN decision del LLM en la cuenta paper: desactivada y asi debe seguir
+    # (las senales se registran igual en `signals`). Las aperturas de la cuenta paper las hace el
+    # brazo ejecutado con las senales APROBADA (`PAPER_EXECUTION_ENABLED`); si ambos interruptores
+    # estuvieran en true el brazo se niega a armarse (ver docs/FASE3_9_BRAZO_EJECUTADO.md).
     auto_open_without_llm: bool = Field(default=False, alias="AUTO_OPEN_WITHOUT_LLM")
 
     # --- Monitor de posiciones y feed en vivo (Fase 3, subfase 3.4) ---
@@ -231,10 +233,10 @@ class Settings(BaseSettings):
 
     # --- Claude / Anthropic (usado desde Fase 3.6) ---
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
-    anthropic_haiku_model: str = Field(default="claude-haiku-4-5", alias="ANTHROPIC_HAIKU_MODEL")
     # claude-sonnet-5-5: ID verificado en la tabla oficial de modelos a
     # 2026-10-04 (`docs/FASE3_6_LLM.md`, seccion 0). `claude-sonnet-5` no esta
-    # verificado.
+    # verificado. Es el modelo que etiqueta la medicion: NO cambiarlo mientras dure (el hash
+    # congelado cubre el prompt y las features, no el modelo; ver docs/MANUAL_OPERACION.md).
     anthropic_sonnet_model: str = Field(default="claude-sonnet-5-5", alias="ANTHROPIC_SONNET_MODEL")
     llm_daily_budget_usd: float = Field(default=1.0, alias="LLM_DAILY_BUDGET_USD")
     # Subfase 3.6 (docs/FASE3_6_LLM.md, secciones b/e/l). max_tokens=300: la
@@ -279,10 +281,6 @@ class Settings(BaseSettings):
     lessons_min_sample: int = Field(default=30, alias="LESSONS_MIN_SAMPLE")
     lessons_rebuild_hours: float = Field(default=24.0, alias="LESSONS_REBUILD_HOURS")
     lessons_top_k: int = Field(default=3, alias="LESSONS_TOP_K")
-    # FRACCION 0-1 (score de confluencia, no un porcentaje de precio).
-    confluence_score_threshold: float = Field(
-        default=0.6, alias="CONFLUENCE_SCORE_THRESHOLD"
-    )
 
     # --- Telegram (usado desde Fase 5) ---
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
@@ -308,11 +306,6 @@ class Settings(BaseSettings):
 
     # --- Base de datos ---
     database_path: str = Field(default="./data/minerva.db", alias="DATABASE_PATH")
-
-    @property
-    def symbols(self) -> list[str]:
-        """Lista de simbolos configurados en TRADING_SYMBOLS (separados por coma)."""
-        return [s.strip().upper() for s in self.trading_symbols.split(",") if s.strip()]
 
     @property
     def universe_exclude_categories_list(self) -> list[str]:
@@ -357,9 +350,7 @@ class Settings(BaseSettings):
 
         Formula acordada: min(margen configurado, 10% del capital actual menos lo ya
         comprometido en ese simbolo, margen disponible bajo el limite de posiciones
-        simultaneas). No se usa aun en Fase 1 (PaperBackend no aplica limites de riesgo
-        todavia -- eso es Fase 3), pero se deja implementada para reutilizarla sin
-        reabrir esta configuracion.
+        simultaneas). La usa el motor de riesgo (`risk_engine.check_new_entry`) al abrir.
         """
         per_asset_cap = max(
             0.0, current_capital * self.max_capital_pct_per_asset - margin_committed_on_symbol

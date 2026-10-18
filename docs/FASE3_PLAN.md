@@ -386,6 +386,8 @@ referencia a confirmar en ese momento: Sonnet vigente `claude-sonnet-5-5` y
 Haiku `claude-haiku-4-5-20251001`. `ANTHROPIC_SONNET_MODEL`/
 `ANTHROPIC_HAIKU_MODEL` (ya existen en `app/config.py`) quedan como los
 puntos de configuración; ningún string de modelo se fija en el código.
+*(Fase 6: `ANTHROPIC_HAIKU_MODEL` se retiró de `Settings` porque Haiku nunca se usó —decide Sonnet—; el modelo
+que etiqueta la medición es `ANTHROPIC_SONNET_MODEL`.)*
 
 **Quién decide**: **Sonnet** toma la decisión aprobar/rechazar de cada
 señal accionable (no Haiku, a diferencia de la primera versión de este

@@ -206,14 +206,3 @@ async def get_trades(
     query += " ORDER BY entry_time ASC"
     rows = await db.fetch_all(query, tuple(params))
     return [_row_to_trade(r) for r in rows]
-
-
-async def count_distinct_combos(db: Database) -> int:
-    row = await db.fetch_one(
-        "SELECT COUNT(*) AS n FROM ("
-        "SELECT DISTINCT strategy, symbol, timeframe FROM backtest_trades "
-        "UNION "
-        "SELECT DISTINCT strategy, symbol, timeframe FROM backtest_skipped_entries"
-        ")"
-    )
-    return int(row["n"]) if row else 0

@@ -8,11 +8,9 @@ docs/FASE0.md):
 - Push del canal "tickers": {"ch": "tickers", "ts": ..., "data": [{"s": "BTCUSDT",
   "la": "<last price>", "o": .., "h": .., "l": .., "b": .., "q": .., ...}]}.
 
-En la vertical minima de Fase 1 la ejecucion usa el endpoint REST de tickers
-(que si expone markPrice explicito); este cliente WS queda operativo y testeado
-de forma independiente para tiempo real, y se integra a la decision/ejecucion
-en una fase posterior si se requiere evaluacion a nivel de tick (SPEC lo exige
-para SL/TP/trailing en el simulador realista de Fase 3).
+El canal `tickers` trae el ultimo precio (`la`) pero no el mark price; el mark se consulta por REST
+(`bitunix_rest`). Desde la subfase 3.4 el monitor de posiciones (`app/trading/position_monitor.py`)
+consume estos ticks para evaluar SL, TP, trailing y liquidacion a nivel de tick, como exige el SPEC.
 """
 
 from __future__ import annotations

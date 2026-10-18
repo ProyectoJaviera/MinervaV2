@@ -2,7 +2,7 @@
 `docs/FASE3_PLAN.md`) -- reemplaza el viejo `Scheduler._evaluate_symbol`
 (UNA estrategia sobre UN simbolo fijo, vestigio de Fase 1) por un
 generador que, en cada tick, itera TODO el universo vigente
-(`asset_universe` con `included=1`, nunca `settings.symbols`) x TODAS las
+(`asset_universe` con `included=1`, no una lista fija de la configuracion) x TODAS las
 estrategias de `app/strategies/registry.py::STRATEGIES` (en sus timeframes),
 llamando `strategy.precompute(df)` + `strategy.evaluate(df)` -- el MISMO
 codigo de indicadores que el backtest.

@@ -1,6 +1,7 @@
 """Decision del LLM sobre las senales agrupadas (subfase 3.6).
 
-Ver docs/FASE3_6_LLM.md. Ningun modulo de aqui se llama todavia desde
-`app/core/scheduler.py`: la 3.6 se implementa por fases y el uso real del LLM
-en el bot (`AUTO_OPEN_WITHOUT_LLM`) es una decision aparte.
+Ver docs/FASE3_6_LLM.md. `ShadowLiveLabeler` (`app/trading/shadow_live_labeler.py`) llama a
+`LlmDecisionService` desde el ciclo del scheduler para etiquetar cada sombra `APROBADA` o
+`RECHAZADA` con el prompt congelado (`prompts.py`); el interruptor es `LLM_LIVE_LABELING_ENABLED`.
+`prompts_v5.py` esta preparado y SIN usar.
 """

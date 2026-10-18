@@ -1,8 +1,9 @@
 """Interfaz base para estrategias por reglas.
 
-En Fase 1 la senal de la estrategia ES la decision (no hay score de
-confluencia ni LLM todavia). El motor de confluencia que combina varias
-estrategias + Claude llega en Fase 3/4.
+La senal de la estrategia no abre nada por si sola: el generador de senales (`app/trading/
+signal_generator.py`) la registra, se simula como operacion sombra y Claude la etiqueta `APROBADA`
+o `RECHAZADA`; la cuenta paper solo abre las aprobadas a tiempo. No hay un puntaje de confluencia
+entre estrategias (docs/INFORME_FINAL.md, "Cumplimiento de la especificacion").
 
 Fase 2 agrega tres metodos opcionales (default `None`) para que cada
 estrategia pueda definir su propia gestion de riesgo (ATR, nivel de banda,

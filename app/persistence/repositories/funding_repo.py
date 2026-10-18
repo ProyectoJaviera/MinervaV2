@@ -32,13 +32,6 @@ async def get_funding(
     return [(int(r["funding_time"]), float(r["funding_rate"])) for r in rows]
 
 
-async def get_covered_funding_times(db: Database, symbol: str) -> set[int]:
-    rows = await db.fetch_all(
-        "SELECT funding_time FROM funding_cache WHERE symbol = ?", (symbol,)
-    )
-    return {int(r["funding_time"]) for r in rows}
-
-
 async def get_covered_range(db: Database, symbol: str) -> tuple[int, int] | None:
     """(funding_time mas antiguo, mas nuevo) ya cacheados, o `None` si no
     hay ninguno -- misma idea que `ohlcv_repo.get_covered_range`."""

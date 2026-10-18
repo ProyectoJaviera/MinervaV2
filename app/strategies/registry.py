@@ -1,7 +1,7 @@
 """Registro de estrategias candidatas (Fase 2, docs/FASE2_PLAN.md seccion B).
 
 `EXPERIMENTAL_STRATEGIES` marca las que NO participan en el veredicto
-global de descarte (solo se reportan) -- por ahora, `funding_contrarian`.
+global de descarte (solo se reportan): las dos variantes de `funding_contrarian`.
 """
 
 from __future__ import annotations
@@ -42,10 +42,3 @@ EXPERIMENTAL_STRATEGIES = {
     "funding_contrarian_experimental",
     "funding_contrarian_percentile_experimental",
 }
-
-
-def get_strategy(name: str) -> BaseStrategy:
-    try:
-        return STRATEGIES[name]
-    except KeyError as exc:
-        raise ValueError(f"Estrategia desconocida: {name}") from exc
