@@ -14,12 +14,17 @@ data/
 *.db
 *.db-wal
 *.db-shm
+*.sqlite
+*.sqlite3
 .env
+.env.*
+!.env.example
 
 # Frontend build
 frontend/dist/
 
 # Logs
+logs/
 *.log
 
 # Certificados locales de la imagen Docker (especificos de cada red; ver docker/certs/README.md)
