@@ -138,6 +138,86 @@ export interface ShadowTradeEntry {
   closed_at?: string | null;
 }
 
+// --- Fase 4: noticias y memoria de lecciones (docs/FASE4_PLAN.md) ----------------
+
+export interface NewsSourceHealth {
+  last_success_at: string | null;
+  consecutive_failures: number;
+  last_error: string | null;
+}
+
+export interface NewsStatus {
+  enabled: boolean;
+  active: boolean;
+  sources: Record<string, NewsSourceHealth>;
+  items_24h: number;
+  // Textos de atribucion de las fuentes: el dashboard DEBE mostrarlos junto a los datos.
+  attribution: string[];
+  fear_greed: {
+    value: number;
+    classification: string | null;
+    ts: string;
+    age_hours: number;
+  } | null;
+}
+
+// Titular de un tercero: texto NO confiable. Se muestra siempre como texto (React lo escapa) y el
+// enlace solo se usa si es http(s).
+export interface NewsItem {
+  id: number;
+  source: string;
+  title: string;
+  domain: string | null;
+  url: string | null;
+  published_at: string | null;
+  fetched_at: string;
+  assets: string[];
+  sentiment: number | null;
+  sentiment_method: string | null;
+}
+
+export interface NewsRecent {
+  items: NewsItem[];
+  attribution: string[];
+}
+
+// Solo conteos y el interruptor: nunca tasas ni retornos.
+export interface MemoryStatus {
+  enabled: boolean;
+  active: boolean;
+  min_sample: number;
+  closed_reliable: number;
+  entries: number;
+  applications: number;
+  last_build_id: string | null;
+  results_visible: boolean;
+  message: string | null;
+}
+
+export interface LessonEntry {
+  dimension: string;
+  pattern: string;
+  n: number;
+  wins: number;
+  winrate: number | null;
+  ci_low: number | null;
+  ci_high: number | null;
+  base_winrate: number | null;
+  mean_return_pct: number | null;
+  half1_delta: number | null;
+  half2_delta: number | null;
+  status: string;
+}
+
+export interface MemoryLessons {
+  results_visible: boolean;
+  message?: string;
+  lessons: LessonEntry[];
+  build_id?: string | null;
+  min_sample?: number;
+  disclaimer?: string;
+}
+
 export interface MeResponse {
   username: string;
 }
@@ -215,5 +295,36 @@ export function useRecentShadows(limit = 20) {
   return useQuery({
     queryKey: ["shadow-trades-recent", limit],
     queryFn: () => apiFetch<ShadowTradeEntry[]>(`/api/shadow-trades/recent?limit=${limit}`),
+  });
+}
+
+export function useNewsStatus() {
+  return useQuery({
+    queryKey: ["news-status"],
+    queryFn: () => apiFetch<NewsStatus>("/api/news/status"),
+  });
+}
+
+export function useNewsRecent(limit = 8) {
+  return useQuery({
+    queryKey: ["news-recent", limit],
+    queryFn: () => apiFetch<NewsRecent>(`/api/news/recent?limit=${limit}`),
+  });
+}
+
+export function useMemoryStatus() {
+  return useQuery({
+    queryKey: ["memory-status"],
+    queryFn: () => apiFetch<MemoryStatus>("/api/memory/status"),
+  });
+}
+
+// Solo se pide con `enabled`, y el llamador lo pone en true unicamente cuando el backend dijo,
+// explicitamente, que los resultados ya son visibles (falla cerrado).
+export function useMemoryLessons(enabled: boolean) {
+  return useQuery({
+    queryKey: ["memory-lessons"],
+    queryFn: () => apiFetch<MemoryLessons>("/api/memory/lessons"),
+    enabled,
   });
 }

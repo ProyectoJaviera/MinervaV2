@@ -4,6 +4,7 @@ import { ProgressBar } from "./components/ProgressBar";
 import { StatTile } from "./components/StatTile";
 import { fmtDate, fmtDays, fmtPct, fmtUsd } from "./format";
 import { useHealth, useLogout, useMeasurementStatus, useRecentDecisions, useRecentShadows } from "./api";
+import { NewsMemoryCard } from "./NewsMemoryCard";
 
 const NON_OK_LABELS: Record<string, string> = {
   TIMEOUT: "Timeout",
@@ -210,6 +211,8 @@ export function DashboardView({ username }: { username: string }) {
           <p className="text-sm text-gray-500">Cargando...</p>
         )}
       </Card>
+
+      <NewsMemoryCard />
 
       <Card title="Decisiones recientes del LLM">
         <div className="overflow-x-auto">

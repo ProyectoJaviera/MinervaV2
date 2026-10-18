@@ -225,6 +225,29 @@ describe("DashboardView: columnas de PnL de las sombras", () => {
     expect(screen.queryByText(/EN MARCHA$/)).not.toBeInTheDocument();
   });
 
+  it("monta la tarjeta de noticias y memoria, y una falla de sus rutas no afecta al resto del panel", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetchRoutedByPath({
+        "/health": { status: 200, body: HEALTH_BODY },
+        "/api/measurement/status": { status: 200, body: MEASUREMENT_BODY },
+        "/api/llm/decisions/recent": { status: 200, body: [] },
+        "/api/shadow-trades/recent": { status: 200, body: [SHADOW_WITHOUT_OUTCOME] },
+        "/api/news/status": { status: 500, body: {} },
+        "/api/news/recent": { status: 500, body: {} },
+        "/api/memory/status": { status: 500, body: {} },
+      })
+    );
+
+    render(withQueryClient(<DashboardView username="renzo" />));
+
+    expect(await screen.findByText("Noticias y memoria de lecciones (Fase 4)")).toBeInTheDocument();
+    expect(await screen.findByText("Noticias no disponibles.")).toBeInTheDocument();
+    expect(await screen.findByText("Memoria no disponible.")).toBeInTheDocument();
+    await screen.findByText("BTCUSDT LONG");
+    expect(screen.getByText("Avance de la medicion")).toBeInTheDocument();
+  });
+
   it("con el gate cerrado explica que faltan los 300 conglomerados y no muestra el aviso del procedimiento", async () => {
     vi.stubGlobal(
       "fetch",
