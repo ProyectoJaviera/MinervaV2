@@ -69,7 +69,7 @@ Si no llega a 100 operaciones totales, se marca `evidencia_insuficiente` (ni apr
 
 - **API key de CoinGecko**: el cliente envía `x-cg-demo-api-key` si `COINGECKO_API_KEY` está configurada; en esta investigación varias llamadas de solo lectura funcionaron incluso SIN key, pero el plan Demo oficial la exige, así que no hay que depender de ese comportamiento — se documenta en el README que conviene sacar la key gratuita.
 - **Degradación si CoinGecko falla** (reintentos con backoff ya agotados): se conserva el ÚLTIMO snapshot válido de `asset_universe` (nunca se vacía el universo por un fallo de red); se registra `system_state.universe_last_refresh_ok_at` vs. el intento fallido. Si el snapshot vigente supera **48h** de antigüedad (2x el periodo de refresco), se bloquean nuevas aperturas hasta que un refresco tenga éxito — misma política que SPEC.md exige para datos de precio obsoletos, aplicada aquí por instrucción de CLAUDE.md ("bloqueo de nuevas operaciones si los datos críticos están obsoletos").
-- **Atribución**: CLAUDE.md exige mostrar "Data provided by CoinGecko" en el frontend — anotado como pendiente de Fase 5 (el frontend mínimo de Fase 1 no lo necesita porque no consume CoinGecko todavía).
+- **Atribución**: CLAUDE.md exige mostrar "Data provided by CoinGecko" en el frontend — anotado como pendiente de Fase 5 (el frontend mínimo de Fase 1 no lo necesita porque no consume CoinGecko todavía). **Hecho en la Fase 5** (2026-10-18, `docs/FASE5_PLAN.md`): enlazada a coingecko.com junto a la tabla del universo y en el pie de todo el dashboard.
 
 ## E. Fuera de alcance de esta fase (y por qué)
 
@@ -77,7 +77,7 @@ Si no llega a 100 operaciones totales, se marca `evidencia_insuficiente` (ni apr
 - **Aplicar SL/TP/trailing/liquidación dentro de `PaperBackend` en vivo**: esta fase los implementa SOLO dentro del motor de backtest (simulación histórica). Conectar esa misma lógica al loop en vivo de `PaperBackend`/`core/scheduler.py` es, explícitamente, Fase 3 — evita mezclar "motor de riesgo en producción" con "motor de backtest", que tienen necesidades de timing distintas (velas cerradas históricas vs. ticks en vivo). `PaperBackend` seguirá cerrando solo por señal contraria hasta Fase 3.
 - **Límites de correlación/exposición entre posiciones simultáneas de distintos símbolos**: pertenece al motor de riesgo de cartera en vivo (Fase 3); el backtest de esta fase evalúa cada estrategia+símbolo de forma aislada.
 - **Noticias, Claude como motor de decisión, memoria/lecciones, calibración del % de éxito**: Fase 4, sin cambios respecto al plan original.
-- **Mostrar universo/resultados de backtest en el frontend, notificar cambios de universo por Telegram**: Fase 5. Los datos ya quedan en la base de datos, listos para que Fase 5 los muestre sin recalcular nada.
+- **Mostrar universo/resultados de backtest en el frontend, notificar cambios de universo por Telegram**: Fase 5. Los datos ya quedan en la base de datos, listos para que Fase 5 los muestre sin recalcular nada. **Hecho en la Fase 5** (2026-10-18, `docs/FASE5_PLAN.md`): pestaña "Universo y backtest" y aviso push de cada cambio del universo.
 - **Optimizar/ajustar parámetros de las estrategias** (grid search, etc.): deliberadamente fuera de alcance para no introducir sobreajuste desde el arranque; si alguna estrategia queda en el límite del descarte, la decisión de afinar parámetros se toma explícitamente más adelante, nunca dentro de este primer backtest.
 
 ## Archivos nuevos/afectados (para la implementación, una vez aprobado este plan)

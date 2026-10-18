@@ -625,7 +625,10 @@ ejecutado). Se agregan:
   del LLM (punto 2) -- son mejoras sobre el filtro aprobar/rechazar que esta
   fase ya entrega.
 - **Fase 5**: frontend/dashboard, autenticación, Telegram enriquecido más
-  allá de los 7 comandos de control.
+  allá de los 7 comandos de control. **HECHA (2026-10-18)**: ver
+  `docs/FASE5_PLAN.md` (la autenticación ya existía; quedaron fuera a
+  propósito el cierre manual de posiciones, la edición de parámetros de riesgo
+  y los gráficos de equity).
 
 ### Orden de subfases y criterios de aceptación
 
