@@ -1,6 +1,6 @@
 # Informe final de Minerva v1 (paper trading)
 
-**Fecha:** 2026-10-18 · **Alcance:** Fases 0 a 6 · **Modo:** 100 % paper trading (ninguna orden real)
+**Fecha:** 2026-10-18 · **Alcance:** Fases 0 a 7 · **Modo:** 100 % paper trading (ninguna orden real)
 
 > ## ⚠ Aviso de riesgos
 >
@@ -20,14 +20,16 @@ un dashboard, un bot de Telegram y una API con login. El proyecto está diseñad
 
 **Qué se logró.**
 
-- La plataforma completa de las seis fases, con **1.800 pruebas automáticas de Python** (1.745 unitarias, 51 de punta
+- La plataforma completa de las seis fases, con **1.925 pruebas automáticas de Python** (1.870 unitarias, 51 de punta
   a punta y 4 de integración con la red real, omitidas por defecto) y 106 del frontend, humos contra copias de la
   base real y contra la red real, y el pipeline corriendo en vivo.
 - Una **medición ciega y trazable** del valor de la IA: sombras comparables, conglomerados para no contar dos veces
   operaciones solapadas, prompt y features congelados con hash vigilado en cada ciclo, y una *puerta de resultados*
   que, hasta el registro oficial del veredicto, impide que **ningún canal** (API, dashboard, Telegram, avisos, resumen)
   muestre PnL, saldo, precio ni motivo de cierre.
-- Docker, respaldo y restauración consistentes, manual de operación y esquema de la base generado del código.
+- Docker (probado contra Docker Desktop real en la Fase 7), respaldo y restauración consistentes, **mudanza del bot
+  real a Docker con vuelta atrás** (`scripts/migrate_to_docker.ps1`, `scripts/rollback_from_docker.ps1`), manual de
+  operación y esquema de la base generado del código.
 
 **Qué NO se sabe (y no hay que fingir lo contrario).**
 
@@ -44,7 +46,9 @@ un dashboard, un bot de Telegram y una API con login. El proyecto está diseñad
    `INCONCLUSO`.
 3. **El brazo ejecutado de la cuenta paper no tiene resultados que mostrar:** acaba de empezar y, por diseño, sus
    resultados están ocultos.
-4. **Docker no se probó con un daemon real** (Docker Desktop estaba apagado en el PC donde se desarrolló): ver §5.2.
+4. **La mudanza real del bot a Docker no se ha ejecutado:** los scripts se probaron con Docker Desktop real pero en un
+   ensayo aislado (puertos 8001 y 8002, copia de la base); el bot del puerto 8000 sigue nativo hasta que el
+   usuario lo mude (§5.2 y `docs/MUDANZA_DOCKER.md`).
 
 **Conclusión honesta.** Se entrega un sistema sólido para *medir* —no un sistema rentable—. Que el sistema funcione
 no dice nada sobre si gana dinero. El siguiente paso útil es **dejarlo correr con la mayor disponibilidad posible
@@ -65,7 +69,8 @@ escritura**: login, logout y `POST /api/control/{action}`.
 | 3 | Riesgo, simulador realista, señales en vivo, sombras, medición del LLM, brazo ejecutado (3.1–3.9) | Implementada |
 | 4 | Noticias y memoria de lecciones (apagadas durante la medición) | Aprobada |
 | 5 | Dashboard completo, controles, push de Telegram | Aprobada |
-| 6 | Docker, pruebas de punta a punta, documentación final y limpieza | Este informe |
+| 6 | Docker, pruebas de punta a punta, documentación final y limpieza | Entregada |
+| 7 | Mudanza del bot real a Docker (probada con Docker Desktop real) y vuelta atrás | Este informe (actualizado) |
 
 ### Fase 0: evaluación y decisiones
 
@@ -186,6 +191,37 @@ CoinGecko". Con la puerta cerrada, el servidor no consulta siquiera el PnL, y el
   historial de git (solo conteos): 0 coincidencias de esos patrones y 0 archivos prohibidos entre los 374 que alguna
   vez se añadieron; es una revisión por patrones, no una garantía contra formatos de secreto desconocidos.
 
+### Fase 7: mudanza del bot real a Docker
+
+Detalle en [`docs/MUDANZA_DOCKER.md`](MUDANZA_DOCKER.md). **Etapa 1 (ejecutada):** `docker compose build` y un contenedor
+de prueba en el puerto 8001 con una copia de la base real en un volumen de prueba (etiquetado, Telegram, brazo y
+noticias apagados, credenciales de mentira), verificado de verdad: `healthy`, `/health`, `frozen_hash_ok`, dashboard,
+persistencia tras `docker compose restart`, usuario sin privilegios; después se bajó y se borró el volumen. Encontró
+**cinco defectos** que las pruebas estáticas no veían (los cinco, corregidos): `restore_db.py` no abría un respaldo en
+modo WAL montado de solo lectura; Compose mutilaba el hash de la contraseña con `env_file:`; el código de la imagen era
+escribible por el proceso; Docker Desktop crea una *carpeta* si falta el `.env`; y Docker Desktop no inicia con Windows
+en este PC.
+
+**Etapa 2 (preparada y ensayada, no ejecutada contra el bot real):**
+
+- `scripts/migrate_to_docker.ps1`: ventana segura (minutos :10-:40 de una hora UTC que no sea de cierre de 4 h),
+  comprobaciones previas que no cambian nada (`-DryRun`), respaldo, parada del bot nativo con `stop_bot.ps1`,
+  copia de la base al volumen con la API de backup, verificación (`PRAGMA integrity_check` y **mismas filas en las 28
+  tablas**, con `shadow_trades`, `llm_logs` y `paper_execution_log` a la vista), tarea `MinervaStartBot` deshabilitada,
+  `docker compose up -d` en `127.0.0.1:8000` con los mismos interruptores que `start_bot.ps1`, y espera de `/health`
+  (`status ok`, `frozen_hash_ok true`, `paused false`). **Cualquier fallo, o un Ctrl+C, deshace todo en orden inverso.**
+- `scripts/rollback_from_docker.ps1`: el camino de vuelta (base del volumen de vuelta a `data\` con la API de backup,
+  tarea reactivada, arranque nativo).
+- `scripts/docker_db.py` (respaldo, copia y «correr un informe sobre una copia fresca»), `scripts/db_fingerprint.py`,
+  la marca `data\MIGRADO_A_DOCKER.txt` que impide arrancar el bot nativo sobre la base vieja, y `telegram_daily.py`
+  adaptado (con la marca saca su copia del contenedor).
+- `restart: unless-stopped` por defecto y la guía para que Docker Desktop inicie con Windows.
+- **Pruebas:** 57 de las herramientas (marca, copia del volumen, `docker_db.py`, huella y protecciones de los scripts
+  existentes), 45 de los scripts de la mudanza ejecutando PowerShell de verdad contra un `docker`, un `schtasks` y un
+  bot nativo falsos (incluido el caso real de **un solo puerto** para el bot nativo y el contenedor), y el **ensayo
+  general con Docker real** (bot nativo de prueba en el 8001, Docker en el 8002 y en el 8001): ensayo en seco, mudanza
+  completa, respaldo/copia/informes sobre el contenedor vivo, vuelta atrás y un fallo forzado que se deshizo solo.
+
 ## 3. Cumplimiento de la especificación
 
 Contrastado línea por línea con `docs/SPEC.md`.
@@ -213,7 +249,7 @@ Contrastado línea por línea con `docs/SPEC.md`.
 | Frontend: saldo, PnL no realizado, ROI, curva de equity, PnL agrupado, winrate | **No mostrado, a propósito** | Son resultados: se habilitan con el registro oficial. Las curvas y agrupaciones **no están construidas** (quedan para después del veredicto) |
 | Frontend: tiempo real por WebSocket, PWA/APK | **No hecho** | Consulta periódica; fuera del alcance acordado |
 | Controles: cerrar posición, cerrar todo, editar parámetros de riesgo | **No hecho, a propósito** | Solo pausa, reanudación y kill; menos superficie de ataque |
-| Docker Compose, pruebas de punta a punta, guía de puesta en marcha, aviso de riesgos | **Cumplido** (Docker sin daemon real) | |
+| Docker Compose, pruebas de punta a punta, guía de puesta en marcha, aviso de riesgos | **Cumplido** (Docker probado con Docker Desktop real en la Fase 7; la mudanza del bot real está lista pero no ejecutada) | |
 | Esquema de base de datos | **Cumplido** | `docs/ESQUEMA_BD.md`, generado del código y vigilado por una prueba |
 | Informe de métricas de paper trading | **Aún no producible** | La medición es ciega y el gate está cerrado; lo generarán `ai_value_report.py` y `real_money_report.py` tras el registro oficial |
 | Paper trading mínimo de 30 días corridos | **Pendiente** | El brazo ejecutado acaba de empezar |
@@ -246,8 +282,14 @@ Contrastado línea por línea con `docs/SPEC.md`.
     velas de 1 minuto; si faltan más de 2 velas la posición queda abierta con un CRITICAL.
 11. **Fuentes externas solo gratuitas y con sus términos verificados.** Lo único que cuesta dinero es la API de
     Anthropic, con tope diario y corte duro.
-12. **Docker como alternativa, no como reemplazo.** El bot real sigue con `start_bot.ps1` hasta la migración;
-    volúmenes con nombre para no abrir nunca el `data/` real ni depender del WAL sobre carpetas compartidas.
+12. **Docker como alternativa, no como reemplazo… hasta la Fase 7.** El bot real sigue con `start_bot.ps1` hasta que
+    el usuario ejecute `migrate_to_docker.ps1`; volúmenes con nombre para no abrir nunca el `data/` real ni depender
+    del WAL sobre carpetas compartidas. **Tras la mudanza la base viva es la del volumen** (la nativa queda como
+    copia vieja, protegida por una marca) y todo lo que lee la base —respaldos, estado de la medición, informes del
+    veredicto— corre en el host sobre una **copia** sacada con la API de backup dentro del contenedor.
+13. **Una mudanza que se deshace sola.** Cada paso que cambia algo registra su inverso *antes* de ejecutarse; un fallo
+    o un Ctrl+C los aplica en orden inverso. La base nativa solo se **lee** (API de backup), nunca se modifica, así
+    que volver atrás es volver a arrancarla.
 
 ## 5. Qué está verificado y qué no
 
@@ -255,21 +297,30 @@ Contrastado línea por línea con `docs/SPEC.md`.
 
 | Qué | Con qué evidencia |
 |---|---|
-| Lógica de riesgo, simulación y datos | 1.800 pruebas de `pytest` recogidas (1.745 unitarias, 4 de integración con la red real y 51 de punta a punta): 1.796 pasan y las 4 de red real se omiten salvo con `MINERVA_RUN_LIVE_TESTS=1`; 106 de Vitest; `ruff` limpio; `tsc` y `vite build` limpios |
+| Lógica de riesgo, simulación y datos | 1.925 pruebas de `pytest` recogidas (1.870 unitarias, 4 de integración con la red real y 51 de punta a punta): 1.921 pasan en 12 min 26 s y las 4 de red real se omiten salvo con `MINERVA_RUN_LIVE_TESTS=1`; 106 de Vitest; `ruff` limpio; `tsc` y `vite build` limpios |
 | Casos límite de SL/TP/trailing, liquidación, comisiones y funding | Pruebas dedicadas por función de riesgo y de simulación, y paridad de PnL entre la sombra y la cuenta paper |
 | Ciclo completo de punta a punta | 51 pruebas con el sistema real y el exterior simulado, con un candado que impide cualquier conexión de red |
 | Persistencia y migraciones con datos reales | Cada tarea sobre datos se probó contra una **copia** de la base real (ruta distinta verificada con `assert`): migraciones aditivas, mismas filas en las demás tablas, `PRAGMA integrity_check` |
 | Mercado real | Humos con la red real de Bitunix (REST y WebSocket), Fed y Fear & Greed |
 | Ocultamiento de resultados | Barrido sobre API, dashboard, Telegram, push y resumen; mutaciones de prueba del backend que las pruebas detectaron |
 | Aislamiento de la medición | Con el brazo/noticias/memoria/push encendidos o apagados, `llm_logs`, `shadow_trades` y el avance son idénticos; el hash congelado está fijado por prueba |
-| Docker, hasta donde se puede sin daemon | `docker compose config`, 90 pruebas estáticas del `Dockerfile`/compose/healthcheck, resolución de dependencias para Linux, réplica de la etapa de Node y humo del árbol de la imagen |
-| Respaldo y restauración | 21 pruebas, humo sobre una copia real (con el conteo de tablas y filas antes y después) |
+| Docker, estático | `docker compose config`, pruebas estáticas del `Dockerfile`/compose/healthcheck, resolución de dependencias para Linux, réplica de la etapa de Node y humo del árbol de la imagen |
+| **Docker real (Fase 7, Etapa 1)** | `docker compose build` (3 etapas, ≈ 1 min en frío, 503 MB); contenedor en el 8001 con una **copia** de la base real: `healthy`, `/health` `status ok` en ≈ 60 s, `frozen_hash_ok: true`, dashboard y login, volumen persistente tras `docker compose restart` (apagado ordenado ≈ 4 s), proceso uid 10001 con `cap_drop: ALL` que solo escribe en `/app/data`, `/app/logs` y `/tmp`, conectividad a Bitunix, respaldo y `docker compose cp` con el contenedor corriendo y detenido (SHA-256 coincide), resumen diario dentro del contenedor |
+| **Mudanza y vuelta atrás con Docker real (Fase 7, ensayo general)** | Instancia nativa de prueba en el 8001 y Docker en el 8002 sobre una copia de la base real: `-DryRun`, mudanza completa (mismas filas en las 28 tablas), `docker_db.py backup/export/run`, las protecciones de la marca, vuelta atrás completa y un fallo forzado (espera de `/health` de 3 s) que dejó el sistema como estaba. Más pruebas de los scripts de PowerShell ejecutados de verdad contra un `docker`, un `schtasks` y un bot nativo falsos |
+| Respaldo y restauración | Pruebas dedicadas, humo sobre una copia real (con el conteo de tablas y filas antes y después) y, desde la Fase 7, dentro del contenedor |
 
 ### 5.2 No verificado (declarado, no oculto)
 
-- **Docker con un daemon real:** `docker compose build`, arranque, estado `healthy`, que el volumen herede el dueño del
-  usuario sin privilegios, el montaje de `docs/` en solo lectura, el flujo de certificados corporativos y cualquier
-  comportamiento específico de Linux. El manual indica cómo probarlo sin riesgo (`MINERVA_REAL_BOT=false`).
+- **Docker con un daemon real: verificado en la Fase 7 (§5.1), salvo lo siguiente.** No se ejecutó **la mudanza real**
+  (puerto 8000, el `.env` real, Telegram y la API de Anthropic reales: el ensayo usó credenciales de mentira y los
+  interruptores apagados), así que el primer arranque del contenedor con etiquetado, Telegram, brazo, noticias y push
+  encendidos lo verás tú; tampoco se probó que **Docker Desktop inicie con Windows** y el bot vuelva solo tras
+  reiniciar el PC (hoy no inicia: `AutoStart` en `false` y la entrada deshabilitada en Inicio), una suspensión o
+  hibernación de Windows con el reloj de la máquina virtual de Docker, el flujo de certificados corporativos, semanas
+  de operación continua (crecimiento del volumen, rotación de logs) ni un **Ctrl+C a mitad de la mudanza** (el
+  bloque `finally` que deshace lo hecho no tiene prueba automática). Tampoco una mudanza con el bot nativo y el
+  contenedor **ambos en el puerto 8000** contra Docker real: el ensayo real usó el 8001 y el 8002 (más una repetición
+  con el mismo puerto, §13 de `docs/MUDANZA_DOCKER.md`) y las pruebas automáticas cubren el caso del mismo puerto.
 - **Entrega real de mensajes de Telegram** en el chat del usuario (requiere el token del `.env`, que no se lee). El
   notificador envía un mensaje de arranque para comprobarlo la primera vez.
 - **Aspecto visual del dashboard** en un navegador real (solo Vitest/jsdom, `tsc` y `vite build`), y una mutación de
@@ -286,7 +337,10 @@ Contrastado línea por línea con `docs/SPEC.md`.
   el funding de un cierre real contra los logs y la base (el recordatorio de la 3.4 sigue vigente). Hacerlo implica
   mirar resultados, así que **debe esperar al registro oficial del veredicto**.
 - **Tareas del Programador de Windows:** se verificó la sintaxis construyendo los objetos; el registro puede exigir
-  una terminal con privilegios.
+  una terminal con privilegios. Con el Programador **real** solo se probó que `schtasks /Change /DISABLE` y `/ENABLE`
+  funcionan sobre una tarea ficticia; en este PC no existen `MinervaStartBot` ni `MinervaDailySummary` (solo
+  `MinervaHealthAlert`), así que la mudanza real no tendrá tarea que deshabilitar y el resumen de las 09:15 no se
+  está enviando.
 - **Operación 24/7 sostenida:** la disponibilidad histórica fue de 23,6 %; no hay datos de semanas de ejecución
   continua, ni del crecimiento de la base a largo plazo.
 - **Vigilancia automática del modelo:** el hash cubre el prompt y las features, **no el modelo**. Si
@@ -313,7 +367,8 @@ Contrastado línea por línea con `docs/SPEC.md`.
 ## 7. Hallazgos de la Fase 6
 
 1. **Docker apagado en el PC de desarrollo:** no se encendió por iniciativa propia (servicio pesado en el PC del bot
-   real). Se dejó todo listo y validado hasta donde no necesita daemon.
+   real). Se dejó todo listo y validado hasta donde no necesita daemon. *(Actualización: en la Fase 7 Docker Desktop
+   estaba encendido y se probó de verdad; ver §7b.)*
 2. **`risk_engine.resume_drawdown_stop` no tenía por dónde ejecutarse:** los avisos prometían "se levanta aparte" y
    no existía ningún CLI, API ni comando. Se añadió `scripts/resume_drawdown_stop.py` (informativo por defecto, exige
    `--confirm`, no imprime el equity con el reveal cerrado, no reinicia el contador del criterio de dinero real).
@@ -342,6 +397,29 @@ Contrastado línea por línea con `docs/SPEC.md`.
 11. **Sin secretos, y ahora vigilado:** ni en los archivos versionados ni en el historial; la protección ya no
     depende de la disciplina sino de una prueba.
 
+## 7b. Hallazgos de la Fase 7 (mudanza a Docker)
+
+1. **La prueba real de Docker encontró cinco defectos que ninguna prueba estática veía** (§2, Fase 7). Lección: las
+   1.800 pruebas que pasaban entonces no decían nada sobre un contenedor de verdad; solo un humo contra Docker Desktop
+   lo hizo.
+2. **Compose escribe trozos del hash de la contraseña en la pantalla** si el `.env` de la raíz lo trae con `$` sin
+   comillas simples (probado con un `.env` de mentira): cada `docker compose …` repetía cuatro líneas. Por eso
+   `scripts/hash_password.py` imprime ahora el valor entre comillas simples, `.env.example` lo explica, los scripts de la
+   mudanza usan un archivo de variables vacío (`docker/compose.vars`) para que Compose no lea nunca el `.env`, y
+   `migrate_to_docker.ps1` avisa —solo con el *nombre* de la variable— si el `.env` tiene un `$` sin comillas.
+3. **Ninguna prueba cubría la configuración real** (bot nativo y contenedor en el mismo puerto 8000): todas usaban dos
+   puertos distintos. Se añadió y se repitió en el ensayo real.
+4. **Un defecto latente en el informe de diferencias** (`Compare-Fingerprint`): una variable local pisaba al parámetro
+   (PowerShell no distingue mayúsculas) y, con dos tablas distintas, la segunda se informaba mal. Corregido con una
+   prueba que altera dos tablas.
+5. **`MinervaStartBot` y `MinervaDailySummary` no existen en este PC** (solo `MinervaHealthAlert`): el resumen diario
+   por Telegram no se está enviando. No se creó ninguna: es una decisión del usuario (comando en
+   `docs/MIGRACION_PC.md`).
+6. **Un contenedor `unhealthy` no se reinicia solo** (Docker reinicia procesos que terminan, no que se cuelgan): la
+   alerta externa sigue siendo necesaria.
+7. **`create_host_path: false` no se respeta en Docker Desktop para Windows:** si falta el `.env`, crea una carpeta
+   con ese nombre. Los scripts de la mudanza comprueban que sea un archivo antes de llamar a Compose.
+
 ## 8. Próximos pasos
 
 ### Inmediatos (operación)
@@ -349,11 +427,16 @@ Contrastado línea por línea con `docs/SPEC.md`.
 1. **Un único reinicio del bot real** (`stop_bot.ps1` + `start_bot.ps1`, entre :10 y :40 de una hora UTC que no sea de
    cierre de 4 h) para cargar el backend de la Fase 5 (rutas nuevas, `control_audit`, notificador push y los cambios
    de `/pause`, `/resume` y `/kill`). El frontend compilado y el banner de pausa ya se sirven sin reiniciar.
-2. **Probar Docker con un daemon real** en el PC 24/7, sin riesgo: `MINERVA_REAL_BOT=false` y un respaldo. Ver el
-   manual.
+   **Si vas a mudar a Docker (punto 2), la mudanza ya es ese reinicio:** el contenedor se construye con el código
+   actual, así que hazla *en lugar de* ese reinicio, no además.
+2. **Mudar el bot real a Docker** (ya probado con Docker Desktop real en un ensayo aislado): ponle comillas simples al
+   hash de la contraseña del `.env`, activa «iniciar Docker Desktop al iniciar sesión», corre
+   `scripts\migrate_to_docker.ps1 -DryRun` y después el script real dentro de la ventana segura
+   (`docs/MUDANZA_DOCKER.md`). Es la palanca que más acorta la medición junto con el PC 24/7.
 3. **Migrar al PC 24/7** (nativo o con Docker) y poner las tareas de vigilancia: es la palanca que más acorta la
    medición.
-4. **Respaldo semanal fuera del PC** y la comprobación semanal de la identidad de la medición
+4. **Registrar `MinervaDailySummary`** (hoy no existe) y programar el respaldo diario (`docker_db.py backup`), con una
+   copia semanal **fuera del PC**; y la comprobación semanal de la identidad de la medición
    (`scripts/measurement_identity.py`: un solo modelo, el prompt congelado, una sola versión de features).
 
 ### Cuando se abra el gate
@@ -383,10 +466,16 @@ logs INFO, un proxy con TLS si alguna vez se expone fuera del PC, y programar el
 |---|---|
 | Backend de la Fase 5 (rutas, `control_audit`, push, comandos de control) | **Sí, un solo reinicio** (pendiente desde la Fase 5) |
 | Archivos de Docker, pruebas, documentación, scripts nuevos (`backup_db`, `restore_db`, `resume_drawdown_stop`, `measurement_identity`, `export_schema_doc`, `export_docker_requirements`) | No |
+| **Fase 7:** `migrate_to_docker.ps1`, `rollback_from_docker.ps1`, `docker_db.py`, `docker_support.py`, `db_fingerprint.py`, `docker_common.ps1`, la marca de la mudanza en `start_bot.ps1`/`backup_db.py`/`restore_db.py`/`resume_drawdown_stop.py`/`telegram_daily.py`, `hash_password.py`, y los cambios del `Dockerfile` y del `docker-compose.yml` | **No cambia nada de `app/` ni del bot en marcha** (los scripts se leen al ejecutarse). La mudanza en sí detiene el bot nativo y lo arranca en Docker: **sustituye** al reinicio pendiente de la Fase 5 |
 | Los 9 archivos de `app/` que cambió la Fase 6: solo docstrings (`core/http.py`, `llm/__init__.py`, `market/bitunix_ws.py`, `strategies/base.py`, `trading/signal_generator.py`) y retirada de código sin uso (`config.py`: 7 campos; `registry.py`, `backtest_repo.py` y `funding_repo.py`: 3 funciones) | No lo exigen por sí mismos: **se cargan con ese mismo reinicio** y no cambian el comportamiento. Un `.env` que aún tenga las variables retiradas sigue funcionando (se ignoran) |
 
-El bot real (puerto 8000) **no se tocó** durante la Fase 6: no se detuvo ni se reinició (solo se comprobó que seguía
-escuchando) y no se leyó ni se imprimió ninguna credencial.
+El bot real (puerto 8000) **no se tocó** durante la Fase 6 ni la Fase 7: no se detuvo ni se reinició (solo se
+comprobó que seguía escuchando), `data/minerva_estabilidad.db` solo se leyó con la API de backup abierta en solo
+lectura para crear copias en el scratchpad, y no se leyó ni se imprimió ninguna credencial. **Una excepción
+declarada en la Fase 7:** por un error del arnés del ensayo, dos ejecuciones de `backup_db.py` sin `--db` crearon
+dos respaldos consistentes de más en `data/backups/` (`minerva_20261019_002121.db` y `minerva_20261019_021843.db`;
+sin modificar ni borrar nada existente; detalle en `docs/MUDANZA_DOCKER.md` §13). Además creó y borró una tarea
+programada ficticia (`MinervaRehearsalDummy`) para probar `schtasks /Change` y no tocó ninguna de las tareas reales.
 
 ## 10. Mapa de documentos
 
@@ -394,4 +483,5 @@ escuchando) y no se leyó ni se imprimió ninguna credencial.
 (generado) · `docs/SPEC.md` (especificación) · `docs/FASE0.md` … `docs/FASE6_PLAN.md` (plan y decisiones de cada fase)
 · `docs/FASE3_6_LLM.md` (diseño de la medición) · `docs/VEREDICTO_3_6.md` (procedimiento del veredicto) ·
 `docs/PASO_DINERO_REAL.md` (criterios y riesgos de un eventual paso a real) · `docs/MIGRACION_PC.md` (tareas de
-Windows y mudanza nativa) · `PROGRESS.md` (bitácora completa).
+Windows y mudanza nativa) · `docs/MUDANZA_DOCKER.md` (pasar el bot real a Docker, volver atrás, qué se probó) ·
+`PROGRESS.md` (bitácora completa).

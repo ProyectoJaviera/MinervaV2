@@ -1,5 +1,11 @@
 # Fase 6: Docker, pruebas de punta a punta, documentación final y limpieza (plan, 2026-10-18)
 
+> **Actualización posterior (2026-10-18, mudanza a Docker):** este plan se escribió con Docker Desktop apagado, así que
+> varias frases dicen «sin daemon». Después se probó **con Docker real** y se corrigieron cinco defectos que esta fase
+> no pudo ver (el `.env` pasa a montarse como archivo en vez de `env_file:`, el código de la imagen es de solo lectura,
+> los respaldos se guardan en modo clásico, etc.); además `restart: unless-stopped` es ahora el valor por defecto. Lo
+> vigente está en `docs/MUDANZA_DOCKER.md` y `docs/MANUAL_OPERACION.md`; este documento se conserva como bitácora.
+
 Alcance: `docs/SPEC.md` (fase 6: "Docker, pruebas E2E, guía de puesta en marcha en PC local y aviso de riesgos"; entregables:
 README, `.env.example`, esquema de base de datos, instrucciones de ejecución e informe de métricas) y lo que pediste en la revisión
 de `6be3d2f`. Cierra además dos pendientes heredados: el certificado raíz de inspección TLS en el contenedor (nota de la Fase 1 en

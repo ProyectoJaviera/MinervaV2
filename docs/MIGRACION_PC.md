@@ -9,6 +9,14 @@ PC 24/7 sin perder la medición en vivo en curso.
 > `scripts/restore_db.py`, que verifican la copia), la mudanza —nativa o con Docker— y las claves están
 > reunidos en [`docs/MANUAL_OPERACION.md`](MANUAL_OPERACION.md). Este documento conserva el detalle de
 > las tareas del Programador de Windows y de la mudanza nativa.
+>
+> **Fase 7 (Docker):** el bot real puede pasar a Docker, con su base en un volumen interno y arranque con
+> `docker compose up -d`, con `scripts\migrate_to_docker.ps1` (y volver con `scripts\rollback_from_docker.ps1`):
+> [`docs/MUDANZA_DOCKER.md`](MUDANZA_DOCKER.md). Lo de este documento sigue valiendo para el arranque nativo
+> (que es también el camino de vuelta); lo que cambia con Docker está en la sección «Con Docker» del final.
+> **Estado de las tareas en este PC (2026-10-18):** solo existía `MinervaHealthAlert`; `MinervaStartBot` y
+> `MinervaDailySummary` **no estaban registradas** (compruébalo con `schtasks /Query /FO CSV /NH`). Sin la tarea
+> del resumen, el resumen de las 09:15 no llega: regístrala con el bloque de más abajo.
 
 ## Arrancar y detener el bot real
 
@@ -221,3 +229,21 @@ importa (el código primero, los datos después).
 
    Los conteos deberían seguir la misma tendencia que tenías en el PC viejo
    justo antes de la migración (no deberían saltar a cero ni duplicarse).
+
+## Con Docker (Fase 7): qué cambia respecto a todo lo anterior
+
+El bot real arranca con `docker compose up -d` (Docker Desktop abierto, `.env` como **archivo** junto a
+`docker-compose.yml` y el hash de la contraseña entre comillas simples) y se reinicia solo
+(`restart: unless-stopped`). La base vive en el volumen `minerva_data`, no en `data\`. Tareas del Programador:
+
+| Tarea | Con Docker |
+|---|---|
+| `MinervaStartBot` | **No aplica** (la reemplaza `restart: unless-stopped`). `migrate_to_docker.ps1` la deshabilita si existe; `rollback_from_docker.ps1` la reactiva. Docker Desktop sí debe iniciar con Windows: `docs/MUDANZA_DOCKER.md` §5 |
+| `MinervaHealthAlert` | Sin cambios (consulta `127.0.0.1:8000`) |
+| `MinervaDailySummary` | Sin cambios en la tarea: `telegram_daily.py` ve la marca `data\MIGRADO_A_DOCKER.txt` y saca una copia de la base del contenedor (con el contenedor detenido informa igual y dice que el bot no responde). Probarlo sin enviar: `.\.venv\Scripts\python.exe scripts\telegram_daily.py --dry-run` |
+| `MinervaBackup` | `scripts\docker_db.py backup --keep 14` en lugar de `backup_db.py` (manual §5.2) |
+
+Para **mudar a otro PC con Docker**: en el PC viejo `docker compose stop` y `scripts\docker_db.py backup`; en el nuevo,
+`git clone` del mismo commit, `.env` a mano, `docker compose build`, importar el respaldo con el comando de manual §5.5
+y `docker compose up -d`. La mudanza *de nativo a Docker en el mismo PC* tiene su propio script
+(`docs/MUDANZA_DOCKER.md`).

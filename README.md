@@ -105,20 +105,43 @@ Para probar sin tocar nada real: `python scripts/run_dev_server.py --source-db <
 copia temporal en el puerto **8001** con el LLM, Telegram, el brazo, las noticias y los avisos
 apagados por construcción.
 
-### B) Con Docker (pensado para el PC 24/7; no reemplaza a `start_bot.ps1`)
+### B) Con Docker (un solo comando; la forma prevista para el PC 24/7)
 
-```bash
-docker compose build
-docker compose up -d
-docker compose ps          # debe pasar a "healthy" (hasta ~5 min la primera vez)
+> **⚠ Si hoy el bot real corre nativo, NO uses `docker compose up -d` para pasarlo a Docker.** Con el bot nativo apagado
+> crearía un volumen *vacío* y empezaría una medición nueva, sin historial y con el etiquetado real encendido (gasta
+> API). La mudanza correcta es con el script de más abajo (`migrate_to_docker.ps1`), que copia la base, la verifica y
+> puede deshacerse. `docker compose up -d` a secas es para **después** de la mudanza, o para una instalación nueva.
+
+```powershell
+docker compose up -d       # la primera vez construye la imagen (~1 min) y arranca el bot real
+docker compose ps          # STATUS pasa a "healthy" en ~1 min
+docker compose logs -f minerva
+docker compose stop        # parada ordenada (SIGTERM, hasta 30 s)
 ```
 
-El `.env` **no entra en la imagen**: se inyecta como variables de entorno en tiempo de ejecución. El
-puerto se publica solo en `127.0.0.1`, la base y los logs viven en volúmenes con nombre y el contenedor
-corre sin privilegios. **No lo levantes a la vez que `start_bot.ps1`** (dos procesos con el mismo token
-de Telegram y la misma clave). Detalle, migración y respaldos: [`docs/MANUAL_OPERACION.md`](docs/MANUAL_OPERACION.md).
+- La **base y los logs viven en volúmenes internos de Docker** (`minerva_data`, `minerva_logs`), no en carpetas de
+  Windows: SQLite en modo WAL no es fiable sobre ellas. Por eso los respaldos y los informes se hacen con
+  `python scripts\docker_db.py ...` (copia con la API de backup *dentro* del contenedor, SHA-256 verificado al
+  sacarla al host). Ver el manual, §5 y §9.
+- El `.env` **no entra en la imagen**: se monta de solo lectura en `/app/.env`. El puerto se publica solo en
+  `127.0.0.1:8000`, el código de la imagen es de solo lectura para el usuario del proceso (uid 10001, sin
+  capacidades) y el contenedor se reinicia solo (`restart: unless-stopped`).
+- Para que el bot vuelva tras reiniciar el PC, **Docker Desktop debe iniciar con Windows**
+  ([`docs/MUDANZA_DOCKER.md`](docs/MUDANZA_DOCKER.md) §5).
+- **No lo levantes a la vez que `start_bot.ps1`** (dos procesos con el mismo token de Telegram y la misma clave):
+  tras la mudanza, `start_bot.ps1` se niega a arrancar.
 
-Después de arrancar abre `http://127.0.0.1:8000/` (dashboard) y verifica `GET /health`.
+**Pasar a Docker el bot real que hoy corre nativo**, con su base y su medición intactas (guía completa en
+[`docs/MUDANZA_DOCKER.md`](docs/MUDANZA_DOCKER.md)):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\migrate_to_docker.ps1 -DryRun   # ensayo: no cambia nada
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\migrate_to_docker.ps1            # la mudanza (ventana segura; escribe MIGRAR)
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\rollback_from_docker.ps1         # la vuelta atrás (escribe VOLVER)
+```
+
+Después de arrancar abre `http://127.0.0.1:8000/` (dashboard) y verifica `GET /health`. Detalle de la operación
+diaria, los reinicios y los respaldos: [`docs/MANUAL_OPERACION.md`](docs/MANUAL_OPERACION.md).
 
 ## Qué verás
 
@@ -136,7 +159,7 @@ Después de arrancar abre `http://127.0.0.1:8000/` (dashboard) y verifica `GET /
 ## Pruebas
 
 ```bash
-pytest                              # 1.800 pruebas: unitarias, de integración y de punta a punta
+pytest                              # 1.925 pruebas: unitarias, de integración y de punta a punta (~12 min)
 ruff check .
 npm --prefix frontend run test      # Vitest
 npm --prefix frontend run build
@@ -169,9 +192,10 @@ app/            Backend (FastAPI + asyncio)
   trading/      Generador de señales, sombras, brazo ejecutado, monitor, motor de riesgo, informes
   backtesting/  Motor de backtest de la Fase 2
 frontend/       React + Vite + Tailwind (dashboard) con Vitest
-scripts/        Arranque/parada, respaldos, informes de la medición y del veredicto, herramientas
-tests/          unit/, integration/ y e2e/
-docker/         Healthcheck, versiones exactas de dependencias y certificados raíz opcionales
+scripts/        Arranque/parada, respaldos, informes de la medición y del veredicto, mudanza a Docker
+                (migrate_to_docker.ps1, rollback_from_docker.ps1, docker_db.py), herramientas
+tests/          unit/, integration/, e2e/ y support/ (docker, schtasks y bot nativo falsos para probar la mudanza)
+docker/         Healthcheck, versiones exactas de dependencias, variables de Compose y certificados raíz opcionales
 docs/           Especificación, planes por fase, manual de operación, informe final, esquema de la base
 ```
 
@@ -180,6 +204,7 @@ docs/           Especificación, planes por fase, manual de operación, informe 
 | Documento | Para qué |
 |---|---|
 | [`docs/MANUAL_OPERACION.md`](docs/MANUAL_OPERACION.md) | **Empieza aquí para operar**: rutina diaria, reinicios, respaldos, migración, claves, cuando se abra el gate |
+| [`docs/MUDANZA_DOCKER.md`](docs/MUDANZA_DOCKER.md) | Pasar el bot real a Docker con un script (y volver atrás), qué se probó y qué falló, Docker Desktop con Windows |
 | [`docs/INFORME_FINAL.md`](docs/INFORME_FINAL.md) | Qué se construyó, decisiones, qué está verificado y qué no, riesgos y próximos pasos |
 | [`docs/ESQUEMA_BD.md`](docs/ESQUEMA_BD.md) | Esquema de la base de datos (generado del código) |
 | [`docs/SPEC.md`](docs/SPEC.md) | Especificación vigente |

@@ -19,7 +19,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LIVING_DOCS = (
     "README.md", "docs/MANUAL_OPERACION.md", "docs/INFORME_FINAL.md", "docs/MIGRACION_PC.md",
-    "docs/VEREDICTO_3_6.md", "docs/ESQUEMA_BD.md",
+    "docs/VEREDICTO_3_6.md", "docs/ESQUEMA_BD.md", "docs/MUDANZA_DOCKER.md",
 )
 
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
@@ -93,3 +93,19 @@ def test_the_final_report_states_what_is_not_verified():
     # Lo que nunca debe omitirse del informe: lo no probado de verdad.
     assert "Docker con un daemon real" in report
     assert "Entrega real de mensajes de Telegram" in report
+    # Fase 7: lo que sigue sin probarse de la mudanza a Docker
+    for gap in (
+        "la mudanza real", "Docker Desktop inicie con Windows", "Ctrl+C a mitad de la mudanza",
+    ):
+        assert gap in report, gap
+
+
+def test_the_docker_migration_guide_explains_how_to_run_and_undo_it():
+    guide = read("docs/MUDANZA_DOCKER.md")
+
+    for needed in (
+        "migrate_to_docker.ps1 -DryRun", "migrate_to_docker.ps1", "rollback_from_docker.ps1",
+        "MIGRAR", "VOLVER", "Lo que falló", "Lo que no se pudo verificar", "unless-stopped",
+        "Start Docker Desktop when you sign in",
+    ):
+        assert needed in guide, needed
