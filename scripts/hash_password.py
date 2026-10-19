@@ -4,6 +4,12 @@ contrasena con `getpass` (nunca como argumento de linea de comandos -- eso
 quedaria en el historial de la shell) e imprime SOLO el hash resultante.
 Nunca toca `.env`: lo pegas tu mismo.
 
+El valor se imprime ENTRE COMILLAS SIMPLES. Un hash bcrypt lleva signos `$` (`$2b$12$...`) y
+Docker Compose, que lee el `.env` de la raiz en cada comando (`docker compose up/ps/logs...`),
+interpreta los `$` de un valor sin comillas simples como variables: muestra en pantalla trozos del
+hash ("The "XYZ" variable is not set") y lo recorta. Entre comillas simples nadie lo toca, y la
+aplicacion (python-dotenv) lo lee igual con o sin ellas. Fase 7, docs/MUDANZA_DOCKER.md.
+
     python scripts/hash_password.py
 """
 
@@ -20,8 +26,9 @@ BCRYPT_MAX_PASSWORD_BYTES = 72
 
 
 def build_hash_line(password: str, confirm: str) -> str:
-    """Linea `AUTH_PASSWORD_HASH=...` lista para pegar en `.env`; `ValueError`
-    con un mensaje claro si la contrasena no se puede hashear."""
+    """Linea `AUTH_PASSWORD_HASH='...'` lista para pegar en `.env` (el hash va entre comillas
+    simples: ver el docstring del modulo); `ValueError` con un mensaje claro si la contrasena no
+    se puede hashear."""
     if not password:
         raise ValueError("La contrasena no puede estar vacia.")
     if password != confirm:
@@ -33,7 +40,7 @@ def build_hash_line(password: str, confirm: str) -> str:
             f"{BCRYPT_MAX_PASSWORD_BYTES} (los caracteres no ASCII ocupan 2-4 bytes cada uno). "
             "Usa una mas corta."
         )
-    return "AUTH_PASSWORD_HASH=" + hash_password(password)
+    return "AUTH_PASSWORD_HASH='" + hash_password(password) + "'"
 
 
 if __name__ == "__main__":
