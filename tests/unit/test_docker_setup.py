@@ -535,7 +535,8 @@ def _kept_files(source: Path) -> list[Path]:
     "tests/unit/test_x.py", "frontend/node_modules/react/index.js", "frontend/dist/index.html",
     "app/__pycache__/main.cpython-311.pyc", "docs/SPEC.md", "PROGRESS.md", "README.md",
     "scripts/start_bot.ps1", "scripts/run_dev_server.py", "scripts/export_docker_requirements.py",
-    "minerva.db", "Dockerfile", "docker-compose.yml",
+    "scripts/docker_db.py", "scripts/migrate_to_docker.ps1", "scripts/rollback_from_docker.ps1",
+    "scripts/docker_common.ps1", "minerva.db", "Dockerfile", "docker-compose.yml",
 ])
 def test_the_build_context_excludes_secrets_data_and_what_is_not_needed(path):
     assert _ignored(path), path
@@ -544,6 +545,9 @@ def test_the_build_context_excludes_secrets_data_and_what_is_not_needed(path):
 @pytest.mark.parametrize("path", [
     "app/main.py", "app/trading/verdict_record.py", "scripts/telegram_daily.py",
     "scripts/measurement_status.py", "scripts/check_health.py", "docker/healthcheck.py",
+    # las herramientas que se corren DENTRO del contenedor (docker compose exec/run)
+    "scripts/backup_db.py", "scripts/restore_db.py", "scripts/db_fingerprint.py",
+    "scripts/docker_support.py", "scripts/resume_drawdown_stop.py",
     "docker/requirements.lock", "docker/certs/README.md", "frontend/package.json",
     "frontend/package-lock.json", "frontend/index.html", "frontend/src/main.tsx",
     "frontend/vite.config.ts", "frontend/tsconfig.json",

@@ -35,7 +35,9 @@ docker-compose.yml
 pyproject.toml
 frontend/node_modules
 frontend/dist
-# scripts solo de Windows o de desarrollo (el resto de scripts/ SI va: son las herramientas de operacion)
+# scripts solo de Windows, del host o de desarrollo (el resto de scripts/ SI va: son las herramientas de
+# operacion). docker_support.py SI viaja: backup_db/restore_db/resume_drawdown_stop lo importan.
 scripts/*.ps1
 scripts/export_docker_requirements.py
 scripts/run_dev_server.py
+scripts/docker_db.py
