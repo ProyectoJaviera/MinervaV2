@@ -46,6 +46,7 @@ from app.persistence.database import Database  # noqa: E402
 from app.persistence.repositories import system_state_repo  # noqa: E402
 from app.trading import risk_engine  # noqa: E402
 from app.trading.reveal import reveal_allowed  # noqa: E402
+from scripts.docker_support import docker_mode_refusal  # noqa: E402
 
 DEFAULT_DB = "data/minerva_estabilidad.db"
 EXIT_OK, EXIT_USAGE, EXIT_NOT_ACTIVE, EXIT_NO_DB = 0, 2, 3, 4
@@ -120,7 +121,7 @@ async def run(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--db", default=DEFAULT_DB, help=f"base del bot (def.: {DEFAULT_DB})")
+    parser.add_argument("--db", default=None, help=f"base del bot (def.: {DEFAULT_DB})")
     parser.add_argument("--confirm", action="store_true", help="levantar el stop (si no, mira)")
     parser.add_argument(
         "--equity", type=float, default=None,
@@ -129,7 +130,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.equity is not None and args.equity <= 0:
         parser.error("--equity debe ser mayor que 0")
-    code, message = asyncio.run(run(args.db, args.confirm, args.equity))
+    if args.db is None:
+        # Tras la mudanza a Docker la base por defecto es una copia VIEJA: levantar el stop ahi no
+        # cambiaria nada en el bot y daria por arreglado algo que no lo esta.
+        refusal = docker_mode_refusal(
+            DEFAULT_DB,
+            "Levantalo en el contenedor: docker compose exec minerva python "
+            "scripts/resume_drawdown_stop.py --confirm.",
+        )
+        if refusal:
+            print(refusal, file=sys.stderr)
+            return EXIT_USAGE
+    code, message = asyncio.run(run(args.db or DEFAULT_DB, args.confirm, args.equity))
     print(message, file=sys.stderr if code in (EXIT_USAGE, EXIT_NO_DB) else sys.stdout)
     return code
 

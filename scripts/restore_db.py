@@ -183,14 +183,31 @@ def run(
     return EXIT_OK, "\n".join(lines)
 
 
+def docker_mode_refusal(db: str) -> str | None:
+    """Tras la mudanza a Docker, restaurar sobre `data/minerva_estabilidad.db` no cambia la base
+    que usa el bot (scripts/docker_support.py)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.docker_support import docker_mode_refusal as refusal
+
+    return refusal(
+        db, "Restaurar aqui no cambia la base del bot: la viva esta en el volumen de Docker "
+        "(docs/MUDANZA_DOCKER.md). Para volver al bot nativo: scripts\\rollback_from_docker.ps1.",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("backup", help="respaldo a restaurar (hecho con scripts/backup_db.py)")
-    parser.add_argument("--db", default=DEFAULT_DB, help=f"destino (def.: {DEFAULT_DB})")
+    parser.add_argument("--db", default=None, help=f"destino (def.: {DEFAULT_DB})")
     parser.add_argument("--force", action="store_true",
                         help="si el destino existe, moverlo a .previo_* y reemplazarlo")
     args = parser.parse_args(argv)
-    code, message = run(args.backup, args.db, args.force)
+    if args.db is None:  # el destino por defecto: solo ahi aplica la proteccion de la mudanza
+        refusal = docker_mode_refusal(DEFAULT_DB)
+        if refusal:
+            print(refusal, file=sys.stderr)
+            return EXIT_USAGE
+    code, message = run(args.backup, args.db or DEFAULT_DB, args.force)
     print(message, file=sys.stderr if code else sys.stdout)
     return code
 

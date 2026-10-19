@@ -48,6 +48,11 @@
     escribiendo la MISMA base SQLite a la vez es exactamente lo que este
     script existe para evitar.
 
+    REHUSA tambien arrancar si junto a la base existe la marca
+    MIGRADO_A_DOCKER.txt (Fase 7): el bot corre en Docker y esa base es una
+    copia vieja; arrancar el bot nativo sobre ella bifurcaria la medicion.
+    Para volver al arranque nativo: scripts\rollback_from_docker.ps1.
+
     "Sin consola visible": el proceso real (`pythonw.exe`, que de por si
     nunca tiene consola) se envuelve en `cmd.exe /c "... >> archivo 2>&1"`
     -ocultada con -WindowStyle Hidden- porque PowerShell 5.1 no permite que
@@ -101,6 +106,17 @@ function Write-OpLog([string]$Message) {
     $line = "{0} | {1}" -f (Get-Date -Format "yyyy-MM-ddTHH:mm:ss"), $Message
     Add-Content -Path $OpLog -Value $line -Encoding utf8
     Write-Output $line
+}
+
+# Fase 7: tras la mudanza a Docker (scripts\migrate_to_docker.ps1) la base de este directorio es una
+# copia VIEJA y la viva esta en el volumen de Docker. Arrancar el bot nativo sobre ella BIFURCARIA la
+# medicion (dos historias distintas de la misma base). La marca la borra scripts\rollback_from_docker.ps1.
+$MigrationMarker = Join-Path (Split-Path -Parent $DatabaseFullPath) "MIGRADO_A_DOCKER.txt"
+if (Test-Path -LiteralPath $MigrationMarker -PathType Leaf) {
+    Write-OpLog ("RECHAZADO: el bot corre en Docker desde la mudanza (existe $MigrationMarker) y " +
+        "$DatabaseFullPath es una copia VIEJA: arrancar el bot nativo bifurcaria la medicion. " +
+        "Para volver al arranque nativo corre scripts\rollback_from_docker.ps1 (docs\MUDANZA_DOCKER.md).")
+    exit 1
 }
 
 $existing = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue

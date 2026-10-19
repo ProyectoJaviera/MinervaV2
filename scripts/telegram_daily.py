@@ -25,6 +25,13 @@ si el bot responde ahora.
 `.env` puede apuntar a otra base (el default de `app/config.py` es `data/minerva.db`,
 que ya no se escribe) y el resumen informaria una medicion que no es la real.
 
+**Con el bot en Docker (Fase 7).** Tras la mudanza existe la marca `data/MIGRADO_A_DOCKER.txt` y
+`data/minerva_estabilidad.db` es una copia VIEJA: sin `--db` explicito, la copia de solo lectura se
+saca DEL CONTENEDOR (`scripts/docker_support.py::export_db_copy`: API de backup dentro del
+contenedor, `docker compose cp` y SHA-256). Asi la tarea programada de siempre
+(`pythonw.exe scripts\telegram_daily.py`) sigue funcionando sin cambiar nada. Si Docker no responde
+el resumen se entrega igual: dice que el bot no contesta y que no pudo leer la base.
+
 Token y chat_id vienen de `settings.telegram_bot_token`/`telegram_chat_id` y nunca
 se imprimen ni se loguean. Probalo primero a mano, sin enviar nada:
 
@@ -65,6 +72,7 @@ from app.trading.measurement_status import (  # noqa: E402
 )
 from app.trading.shadow_live_labeler import FROZEN_PROMPT_SHA256  # noqa: E402
 from scripts.check_health import fetch_health  # noqa: E402
+from scripts.docker_support import docker_mode_active, export_db_copy  # noqa: E402
 from scripts.telegram_alert import send_telegram_message  # noqa: E402
 
 DEFAULT_DB_PATH = "data/minerva_estabilidad.db"
@@ -140,6 +148,24 @@ def collect_snapshot(
     """Copia a un directorio temporal del sistema, lee y borra la copia."""
     with tempfile.TemporaryDirectory(prefix="minerva_daily_", ignore_cleanup_errors=True) as tmp:
         copy_path = snapshot_database(source, Path(tmp))
+        conn = sqlite3.connect(f"file:{copy_path.as_posix()}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            return read_snapshot(conn, now, frozen_hash)
+        finally:
+            conn.close()
+
+
+def collect_snapshot_from_docker(
+    source: str, now: datetime, frozen_hash: str = FROZEN_PROMPT_SHA256,
+) -> DbSnapshot:
+    """La base viva esta en el volumen de Docker (`source` es la copia vieja y se ignora): saca una
+    copia consistente del contenedor a un directorio temporal del sistema, la lee y la borra. Si
+    Docker falla, la excepcion llega a `run()`, que la informa DENTRO del mensaje."""
+    with tempfile.TemporaryDirectory(
+        prefix="minerva_daily_docker_", ignore_cleanup_errors=True,
+    ) as tmp:
+        copy_path = export_db_copy(Path(tmp), "resumen")
         conn = sqlite3.connect(f"file:{copy_path.as_posix()}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         try:
@@ -288,8 +314,9 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument(
-        "--db", default=DEFAULT_DB_PATH,
-        help="base viva de la que se hace la copia de solo lectura (default: la del bot real)",
+        "--db", default=None,
+        help="base viva de la que se hace la copia de solo lectura (default: la del bot real; "
+             "si el bot corre en Docker, la del contenedor)",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="imprime el resumen sin enviarlo a Telegram",
@@ -302,9 +329,13 @@ if __name__ == "__main__":
             "(ver el docstring de scripts/telegram_alert.py), o usa --dry-run."
         )
 
+    # Sin --db y con la marca de la mudanza: la base viva esta en el contenedor.
+    in_docker = args.db is None and docker_mode_active(DEFAULT_DB_PATH)
     ok = run(
-        host=args.host, port=args.port, timeout=args.timeout, db_path=args.db,
+        host=args.host, port=args.port, timeout=args.timeout,
+        db_path=args.db or DEFAULT_DB_PATH,
         token=settings.telegram_bot_token, chat_id=settings.telegram_chat_id,
         dry_run=args.dry_run,
+        snapshot_fn=collect_snapshot_from_docker if in_docker else collect_snapshot,
     )
     sys.exit(0 if ok else 1)

@@ -122,9 +122,18 @@ def run(
     return EXIT_OK, "\n".join(lines)
 
 
+def docker_mode_refusal(db: str) -> str | None:
+    """Tras la mudanza a Docker, `data/minerva_estabilidad.db` es una copia VIEJA: respaldarla en
+    silencio daria por respaldado algo que no es la base viva (scripts/docker_support.py)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.docker_support import docker_mode_refusal as refusal
+
+    return refusal(db, "Para respaldar la base de Docker usa: python scripts/docker_db.py backup.")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--db", default=DEFAULT_DB, help=f"base a respaldar (def.: {DEFAULT_DB})")
+    parser.add_argument("--db", default=None, help=f"base a respaldar (def.: {DEFAULT_DB})")
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, help="carpeta de los respaldos")
     parser.add_argument("--prefix", default=DEFAULT_PREFIX, help="prefijo del nombre del archivo")
     parser.add_argument("--keep", type=int, default=0,
@@ -132,7 +141,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.keep < 0 or not args.prefix.replace("_", "").replace("-", "").isalnum():
         parser.error("--keep debe ser >= 0 y --prefix solo letras, numeros, '-' y '_'")
-    code, message = run(args.db, args.out_dir, args.prefix, args.keep)
+    if args.db is None:  # la base por defecto: solo ahi aplica la proteccion de la mudanza
+        refusal = docker_mode_refusal(DEFAULT_DB)
+        if refusal:
+            print(refusal, file=sys.stderr)
+            return EXIT_USAGE
+    code, message = run(args.db or DEFAULT_DB, args.out_dir, args.prefix, args.keep)
     print(message, file=sys.stderr if code else sys.stdout)
     return code
 
