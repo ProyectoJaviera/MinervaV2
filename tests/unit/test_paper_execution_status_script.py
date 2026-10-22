@@ -16,6 +16,7 @@ import pytest
 from app.config import settings
 from app.persistence.database import Database
 from app.persistence.repositories import paper_execution_repo as repo
+from tests.support.winproc import NO_WINDOW
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "paper_execution_status.py"
@@ -25,7 +26,7 @@ T0 = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
 def run_cli(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args], cwd=REPO_ROOT, capture_output=True, text=True,
-        encoding="utf-8", timeout=120,
+        encoding="utf-8", timeout=120, creationflags=NO_WINDOW,
     )
 
 

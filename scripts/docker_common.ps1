@@ -79,13 +79,15 @@ function ConvertTo-ArgString([string[]]$Items) {
 
 # Ejecuta `$Exe $ArgList` SIN usar el flujo de errores de PowerShell (un `docker` que escribe en
 # stderr no debe tumbar el script), con tiempo maximo. Devuelve ExitCode, Stdout y Stderr.
+# Siempre con `-WindowStyle Hidden`: ningun programa que lance esta mudanza (python, docker, git,
+# schtasks, powershell) debe abrir una ventana de consola, ni siquiera un instante.
 function Invoke-Native {
     param([string]$Exe, [string[]]$ArgList = @(), [int]$TimeoutSec = 600)
     $outFile = [System.IO.Path]::GetTempFileName()
     $errFile = [System.IO.Path]::GetTempFileName()
     try {
         $startArgs = @{
-            FilePath = $Exe; NoNewWindow = $true; PassThru = $true
+            FilePath = $Exe; WindowStyle = "Hidden"; PassThru = $true
             RedirectStandardOutput = $outFile; RedirectStandardError = $errFile
         }
         if ($ArgList.Count -gt 0) { $startArgs.ArgumentList = (ConvertTo-ArgString $ArgList) }
@@ -93,7 +95,7 @@ function Invoke-Native {
         $null = $process.Handle   # sin esto ExitCode queda vacio en Windows PowerShell 5.1
         if (-not $process.WaitForExit($TimeoutSec * 1000)) {
             Start-Process -FilePath "taskkill.exe" -ArgumentList @("/PID", "$($process.Id)", "/T", "/F") `
-                -NoNewWindow -Wait -ErrorAction SilentlyContinue
+                -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue
             return [pscustomobject]@{
                 ExitCode = 124; Stdout = ""; Stderr = "TIEMPO AGOTADO tras $TimeoutSec s: $Exe"
                 TimedOut = $true
@@ -205,13 +207,18 @@ function Wait-PortFree([int]$Port, [int]$TimeoutSec = 30) {
     return (-not (Test-PortListening $Port))
 }
 
-function Get-HealthOrNull([int]$Port, [int]$TimeoutSec = 5) {
-    try {
-        return (Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec $TimeoutSec `
-            -ErrorAction Stop)
-    } catch {
-        return $null
+# `$Attempts` > 1 reintenta (con 2 s de pausa) antes de rendirse: una sola sonda lenta -- el PC cargado,
+# el primer Invoke-RestMethod de un proceso nuevo -- no debe bastar para declarar que el bot no responde.
+function Get-HealthOrNull([int]$Port, [int]$TimeoutSec = 5, [int]$Attempts = 1) {
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            return (Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec $TimeoutSec `
+                -ErrorAction Stop)
+        } catch {
+            if ($attempt -lt $Attempts) { Start-Sleep -Seconds 2 }
+        }
     }
+    return $null
 }
 
 # Problemas de un /health frente a lo que exige la mudanza: status ok, hash congelado ok y sin pausa.

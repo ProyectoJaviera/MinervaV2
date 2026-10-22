@@ -23,6 +23,7 @@ from app.memory.runtime import LessonsRunner
 from app.persistence.models import TradeStatus
 from app.persistence.repositories import trades_repo
 from app.trading.position_monitor import PositionMonitor
+from tests.support.winproc import NO_WINDOW
 from tests.unit.lifespan_fakes import patch_lifespan
 from tests.unit.test_news_runtime_isolation import (
     FORBIDDEN_FOR_NEWS,
@@ -212,7 +213,7 @@ def _loaded_after_importing(modules: list[str], prefixes: tuple[str, ...]) -> li
     )
     proc = subprocess.run(
         [sys.executable, "-I", "-c", code], cwd=REPO_ROOT, capture_output=True, text=True,
-        encoding="utf-8", timeout=120,
+        encoding="utf-8", timeout=120, creationflags=NO_WINDOW,
     )
     assert proc.returncode == 0, proc.stderr
     return ast.literal_eval(proc.stdout.strip())

@@ -137,7 +137,7 @@ function Invoke-Preflight {
     $listening = Test-PortListening $NativePort
     $script:State.NativeWasRunning = $listening
     if ($listening) {
-        $health = Get-HealthOrNull $NativePort 8
+        $health = Get-HealthOrNull $NativePort 8 2
         if ($null -eq $health) {
             Add-Check $false "Bot nativo en el puerto $NativePort" `
                 "algo escucha pero no responde /health como Minerva: no lo toco"

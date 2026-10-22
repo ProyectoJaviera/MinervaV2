@@ -21,6 +21,8 @@ from pathlib import Path
 import httpx
 import pytest
 
+from tests.support.winproc import NO_WINDOW
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PORT = 8001
 
@@ -39,7 +41,7 @@ def _run_ps1(script: str, *args: str, timeout: float) -> subprocess.CompletedPro
     return subprocess.run(
         ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
          "-File", str(REPO_ROOT / "scripts" / script), *args],
-        capture_output=True, text=True, timeout=timeout,
+        capture_output=True, text=True, timeout=timeout, creationflags=NO_WINDOW,
     )
 
 
@@ -131,7 +133,8 @@ def test_start_refuses_a_second_instance_then_stop_frees_the_port(real_db_copy_f
     assert "Confirmado: no queda vivo ningun proceso de la cadena" in stop.stdout
     for pid in pids:
         listing = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True
+            ["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True,
+            creationflags=NO_WINDOW,
         ).stdout
         assert str(pid) not in listing, f"el PID {pid} sigue vivo despues de stop_bot.ps1"
 

@@ -17,6 +17,7 @@ from app.config import settings
 from app.persistence.database import Database
 from app.persistence.repositories import health_repo, news_repo
 from app.persistence.repositories.news_repo import FetchState, NewsRecord
+from tests.support.winproc import NO_WINDOW
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "news_status.py"
@@ -26,7 +27,7 @@ NOW = datetime.now(UTC)
 def run_cli(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args], cwd=REPO_ROOT, capture_output=True, text=True,
-        encoding="utf-8", timeout=120,
+        encoding="utf-8", timeout=120, creationflags=NO_WINDOW,
     )
 
 

@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from app.config import settings
+from tests.support.winproc import NO_WINDOW
 from tests.unit.synthetic_measurement import (
     SYNTHETIC_HASH,
     create_schema,
@@ -31,7 +32,7 @@ FLAGS = ("--allow-synthetic-for-tests", "--frozen-hash", SYNTHETIC_HASH)
 def run_cli(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args], cwd=REPO_ROOT, capture_output=True, text=True,
-        encoding="utf-8", timeout=180,
+        encoding="utf-8", timeout=180, creationflags=NO_WINDOW,
     )
 
 
@@ -209,7 +210,7 @@ def test_no_execution_backend_llm_client_nor_news_network_code_is_loaded_even_tr
     )
     proc = subprocess.run(
         [sys.executable, "-I", "-c", code], cwd=REPO_ROOT, capture_output=True, text=True,
-        encoding="utf-8", timeout=120,
+        encoding="utf-8", timeout=120, creationflags=NO_WINDOW,
     )
 
     assert proc.returncode == 0, proc.stderr

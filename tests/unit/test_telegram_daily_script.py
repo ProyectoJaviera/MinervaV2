@@ -23,6 +23,7 @@ from scripts.telegram_daily import (
     run,
     snapshot_database,
 )
+from tests.support.winproc import NO_WINDOW
 from tests.unit.synthetic_measurement import (
     BASE,
     SYNTHETIC_HASH,
@@ -368,7 +369,7 @@ def test_fetch_health_returns_the_json_or_the_error(monkeypatch):
 def _cli(cwd, *args):
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args], cwd=cwd, capture_output=True, text=True,
-        encoding="utf-8", timeout=120,
+        encoding="utf-8", timeout=120, creationflags=NO_WINDOW,
     )
 
 

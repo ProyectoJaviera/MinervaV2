@@ -11,6 +11,7 @@ import pytest
 
 from app.config import settings
 from scripts import shadow_report
+from tests.support.winproc import NO_WINDOW
 from tests.unit.synthetic_measurement import create_schema, insert_groups, scenario
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -28,7 +29,7 @@ async def db_path(tmp_path):
 def run_cli(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args], cwd=REPO_ROOT, capture_output=True, text=True,
-        encoding="utf-8", timeout=120,
+        encoding="utf-8", timeout=120, creationflags=NO_WINDOW,
     )
 
 

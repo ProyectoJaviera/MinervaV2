@@ -17,6 +17,7 @@ import pytest
 
 from app.persistence.database import Database
 from scripts import backup_db, restore_db
+from tests.support.winproc import NO_WINDOW
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 T0 = datetime(2026, 10, 18, 12, 0, 0, tzinfo=UTC)
@@ -174,7 +175,7 @@ def test_the_backup_script_runs_standalone_with_only_the_standard_library(tmp_pa
     result = subprocess.run(
         [sys.executable, "-I", str(REPO_ROOT / "scripts" / "backup_db.py"),
          "--db", str(tmp_path / "bot.db"), "--out-dir", str(tmp_path / "r")],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, timeout=60, creationflags=NO_WINDOW,
     )
 
     assert result.returncode == 0, result.stderr
@@ -305,7 +306,7 @@ def test_the_restore_script_runs_standalone(tmp_path):
     result = subprocess.run(
         [sys.executable, "-I", str(REPO_ROOT / "scripts" / "restore_db.py"),
          str(tmp_path / "resp.db"), "--db", str(tmp_path / "out" / "bot.db")],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, timeout=60, creationflags=NO_WINDOW,
     )
 
     assert result.returncode == 0, result.stderr

@@ -21,6 +21,7 @@ from app.persistence.models import Side, Trade
 from app.persistence.repositories import system_state_repo, trades_repo
 from app.trading import risk_engine
 from scripts import resume_drawdown_stop as script
+from tests.support.winproc import NO_WINDOW
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SETTINGS = Settings(  # type: ignore[call-arg]
@@ -161,7 +162,7 @@ def test_the_status_mode_runs_standalone_and_exits_zero(tmp_path):
     result = subprocess.run(
         [sys.executable, str(REPO_ROOT / "scripts" / "resume_drawdown_stop.py"),
          "--db", str(tmp_path / "bot.db")],
-        capture_output=True, text=True, timeout=120, cwd=REPO_ROOT,
+        capture_output=True, text=True, timeout=120, cwd=REPO_ROOT, creationflags=NO_WINDOW,
     )
 
     assert result.returncode == 0, result.stderr

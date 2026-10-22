@@ -29,6 +29,7 @@ from packaging.requirements import Requirement
 from packaging.version import Version
 
 from scripts import export_docker_requirements as export_lock
+from tests.support.winproc import NO_WINDOW
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = REPO_ROOT / "Dockerfile"
@@ -703,6 +704,7 @@ def _compose_cli_available() -> bool:
     try:
         result = subprocess.run(
             ["docker", "compose", "version"], capture_output=True, text=True, timeout=30,
+            creationflags=NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -721,6 +723,7 @@ def _compose_config(tmp_path: Path, **overrides: str) -> dict:
         ["docker", "compose", "--project-directory", str(tmp_path), "--env-file", str(fake),
          "-f", str(tmp_path / "docker-compose.yml"), "config", "--format", "json"],
         capture_output=True, text=True, timeout=60, env=env, cwd=tmp_path,
+        creationflags=NO_WINDOW,
     )
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)

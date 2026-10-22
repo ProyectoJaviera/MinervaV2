@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 from tests.support import fake_docker
+from tests.support.winproc import NO_WINDOW
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = Path(__file__).resolve().parent
@@ -232,12 +233,13 @@ class FakeNativeBot:
 
     def start(self) -> None:
         """Arranca el servidor "como si start_bot.ps1 lo hubiera hecho"."""
+        # CREATE_NO_WINDOW, no DETACHED_PROCESS: el `python.exe` del venv es un trampolin de
+        # consola; sin consola propia, el interprete real que lanza abre una VISIBLE.
         process = subprocess.Popen(
             [sys.executable, str(SUPPORT / "fake_health_server.py"), str(self.port),
              str(self.health_file)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
-            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            creationflags=NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
         )
         self.pid_file.write_text(str(process.pid), encoding="ascii")
         assert wait_until(lambda: port_open(self.port)), "el bot nativo falso no abrio su puerto"
@@ -312,7 +314,7 @@ class MigrationWorld:
         env.update(MINERVA_PORT=str(self.docker_port), COMPOSE_PROJECT_NAME=self.PROJECT)
         done = subprocess.run(
             [str(self.docker.cmd), "compose", "-p", self.PROJECT, "up", "-d"], env=env,
-            capture_output=True, text=True,
+            capture_output=True, text=True, creationflags=NO_WINDOW,
         )
         assert done.returncode == 0, done.stderr
         assert wait_until(lambda: port_open(self.docker_port)), (
@@ -359,7 +361,7 @@ class MigrationWorld:
         ]
         return subprocess.run(
             command, capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=timeout, cwd=REPO_ROOT, env=self.env(now),
+            timeout=timeout, cwd=REPO_ROOT, env=self.env(now), creationflags=NO_WINDOW,
         )
 
     def migrate(self, *extra: str, **kwargs) -> subprocess.CompletedProcess[str]:

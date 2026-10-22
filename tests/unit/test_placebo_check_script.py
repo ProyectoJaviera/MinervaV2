@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from app.config import settings
+from tests.support.winproc import NO_WINDOW
 from tests.unit.synthetic_measurement import (
     BASE,
     SYNTHETIC_HASH,
@@ -27,7 +28,7 @@ FLAGS = ("--allow-synthetic-for-tests", "--frozen-hash", SYNTHETIC_HASH)
 def run_cli(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args], cwd=REPO_ROOT, capture_output=True, text=True,
-        encoding="utf-8", timeout=300,
+        encoding="utf-8", timeout=300, creationflags=NO_WINDOW,
     )
 
 

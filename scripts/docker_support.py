@@ -26,6 +26,8 @@ import os
 import posixpath
 import re
 import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
 
@@ -37,6 +39,10 @@ CONTAINER_BACKUP_DIR = "/app/data/backups"
 # el `.env` real (ver docker/compose.vars).
 COMPOSE_VARS = REPO_ROOT / "docker" / "compose.vars"
 BACKUP_LINE = re.compile(r"^Respaldo: (?P<path>\S+) \(", re.MULTILINE)
+# Los procesos hijos de estos scripts no abren ventana de consola. El `python.exe` de un venv de
+# uv es un trampolin de CONSOLA que lanza el interprete real como hijo: desde un padre sin consola
+# (una tarea del Programador, pythonw, una prueba lanzada sin terminal) ese hijo abria una consola
+# VISIBLE. `CREATE_NO_WINDOW` solo existe en Windows; en el resto vale 0, valido en `creationflags`.
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
@@ -105,6 +111,67 @@ def compose(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
     if COMPOSE_VARS.is_file():
         base += ["--env-file", str(COMPOSE_VARS)]
     return run_docker([*base, *args], **kwargs)
+
+
+def _write_through(text: str, sink) -> None:
+    """Escribe `text` en `sink` (stdout/stderr), que puede no existir (`pythonw`) o no admitir algun
+    caracter (consola cp1252): nunca lanza."""
+    if sink is None:
+        return
+    try:
+        try:
+            sink.write(text)
+        except UnicodeEncodeError:
+            encoding = getattr(sink, "encoding", None) or "ascii"
+            sink.write(text.encode(encoding, errors="replace").decode(encoding, errors="replace"))
+        sink.flush()
+    except (OSError, ValueError):
+        pass  # la salida se cerro (p. ej. `| head`): el hijo termina igual
+
+
+def _kill_tree(pid: int) -> None:
+    """Termina el proceso y sus hijos (el trampolin del venv deja huerfano a su hijo si solo se mata
+    al padre)."""
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True,
+            stdin=subprocess.DEVNULL, creationflags=NO_WINDOW,
+        )
+
+
+def run_streaming(command: list[str], *, cwd: str | Path | None = None) -> int:
+    """Ejecuta `command` SIN abrir una ventana de consola, reenvia su stdout y su stderr a los
+    nuestros en cuanto llegan (un informe largo muestra su avance) y devuelve su codigo de salida.
+
+    Con `CREATE_NO_WINDOW` el hijo tiene su propia consola oculta y no hereda la nuestra: por eso su
+    salida se recoge por tuberias y se reenvia, en vez de dejarla caer en una consola que nadie ve.
+    Ctrl+C ya no llega al hijo (no comparte consola), asi que se le cierra a mano, con sus hijos."""
+    env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
+    process = subprocess.Popen(
+        command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=NO_WINDOW,
+    )
+
+    def relay(source, sink) -> None:
+        for raw in iter(source.readline, b""):
+            _write_through(raw.decode("utf-8", errors="replace"), sink)
+        source.close()
+
+    threads = [
+        threading.Thread(target=relay, args=(process.stdout, sys.stdout), daemon=True),
+        threading.Thread(target=relay, args=(process.stderr, sys.stderr), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        code = process.wait()
+    except BaseException:
+        _kill_tree(process.pid)
+        process.kill()
+        raise
+    for thread in threads:
+        thread.join()
+    return code
 
 
 def engine_ready(timeout: float = 120) -> bool:

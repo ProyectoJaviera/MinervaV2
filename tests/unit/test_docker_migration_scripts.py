@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from tests.support.fakes import FakeNativeBot, MigrationWorld, free_port, port_open, table_counts
+from tests.support.winproc import NO_WINDOW
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 pytestmark = [
@@ -161,6 +162,7 @@ def test_something_listening_that_is_not_minerva_is_never_touched(world):
         [sys.executable, "-c",
          f"import socket,time; s=socket.socket(); s.bind(('127.0.0.1',{world.native_port})); "
          "s.listen(); time.sleep(60)"],
+        creationflags=NO_WINDOW,
     )
     try:
         deadline = time.time() + 10
@@ -478,7 +480,9 @@ def test_a_container_that_is_not_healthy_is_rolled_back_but_its_volume_is_kept(
     world, health, expected,
 ):
     world.docker.set_health(health)
-    world.health_timeout = 8
+    # Este es el caso que exige el MOTIVO exacto («no llego a status=ok»): hace falta que al
+    # menos una sonda alcance a responder, y con el PC cargado PowerShell tarda en arrancar.
+    world.health_timeout = 20
 
     result = world.migrate("-Yes")
 
@@ -656,7 +660,7 @@ def test_start_bot_refuses_the_native_bot_on_the_old_database_after_the_migratio
          str(REPO_ROOT / "scripts" / "start_bot.ps1"), "-Port", str(free_port()),
          "-DatabasePath", str(data / "minerva_estabilidad.db"), "-LogDir", str(tmp_path / "logs")],
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
-        cwd=REPO_ROOT,
+        cwd=REPO_ROOT, creationflags=NO_WINDOW,
     )
 
     assert result.returncode == 1

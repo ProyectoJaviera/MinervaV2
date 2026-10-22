@@ -16,6 +16,7 @@ import pytest
 
 from scripts.check_health import OK, SIN_RESPUESTA, STALE
 from scripts.telegram_alert import run
+from tests.support.winproc import NO_WINDOW
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -319,7 +320,7 @@ def test_running_the_script_from_an_unrelated_cwd_does_not_fail_to_import(tmp_pa
 
     result = subprocess.run(
         [sys.executable, str(script_path), "--help"],
-        cwd=str(tmp_path), capture_output=True, text=True, timeout=30,
+        cwd=str(tmp_path), capture_output=True, text=True, timeout=30, creationflags=NO_WINDOW,
     )
 
     assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"

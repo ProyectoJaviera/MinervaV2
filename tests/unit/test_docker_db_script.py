@@ -16,6 +16,7 @@ import pytest
 
 from scripts import db_fingerprint, docker_db
 from tests.support.fakes import FakeDocker, make_native_db, table_counts
+from tests.support.winproc import NO_WINDOW
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -94,7 +95,7 @@ def test_the_fingerprint_cli_prints_one_json_line_and_exits_zero(tmp_path):
 
     result = subprocess.run(
         [sys.executable, "-I", str(REPO_ROOT / "scripts" / "db_fingerprint.py"), "--db", str(db)],
-        capture_output=True, text=True, timeout=60, cwd=tmp_path,
+        capture_output=True, text=True, timeout=60, cwd=tmp_path, creationflags=NO_WINDOW,
     )
 
     assert result.returncode == 0, result.stderr
@@ -244,7 +245,7 @@ def test_the_tool_runs_standalone_from_another_directory(fake, tmp_path):
         [sys.executable, str(REPO_ROOT / "scripts" / "docker_db.py"), "export",
          "--out-dir", str(out)],
         capture_output=True, text=True, timeout=120, cwd=tmp_path,
-        env=fake.env() | {"PYTHONIOENCODING": "utf-8"},
+        env=fake.env() | {"PYTHONIOENCODING": "utf-8"}, creationflags=NO_WINDOW,
     )
 
     assert result.returncode == 0, result.stderr

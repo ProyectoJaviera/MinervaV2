@@ -31,7 +31,6 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -85,10 +84,10 @@ def cmd_run(args: argparse.Namespace) -> int:
             os.replace(copy, kept)
             copy = kept
             print(f"La copia se conserva en {kept}", file=sys.stderr)
-        result = subprocess.run(
+        # Sin ventana de consola; su salida se reenvia en vivo (docker_support.run_streaming).
+        return docker_support.run_streaming(
             [sys.executable, str(script), "--db", str(copy), *forwarded], cwd=REPO_ROOT,
         )
-        return result.returncode
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -13,6 +13,7 @@ import pytest
 
 from app.config import settings
 from app.trading.verdict_record import find_verdict_record, load_official_record
+from tests.support.winproc import NO_WINDOW
 from tests.unit.synthetic_measurement import (
     SYNTHETIC_HASH,
     create_schema,
@@ -27,7 +28,7 @@ SCRIPT = REPO_ROOT / "scripts" / "ai_value_report.py"
 def run_cli(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args], cwd=REPO_ROOT, capture_output=True, text=True,
-        encoding="utf-8", timeout=180,
+        encoding="utf-8", timeout=180, creationflags=NO_WINDOW,
     )
 
 

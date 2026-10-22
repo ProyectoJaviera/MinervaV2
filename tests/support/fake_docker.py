@@ -33,6 +33,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = Path(__file__).resolve().parent
+# Este archivo tambien corre como script suelto (lo lanza `docker.cmd`), asi que la constante se
+# repite aqui en lugar de importarse de tests/support/winproc.py (ver ese modulo: el porque).
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 SERVICE = "minerva"
 WATCHED_ENV = (
     "MINERVA_PORT", "MINERVA_REAL_BOT", "MINERVA_RESTART", "MINERVA_ENV_FILE",
@@ -128,6 +131,7 @@ def container_run(command: list[str], mounts: dict[str, str], state: dict) -> in
         result = subprocess.run(
             [sys.executable, str(script), *args], cwd=app_dir(), capture_output=True, text=True,
             encoding="utf-8", errors="replace", env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            creationflags=NO_WINDOW,
         )
         sys.stdout.write(to_container(result.stdout, mounts))
         sys.stderr.write(to_container(result.stderr, mounts))
@@ -172,7 +176,10 @@ def port_in_use(port: int) -> bool:
 
 def kill(pid: int | None) -> None:
     if pid:
-        subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"], capture_output=True)
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/F", "/T"], capture_output=True,
+            creationflags=NO_WINDOW,
+        )
 
 
 def start_service(state: dict) -> int:
@@ -189,9 +196,9 @@ def start_service(state: dict) -> int:
     ensure_volume(state)
     if not health_file().is_file():
         health_file().write_text(json.dumps(DEFAULT_HEALTH), encoding="utf-8")
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
-        subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-    )
+    # CREATE_NO_WINDOW, no DETACHED_PROCESS: el `python.exe` del venv es un trampolin de consola;
+    # sin consola propia, el interprete real que lanza abre una VISIBLE (y asi se medio).
+    flags = NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     process = subprocess.Popen(
         [sys.executable, str(SUPPORT / "fake_health_server.py"), str(port), str(health_file())],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

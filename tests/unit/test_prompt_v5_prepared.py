@@ -27,6 +27,7 @@ from app.persistence.repositories.memory_repo import LessonRow
 from app.persistence.repositories.news_repo import NewsRecord
 from app.trading import shadow_live_labeler as labeler_module
 from app.trading.shadow_live_labeler import ShadowLiveLabeler
+from tests.support.winproc import NO_WINDOW
 from tests.unit.test_llm_prompts import CANDLE, _shadow_trade
 from tests.unit.test_llm_prompts import make_settings as prompt_settings
 from tests.unit.test_memory import entry as memory_entry
@@ -474,7 +475,7 @@ def test_starting_the_bot_never_loads_the_v5_prompt():
     )
     proc = subprocess.run(
         [sys.executable, "-I", "-c", code], cwd=REPO_ROOT, capture_output=True, text=True,
-        encoding="utf-8", timeout=120,
+        encoding="utf-8", timeout=120, creationflags=NO_WINDOW,
     )
 
     assert proc.returncode == 0, proc.stderr

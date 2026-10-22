@@ -8,8 +8,12 @@ reales de respaldo sobre un "volumen" en una carpeta temporal: sin Docker, sin r
 
 from __future__ import annotations
 
+import io
 import json
 import sqlite3
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -266,3 +270,96 @@ def test_the_exported_copy_survives_the_source_being_a_wal_database_in_use(fake,
         live.close()
 
     assert table_counts(copy)["shadow_trades"] == 5  # incluye lo que aun estaba en el -wal
+
+
+# --- procesos hijos sin ventana de consola (run_streaming) ---------------------------------------
+
+
+def test_run_streaming_relays_both_streams_and_returns_the_exit_code(capfd):
+    code = docker_support.run_streaming([
+        sys.executable, "-c",
+        "import sys; print('salida normal'); "
+        "print('salida de error', file=sys.stderr); sys.exit(3)",
+    ])
+
+    captured = capfd.readouterr()
+    assert code == 3
+    assert "salida normal" in captured.out and "salida de error" not in captured.out
+    assert "salida de error" in captured.err and "salida normal" not in captured.err
+
+
+def test_run_streaming_survives_output_that_is_not_valid_utf8(capfd):
+    code = docker_support.run_streaming([
+        sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'antes \\xff\\xfe despues\\n')",
+    ])
+
+    assert code == 0
+    assert "antes" in capfd.readouterr().out  # no revienta con bytes invalidos
+
+
+def test_run_streaming_launches_without_a_console_window_and_without_a_stdin(monkeypatch):
+    seen = {}
+    real_popen = subprocess.Popen
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real_popen(*args, **kwargs)
+
+    monkeypatch.setattr(docker_support.subprocess, "Popen", spy)
+
+    docker_support.run_streaming([sys.executable, "-c", "pass"])
+
+    assert seen["creationflags"] & docker_support.NO_WINDOW == docker_support.NO_WINDOW
+    assert seen["stdin"] == subprocess.DEVNULL  # un informe no espera teclado
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="taskkill es de Windows")
+def test_kill_tree_ends_the_process_and_its_children(tmp_path):
+    marker = tmp_path / "hijo.pid"
+    parent = subprocess.Popen(
+        [sys.executable, "-c",
+         "import subprocess, sys, time\n"
+         "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+         f"open(r'{marker}', 'w').write(str(child.pid))\n"
+         "time.sleep(120)\n"],
+        creationflags=docker_support.NO_WINDOW,
+    )
+    try:
+        deadline = time.time() + 20
+        while time.time() < deadline and not marker.exists():
+            time.sleep(0.1)
+        child_pid = int(marker.read_text())
+
+        docker_support._kill_tree(parent.pid)
+
+        assert parent.wait(timeout=20) is not None
+        listing = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {child_pid}"], capture_output=True, text=True,
+            creationflags=docker_support.NO_WINDOW,
+        ).stdout
+        assert str(child_pid) not in listing  # el hijo tampoco quedo huerfano
+    finally:
+        parent.kill()
+
+
+def test_an_interrupt_while_waiting_kills_the_child_tree_and_propagates(monkeypatch):
+    killed = []
+
+    class FakeProcess:
+        pid = 4242
+        stdout = io.BytesIO(b"")
+        stderr = io.BytesIO(b"")
+
+        def wait(self):
+            raise KeyboardInterrupt
+
+        def kill(self):
+            killed.append("kill")
+
+    monkeypatch.setattr(docker_support.subprocess, "Popen", lambda *a, **k: FakeProcess())
+    monkeypatch.setattr(docker_support, "_kill_tree", lambda pid: killed.append(("tree", pid)))
+
+    with pytest.raises(KeyboardInterrupt):
+        docker_support.run_streaming(["x"])
+
+    assert killed == [("tree", 4242), "kill"]

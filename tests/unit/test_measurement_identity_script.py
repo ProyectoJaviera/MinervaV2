@@ -17,6 +17,7 @@ import pytest
 from app.persistence.database import Database
 from app.trading.shadow_live_labeler import FROZEN_PROMPT_SHA256
 from scripts import measurement_identity as script
+from tests.support.winproc import NO_WINDOW
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODEL = "claude-sonnet-5-5"
@@ -154,6 +155,7 @@ def run_cli(db: Path, **env: str) -> subprocess.CompletedProcess:
         [sys.executable, str(REPO_ROOT / "scripts" / "measurement_identity.py"),
          "--db", str(db)],
         capture_output=True, text=True, timeout=120, cwd=db.parent, env=environment,
+        creationflags=NO_WINDOW,
     )
 
 

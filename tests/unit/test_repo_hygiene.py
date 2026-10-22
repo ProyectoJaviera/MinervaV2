@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.winproc import NO_WINDOW
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Rutas que NO deben estar versionadas jamas.
@@ -85,7 +87,7 @@ def files_git_would_commit() -> list[str]:
         listed = subprocess.run(
             ["git", "-C", str(REPO_ROOT), "ls-files", "-z", "--cached", "--others",
              "--exclude-standard"],
-            capture_output=True, check=True, timeout=120,
+            capture_output=True, check=True, timeout=120, creationflags=NO_WINDOW,
         ).stdout.decode("utf-8")
     except (OSError, subprocess.SubprocessError):
         pytest.skip("git no esta disponible o esto no es un repositorio")
@@ -135,7 +137,7 @@ def test_the_template_is_versioned_and_the_real_env_is_ignored():
 def test_gitignore_covers_what_must_never_be_pushed(path):
     result = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "check-ignore", "-q", "--no-index", path],
-        capture_output=True, timeout=60,
+        capture_output=True, timeout=60, creationflags=NO_WINDOW,
     )
 
     assert result.returncode == 0, f"{path} no esta en .gitignore"
@@ -147,7 +149,7 @@ def test_gitignore_covers_what_must_never_be_pushed(path):
 def test_gitignore_does_not_hide_what_must_be_versioned(path):
     result = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "check-ignore", "-q", "--no-index", path],
-        capture_output=True, timeout=60,
+        capture_output=True, timeout=60, creationflags=NO_WINDOW,
     )
 
     assert result.returncode == 1, f"{path} esta ignorado y deberia versionarse"
