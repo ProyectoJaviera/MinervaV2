@@ -38,14 +38,29 @@ El script fija su propio directorio de trabajo al arrancar (ver el
 `os.chdir` mas abajo), asi que funciona igual sin importar desde donde lo
 dispare el Programador de tareas (tipicamente System32, no la raiz del
 repo) -- lo unico que SI debe ser una ruta absoluta es el `/TR` de abajo
-(schtasks lo exige). Tarea de Windows cada 10 min, sin ventana de consola
-(probar primero con python.exe para ver errores, recien despues apuntar a
-pythonw.exe). Corre esto desde cmd.exe parado en D:\Estudio\IA\Minerva: el
-`%cd%` se expande ANTES de que schtasks lo vea (verificado), asi que el
-comando que queda guardado en la tarea ya tiene la ruta absoluta de verdad:
+(schtasks lo exige). Tarea de Windows cada 10 min. Corre esto desde cmd.exe
+parado en D:\Estudio\IA\Minerva: el `%cd%` se expande ANTES de que schtasks
+lo vea (verificado), asi que el comando que queda guardado en la tarea ya
+tiene la ruta absoluta de verdad:
 
     schtasks /Create /SC MINUTE /MO 10 /TN "MinervaHealthAlert" /ST 00:00 /F ^
-        /TR "%cd%\.venv\Scripts\pythonw.exe %cd%\scripts\telegram_alert.py"
+        /TR "conhost.exe --headless %cd%\.venv\Scripts\python.exe %cd%\scripts\telegram_alert.py"
+
+SIN VENTANA DE CONSOLA (medido en este PC con tareas de prueba y un monitor de
+ventanas): el `pythonw.exe` de un venv de uv NO es un programa de ventanas, es
+un trampolin de CONSOLA (igual que su python.exe), asi que una tarea que lo
+lance abre una consola visible cada vez; `powershell -WindowStyle Hidden`
+tambien parpadea. `conhost.exe --headless` (Windows 10 1809 o posterior) corre
+el programa sin ninguna ventana y la tarea funciona igual. Para cambiar una
+tarea YA registrada sin tocar sus otros ajustes (conserva el "Iniciar en"):
+
+    $py = "D:\Estudio\IA\Minerva\.venv\Scripts\python.exe"
+    $t = Get-ScheduledTask -TaskName MinervaHealthAlert
+    $t.Actions[0].Execute = "conhost.exe"
+    $t.Actions[0].Arguments = "--headless $py scripts\telegram_alert.py"
+    Set-ScheduledTask -InputObject $t
+
+(Para ver errores, prueba primero a mano con python.exe en una consola.)
 """
 
 from __future__ import annotations

@@ -20,7 +20,7 @@ un dashboard, un bot de Telegram y una API con login. El proyecto está diseñad
 
 **Qué se logró.**
 
-- La plataforma completa de las seis fases, con **1.925 pruebas automáticas de Python** (1.870 unitarias, 51 de punta
+- La plataforma completa de las seis fases, con **1.956 pruebas automáticas de Python** (1.901 unitarias, 51 de punta
   a punta y 4 de integración con la red real, omitidas por defecto) y 106 del frontend, humos contra copias de la
   base real y contra la red real, y el pipeline corriendo en vivo.
 - Una **medición ciega y trazable** del valor de la IA: sombras comparables, conglomerados para no contar dos veces
@@ -297,7 +297,7 @@ Contrastado línea por línea con `docs/SPEC.md`.
 
 | Qué | Con qué evidencia |
 |---|---|
-| Lógica de riesgo, simulación y datos | 1.925 pruebas de `pytest` recogidas (1.870 unitarias, 4 de integración con la red real y 51 de punta a punta): 1.921 pasan en 12 min 26 s y las 4 de red real se omiten salvo con `MINERVA_RUN_LIVE_TESTS=1`; 106 de Vitest; `ruff` limpio; `tsc` y `vite build` limpios |
+| Lógica de riesgo, simulación y datos | 1.956 pruebas de `pytest` recogidas (1.901 unitarias, 4 de integración con la red real y 51 de punta a punta): 1.952 pasan en 11 min 21 s y las 4 de red real se omiten salvo con `MINERVA_RUN_LIVE_TESTS=1`; 106 de Vitest; `ruff` limpio; `tsc` y `vite build` limpios |
 | Casos límite de SL/TP/trailing, liquidación, comisiones y funding | Pruebas dedicadas por función de riesgo y de simulación, y paridad de PnL entre la sombra y la cuenta paper |
 | Ciclo completo de punta a punta | 51 pruebas con el sistema real y el exterior simulado, con un candado que impide cualquier conexión de red |
 | Persistencia y migraciones con datos reales | Cada tarea sobre datos se probó contra una **copia** de la base real (ruta distinta verificada con `assert`): migraciones aditivas, mismas filas en las demás tablas, `PRAGMA integrity_check` |
@@ -419,6 +419,16 @@ Contrastado línea por línea con `docs/SPEC.md`.
    alerta externa sigue siendo necesaria.
 7. **`create_host_path: false` no se respeta en Docker Desktop para Windows:** si falta el `.env`, crea una carpeta
    con ese nombre. Los scripts de la mudanza comprueban que sea un archivo antes de llamar a Compose.
+8. **Las pruebas de la mudanza abrían una consola visible por cada servidor falso** (10 en solo 12 pruebas, medido
+   con un monitor de ventanas): los lanzaban con `DETACHED_PROCESS` a través del `python.exe` del venv, que en este
+   PC (venv de uv) es un trampolín de *consola*; su intérprete hijo abría su propia consola. Corregido con
+   `CREATE_NO_WINDOW` en todos los procesos hijos de pruebas y scripts y `-WindowStyle Hidden` en PowerShell,
+   vigilado por pruebas estáticas y por una comprobación empírica. Mismo origen: **`MinervaHealthAlert` abre una
+   consola visible cada 10 minutos** porque su acción es el `pythonw.exe` del venv (también de consola);
+   `conhost.exe --headless` lo evita (probado con tareas de prueba; el cambio, en `docs/MIGRACION_PC.md`).
+9. **Ninguna prueba toca el Programador de tareas real**, y ahora está garantizado: una trampa (`schtasks` que no
+   hace nada) ocupa su puerta durante toda la sesión de pruebas y una prueba estática impide que otro código lo
+   nombre.
 
 ## 8. Próximos pasos
 

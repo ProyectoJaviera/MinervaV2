@@ -29,8 +29,9 @@ que ya no se escribe) y el resumen informaria una medicion que no es la real.
 `data/minerva_estabilidad.db` es una copia VIEJA: sin `--db` explicito, la copia de solo lectura se
 saca DEL CONTENEDOR (`scripts/docker_support.py::export_db_copy`: API de backup dentro del
 contenedor, `docker compose cp` y SHA-256). Asi la tarea programada de siempre
-(`pythonw.exe scripts\telegram_daily.py`) sigue funcionando sin cambiar nada. Si Docker no responde
-el resumen se entrega igual: dice que el bot no contesta y que no pudo leer la base.
+(`conhost.exe --headless python.exe scripts\telegram_daily.py`) sigue funcionando sin cambiar nada.
+Si Docker no responde el resumen se entrega igual: dice que el bot no contesta y que no pudo leer
+la base.
 
 Token y chat_id vienen de `settings.telegram_bot_token`/`telegram_chat_id` y nunca
 se imprimen ni se loguean. Probalo primero a mano, sin enviar nada:

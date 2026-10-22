@@ -198,6 +198,15 @@ resumen de las 09:15 y el arranque al iniciar sesión **no existían**, así que
 | `MinervaDailySummary` | `scripts/telegram_daily.py`: el resumen de las 09:15 (solo conteos) | Diaria, 09:15 hora de Chile | **Sin cambios en la tarea**: el script ve la marca `data\MIGRADO_A_DOCKER.txt` y saca su propia copia de la base del contenedor (incluso con el contenedor detenido, y entonces dice «BOT SIN RESPUESTA») |
 | `MinervaBackup` (opcional, §5.2) | Respaldo diario | Diaria | Cambia el comando: `scripts\docker_db.py backup` (§5.2) |
 
+**Que ninguna tarea abra una ventana de consola.** Medido en este PC (2026-10-19) con tareas de prueba y un monitor de
+ventanas: una acción `…\.venv\Scripts\pythonw.exe` **abre una consola visible cada vez** (el `pythonw.exe` de un venv
+de uv es un trampolín de *consola*, no un programa de ventanas), y `powershell.exe -WindowStyle Hidden` solo la hace
+parpadear. `conhost.exe --headless <programa> …` no abre nada y el programa corre igual (los procesos ocultos que deja
+un script lanzador, como el bot, siguen vivos). Por eso las órdenes de registro de este manual y de
+`docs/MIGRACION_PC.md` usan `conhost.exe --headless`. Si tu `MinervaHealthAlert` se registró con `pythonw.exe`
+(abre una consola cada 10 minutos), el cambio de una línea que lo corrige sin recrear la tarea está en
+`docs/MIGRACION_PC.md` («Si tu `MinervaHealthAlert` ya existe…»).
+
 ## 4. Reinicios
 
 ### 4.1 Ventana segura
@@ -285,8 +294,9 @@ volumen**, y reiniciar o reinstalar Docker Desktop puede borrarlo (§5.6): el re
 
 ```powershell
 $RepoRoot = "D:\Estudio\IA\Minerva"
-$action = New-ScheduledTaskAction -Execute "$RepoRoot\.venv\Scripts\python.exe" `
-    -Argument "scripts\docker_db.py backup --keep 14" -WorkingDirectory $RepoRoot
+$action = New-ScheduledTaskAction -Execute "conhost.exe" `
+    -Argument "--headless $RepoRoot\.venv\Scripts\python.exe scripts\docker_db.py backup --keep 14" `
+    -WorkingDirectory $RepoRoot
 $trigger = New-ScheduledTaskTrigger -Daily -At 03:30
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName "MinervaBackup" -Action $action -Trigger $trigger -Settings $settings `
@@ -295,6 +305,7 @@ Register-ScheduledTask -TaskName "MinervaBackup" -Action $action -Trigger $trigg
 
 (Nativo: el mismo bloque con `scripts\backup_db.py --keep 14`.) Si Docker Desktop no está listo a esa hora, el script
 espera hasta 60 s al motor y, si no responde, termina con código 5: la tarea aparecerá como fallida en el Programador.
+El `conhost.exe --headless` del comando es para que la tarea no abra una ventana de consola (§3.5).
 
 ### 5.3 Dónde guardarlos
 
@@ -639,6 +650,14 @@ base viva: por eso en Docker se les da la copia de `docker_db.py export` (o, par
 `pytest` (unitarias, de integración y de punta a punta), `ruff check .`, `npm --prefix frontend run test` y
 `npm --prefix frontend run build`. Las pruebas de punta a punta usan el sistema real sobre una base temporal y simulan
 solo el exterior (Anthropic, Bitunix, WebSocket y Telegram), sin red ni gasto.
+
+Las pruebas **no abren ventanas de consola** (todo proceso hijo de `tests/`, `scripts/` y `app/` se lanza con
+`creationflags=CREATE_NO_WINDOW` y todo `Start-Process` de PowerShell con `-WindowStyle Hidden`; lo vigila
+`tests/unit/test_no_console_windows.py`, también de forma empírica con la API de ventanas de Windows) y **no pueden
+tocar el Programador de tareas real**: durante toda la sesión `tests/conftest.py` apunta `MINERVA_SCHTASKS_EXE` (la única
+puerta de los scripts al Programador) a una trampa que no toca nada, las pruebas de la mudanza usan su `schtasks` falso
+(tarea `MinervaStartBotTest`, nunca un nombre real) y `tests/unit/test_no_real_task_scheduler.py` vigila que ningún
+otro código nombre a `schtasks` ni a los cmdlets `*-ScheduledTask`.
 
 La mudanza a Docker se probó de dos maneras (detalle en `docs/MUDANZA_DOCKER.md` §2 y §13): las pruebas del repositorio
 ejecutan **de verdad** los scripts de PowerShell contra un `docker`, un `schtasks` y un bot nativo *falsos*

@@ -68,8 +68,8 @@ denegado" en tu sesión normal, abrí PowerShell como Administrador):
 
 ```powershell
 $RepoRoot = "D:\Estudio\IA\Minerva"
-$action = New-ScheduledTaskAction -Execute "powershell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$RepoRoot\scripts\start_bot.ps1`"" `
+$action = New-ScheduledTaskAction -Execute "conhost.exe" `
+    -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$RepoRoot\scripts\start_bot.ps1`"" `
     -WorkingDirectory $RepoRoot
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $trigger.Delay = "PT60S"   # 60s de retraso: tiempo para que haya red al iniciar sesion
@@ -78,6 +78,13 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 Register-ScheduledTask -TaskName "MinervaStartBot" -Action $action -Trigger $trigger `
     -Settings $settings -Description "Arranca el bot real de Minerva al iniciar sesion (60s de retraso)."
 ```
+
+> **Sin ventana de consola: `conhost.exe --headless`.** Medido en este PC con tareas de prueba y un monitor
+> de ventanas (2026-10-19): una acción `powershell.exe …` abre una consola visible mientras corre
+> (`-WindowStyle Hidden` solo la hace parpadear), y una acción `…\.venv\Scripts\pythonw.exe` **también abre
+> una**, porque el `pythonw.exe` de un venv de uv es un trampolín de *consola*, no un programa de ventanas.
+> Con `conhost.exe --headless <programa> …` no se abre nada y el programa corre igual: el script lanzador
+> termina y los procesos ocultos que dejó (el bot) siguen vivos. Requiere Windows 10 1809 o posterior.
 
 **Eliminar**:
 
@@ -94,6 +101,20 @@ Get-ScheduledTask -TaskName "MinervaStartBot" | Select-Object TaskName, State
 La tarea de alerta por Telegram (`scripts/telegram_alert.py`, cada 10 min, sin
 depender del login) se registra por separado con `schtasks /Create` -- ver el
 docstring de ese script para el comando exacto.
+
+**Si tu `MinervaHealthAlert` ya existe con `…\.venv\Scripts\pythonw.exe`** (así se registraba), abre una consola
+visible cada 10 minutos. Se corrige sin recrearla ni tocar sus otros ajustes (conserva el «Iniciar en»; el cambio
+exacto se probó antes con una tarea de prueba idéntica):
+
+```powershell
+$t = Get-ScheduledTask -TaskName MinervaHealthAlert
+$t.Actions[0].Execute = "conhost.exe"
+$t.Actions[0].Arguments = "--headless D:\Estudio\IA\Minerva\.venv\Scripts\python.exe scripts\telegram_alert.py"
+Set-ScheduledTask -InputObject $t
+```
+
+Comprueba después con `Start-ScheduledTask -TaskName MinervaHealthAlert` que no aparece ninguna ventana y que
+`Get-ScheduledTaskInfo -TaskName MinervaHealthAlert` marca `LastTaskResult : 0`.
 
 ## Tarea del Programador de Windows: resumen diario por Telegram (09:15)
 
@@ -122,8 +143,9 @@ debe estar en la zona horaria de Chile -- Windows: "Pacific SA Standard Time" --
 
 ```powershell
 $RepoRoot = "D:\Estudio\IA\Minerva"
-$action = New-ScheduledTaskAction -Execute "$RepoRoot\.venv\Scripts\pythonw.exe" `
-    -Argument "`"$RepoRoot\scripts\telegram_daily.py`"" -WorkingDirectory $RepoRoot
+$action = New-ScheduledTaskAction -Execute "conhost.exe" `
+    -Argument "--headless $RepoRoot\.venv\Scripts\python.exe `"$RepoRoot\scripts\telegram_daily.py`"" `
+    -WorkingDirectory $RepoRoot
 $trigger = New-ScheduledTaskTrigger -Daily -At 09:15
 # El cmdlet guarda la hora en UTC ("...12:15:00Z"), y en Chile cambia el horario de
 # verano: se fija la hora LOCAL sin "Z" para que siga siendo 09:15 todo el año.
@@ -151,9 +173,10 @@ Start-ScheduledTask -TaskName "MinervaDailySummary"
 La sintaxis (acción, disparador con la hora local fija y opciones) está verificada en
 esta máquina construyendo los objetos sin registrar; el registro en sí puede exigir una
 terminal con privilegios suficientes (si da "Acceso denegado", abre PowerShell como
-Administrador). `pythonw.exe` no muestra ventana ni salida: si la tarea falla, el
-historial del Programador marca la corrida (código de salida 1 = Telegram no confirmó el
-envío); para ver los errores, prueba primero con `python.exe` y `--dry-run`.
+Administrador). Con `conhost.exe --headless` no hay ventana ni salida visible: si la tarea falla,
+el historial del Programador marca la corrida (código de salida 1 = Telegram no confirmó el
+envío); para ver los errores, prueba primero a mano con `python.exe` y `--dry-run`. (No uses el
+`pythonw.exe` del venv: es un trampolín de consola y abriría una ventana cada día.)
 
 ## Mudar el bot a otro PC sin perder la medición en vivo
 

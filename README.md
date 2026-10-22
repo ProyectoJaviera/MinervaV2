@@ -159,7 +159,7 @@ diaria, los reinicios y los respaldos: [`docs/MANUAL_OPERACION.md`](docs/MANUAL_
 ## Pruebas
 
 ```bash
-pytest                              # 1.925 pruebas: unitarias, de integración y de punta a punta (~12 min)
+pytest                              # 1.956 pruebas: unitarias, de integración y de punta a punta (~11 min)
 ruff check .
 npm --prefix frontend run test      # Vitest
 npm --prefix frontend run build
