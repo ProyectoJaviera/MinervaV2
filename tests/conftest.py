@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -8,6 +9,32 @@ import pytest_asyncio
 
 from app.config import settings
 from app.persistence.database import Database
+from tests.support import scheduler_tripwire
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _the_real_task_scheduler_is_never_reachable(tmp_path_factory):
+    """Ninguna prueba toca el Programador de tareas REAL de Windows: durante toda la sesion,
+    `MINERVA_SCHTASKS_EXE` (la unica puerta de los scripts al Programador) apunta a un `schtasks`
+    TRAMPA (ver tests/support/scheduler_tripwire.py). Las pruebas de la mudanza la sobrescriben con
+    su falso. Si la trampa llegara a usarse en la sesion, esta falla al terminar con la llamada."""
+    trap, log = scheduler_tripwire.install(tmp_path_factory.mktemp("tripwire"))
+    previous = {k: os.environ.get(k) for k in (scheduler_tripwire.EXE_VARIABLE,
+                                               scheduler_tripwire.LOG_VARIABLE)}
+    os.environ[scheduler_tripwire.EXE_VARIABLE] = str(trap)
+    os.environ[scheduler_tripwire.LOG_VARIABLE] = str(log)
+    try:
+        yield trap
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+    calls = log.read_text(encoding="utf-8", errors="replace").strip() if log.exists() else ""
+    assert not calls, (
+        "Una prueba intento usar el Programador de tareas REAL (lo freno la trampa): " + calls
+    )
 
 
 @pytest_asyncio.fixture
