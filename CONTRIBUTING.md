@@ -23,9 +23,11 @@ tocar nada, lee las tres de abajo.
 ## Preparar el entorno
 
 Necesitas Python 3.11 o 3.12 (`requires-python = ">=3.11,<3.13"`; con 3.13 o superior `pip install` se niega a
-instalar el proyecto, así que si tu `python` es más nuevo crea el entorno con `py -3.12 -m venv .venv` en Windows,
-`python3.12 -m venv .venv` en Linux o macOS, o `uv venv --python 3.12`) y, para el dashboard, Node.js 22.22 o
-superior (se usa Node 24 en la imagen Docker).
+instalar el proyecto, así que si tu `python` es más nuevo crea el entorno con `py -3.11 -m venv .venv` en Windows,
+`python3.12 -m venv .venv` en Linux o macOS) y, para el dashboard, Node.js 22.22 o superior (se usa Node 24 en la
+imagen Docker). **Windows con uv:** el Python 3.12 que descarga uv (*python-build-standalone*) aborta con
+`OPENSSL_Uplink … no OPENSSL_Applink` en cuanto se crea un contexto SSL (comprobado en el equipo de desarrollo: falla
+al crear el entorno con `python -m venv` y detiene las pruebas de `docker/healthcheck.py`); su Python 3.11 funciona.
 
 ```bash
 python -m venv .venv
@@ -36,6 +38,9 @@ python -m venv .venv
 
 npm --prefix frontend ci
 ```
+
+Con [uv](https://docs.astral.sh/uv/) es equivalente: `uv venv --python 3.11` y `uv pip install -e ".[dev]"` (es como
+se creó el entorno de desarrollo). Detrás de una red con inspección TLS, añade `--system-certs` a `uv pip install`.
 
 Las pruebas no necesitan credenciales ni red. Copia `.env.example` a `.env` **solo si vas a arrancar el bot**
 (ver [`docs/GUIA_INSTALACION.md`](docs/GUIA_INSTALACION.md)); si tienes uno, `app/config.py` lo lee también al

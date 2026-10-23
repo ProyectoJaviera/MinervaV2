@@ -95,7 +95,7 @@ un bot de Telegram. Detalle de componentes, flujo y decisiones de diseño: [Arqu
 | Para | Necesitas |
 |---|---|
 | Ejecutar el bot | **Docker** (Docker Desktop, o Docker Engine con Compose v2) y **Git** |
-| Herramientas auxiliares (contraseña, respaldos, informes) | **Python 3.11 o 3.12** (no 3.13 ni superiores) |
+| Herramientas auxiliares (contraseña, respaldos, informes) | **Python 3.11 o 3.12** (no 3.13 ni superiores; en Windows con uv, usa el 3.11: [detalle](docs/GUIA_INSTALACION.md#antes-de-empezar)) |
 | La IA (etiquetado) | Una cuenta de la **Claude Console** con facturación. Es lo **único que cuesta dinero**: del orden de 0,005 USD por señal, con tope diario (1 USD por defecto) |
 | Avisos y comandos | Un bot de **Telegram** (gratis). Opcional |
 | Compilar el dashboard sin Docker | **Node.js 22.22 o superior**. Opcional |

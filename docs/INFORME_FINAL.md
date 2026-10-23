@@ -72,7 +72,7 @@ escritura**: login, logout y `POST /api/control/{action}`.
 | 0 | Evaluación crítica de `openspec.md`, verificación de APIs y diseño (`docs/historial/FASE0.md`) | Aprobada |
 | 1 | Estructura, datos de mercado de Bitunix, vertical mínima de punta a punta | Aprobada |
 | 2 | Universo dinámico y backtest riguroso | Cerrada |
-| 3 | Riesgo, simulador realista, señales en vivo, sombras, medición del LLM, brazo ejecutado (3.1–3.9) | Implementada |
+| 3 | Riesgo, simulador (comisiones, funding, deslizamiento y liquidación), señales en vivo, sombras, medición del LLM, brazo ejecutado (3.1–3.9) | Implementada |
 | 4 | Noticias y memoria de lecciones (apagadas durante la medición) | Aprobada |
 | 5 | Dashboard completo, controles, push de Telegram | Aprobada |
 | 6 | Docker, pruebas de punta a punta, documentación final y limpieza | Entregada |

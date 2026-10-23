@@ -188,6 +188,10 @@ documentación oficial o con una prueba controlada antes de pensar en dinero rea
 - **La entrega real de mensajes de Telegram** en el chat de cada usuario: depende de su token, que el proyecto nunca lee.
 - **El aspecto visual del dashboard en un navegador real y en un teléfono.** Solo se probó con Vitest/jsdom y `tsc`/`vite build`;
   el modo oscuro y el diseño adaptable están implementados pero sin revisión visual.
+- **Python en Windows:** el desarrollo y las pruebas usaron el Python 3.11 que instala uv. El Python 3.12 de uv
+  (*python-build-standalone*) aborta con `OPENSSL_Uplink … no OPENSSL_Applink` en cuanto se crea un contexto SSL
+  (comprobado: falla `python -m venv` y las pruebas de `docker/healthcheck.py`); un Python 3.11 o 3.12 de python.org no
+  se ha comprobado (sí el 3.14 de python.org, fuera del rango admitido).
 - **Linux y macOS como equipo anfitrión:** el proyecto se desarrolló y probó en Windows. La imagen de Docker es de Linux y su
   construcción y ejecución sí se probaron; no se ejecutó nada del anfitrión (scripts de Python, `cron`, permisos del `.env`) en
   Linux ni en macOS.
