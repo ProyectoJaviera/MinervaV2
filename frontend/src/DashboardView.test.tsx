@@ -69,7 +69,7 @@ describe("DashboardView: columnas de PnL de las sombras", () => {
       })
     );
 
-    render(withQueryClient(<DashboardView username="renzo" />));
+    render(withQueryClient(<DashboardView username="admin" />));
 
     await screen.findByText("BTCUSDT LONG");
     expect(screen.queryByText("PnL neto")).not.toBeInTheDocument();
@@ -90,7 +90,7 @@ describe("DashboardView: columnas de PnL de las sombras", () => {
       })
     );
 
-    render(withQueryClient(<DashboardView username="renzo" />));
+    render(withQueryClient(<DashboardView username="admin" />));
 
     await screen.findByText("BTCUSDT LONG");
     expect(screen.getByText("PnL neto")).toBeInTheDocument();
@@ -114,7 +114,7 @@ describe("DashboardView: columnas de PnL de las sombras", () => {
       })
     );
 
-    render(withQueryClient(<DashboardView username="renzo" />));
+    render(withQueryClient(<DashboardView username="admin" />));
 
     await screen.findByText("BTCUSDT LONG");
     expect(screen.getByRole("status")).toHaveTextContent(/gate abierto: seguir docs\/VEREDICTO_3_6\.md/i);
@@ -136,7 +136,7 @@ describe("DashboardView: columnas de PnL de las sombras", () => {
       })
     );
 
-    render(withQueryClient(<DashboardView username="renzo" />));
+    render(withQueryClient(<DashboardView username="admin" />));
 
     await screen.findByText("BTCUSDT LONG");
     expect(screen.queryByText("PnL neto")).not.toBeInTheDocument();
@@ -156,7 +156,7 @@ describe("DashboardView: columnas de PnL de las sombras", () => {
       })
     );
 
-    render(withQueryClient(<DashboardView username="renzo" />));
+    render(withQueryClient(<DashboardView username="admin" />));
 
     await screen.findByText("BTCUSDT LONG");
     expect(screen.queryByText("PnL neto")).not.toBeInTheDocument();
@@ -189,7 +189,7 @@ describe("DashboardView: columnas de PnL de las sombras", () => {
       })
     );
 
-    render(withQueryClient(<DashboardView username="renzo" />));
+    render(withQueryClient(<DashboardView username="admin" />));
 
     await screen.findByText(/Dias estimados para llegar a 300/);
     expect(screen.getByText("~317.7 dias de calendario")).toBeInTheDocument();
@@ -217,7 +217,7 @@ describe("DashboardView: columnas de PnL de las sombras", () => {
       })
     );
 
-    render(withQueryClient(<DashboardView username="renzo" />));
+    render(withQueryClient(<DashboardView username="admin" />));
 
     await screen.findByText("~12.5 dias de calendario");
     expect(screen.getAllByText("sin datos suficientes para estimar").length).toBeGreaterThanOrEqual(3);
@@ -239,7 +239,7 @@ describe("DashboardView: columnas de PnL de las sombras", () => {
       })
     );
 
-    render(withQueryClient(<DashboardView username="renzo" />));
+    render(withQueryClient(<DashboardView username="admin" />));
 
     expect(await screen.findByText("Noticias y memoria de lecciones (Fase 4)")).toBeInTheDocument();
     expect(await screen.findByText("Noticias no disponibles.")).toBeInTheDocument();
@@ -259,7 +259,7 @@ describe("DashboardView: columnas de PnL de las sombras", () => {
       })
     );
 
-    render(withQueryClient(<DashboardView username="renzo" />));
+    render(withQueryClient(<DashboardView username="admin" />));
 
     await screen.findByText("BTCUSDT LONG");
     expect(screen.getByText(/junte 300 conglomerados efectivos por lado/i)).toBeInTheDocument();
@@ -303,7 +303,7 @@ describe("DashboardView: pestanas (Fase 5)", () => {
   function open(routes: Record<string, { status: number; body: unknown }> = {}) {
     const fetchMock = mockFetch({ ...SUMMARY_ROUTES, ...routes });
     vi.stubGlobal("fetch", fetchMock);
-    render(withQueryClient(<DashboardView username="renzo" />));
+    render(withQueryClient(<DashboardView username="admin" />));
     return fetchMock;
   }
 

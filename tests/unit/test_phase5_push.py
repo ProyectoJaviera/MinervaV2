@@ -155,7 +155,7 @@ async def test_the_first_run_takes_the_baseline_and_notifies_nothing(db):
     open_trade = await new_trade(db)
     done = await new_trade(db, "ETHUSDT", Side.SHORT)
     await close(db, done)
-    await control_actions.apply_control(db, "kill", channel="DASHBOARD", actor="renzo")
+    await control_actions.apply_control(db, "kill", channel="DASHBOARD", actor="admin")
     await system_state_repo.set_state(
         db, "circuit_breaker_until", (now() + 5 * H).isoformat(),
     )
@@ -382,18 +382,18 @@ async def test_a_change_back_is_announced_again(db, gate):
 async def test_the_kill_switch_from_the_dashboard_is_one_alert_with_its_origin(db, gate):
     client = FakeClient()
     notifier, _ = await baseline(db, client)
-    await control_actions.apply_control(db, "kill", channel="DASHBOARD", actor="renzo")
+    await control_actions.apply_control(db, "kill", channel="DASHBOARD", actor="admin")
 
     assert await notifier.poll_once() == 1  # kill + pausa = un solo aviso
 
     [text] = client.sent
     assert "ALERTA: KILL SWITCH ACTIVADO. No se abren entradas nuevas." in text
     assert "La medicion esta DETENIDA (scheduler en pausa)." in text
-    assert "Origen: dashboard (renzo) a las " in text and text.endswith(" UTC")
+    assert "Origen: dashboard (admin) a las " in text and text.endswith(" UTC")
 
 
 async def test_resume_after_a_kill_is_one_message_too(db, gate):
-    await control_actions.apply_control(db, "kill", channel="DASHBOARD", actor="renzo")
+    await control_actions.apply_control(db, "kill", channel="DASHBOARD", actor="admin")
     client = FakeClient()
     notifier, _ = await baseline(db, client)
     await control_actions.apply_control(db, "resume", channel="TELEGRAM", actor="telegram")
@@ -408,13 +408,13 @@ async def test_resume_after_a_kill_is_one_message_too(db, gate):
 async def test_a_plain_pause_and_resume_are_announced(db, gate):
     client = FakeClient()
     notifier, _ = await baseline(db, client)
-    await control_actions.apply_control(db, "pause", channel="DASHBOARD", actor="renzo")
+    await control_actions.apply_control(db, "pause", channel="DASHBOARD", actor="admin")
     await notifier.poll_once()
-    await control_actions.apply_control(db, "resume", channel="DASHBOARD", actor="renzo")
+    await control_actions.apply_control(db, "resume", channel="DASHBOARD", actor="admin")
     await notifier.poll_once()
 
     assert "Scheduler PAUSADO: la medicion esta DETENIDA" in client.sent[0]
-    assert "Origen: dashboard (renzo)" in client.sent[0]
+    assert "Origen: dashboard (admin)" in client.sent[0]
     assert "Scheduler REANUDADO: la medicion sigue." in client.sent[1]
     assert len(client.sent) == 2
 
@@ -423,7 +423,7 @@ async def test_an_old_control_record_is_not_claimed_as_the_origin(db, gate):
     client = FakeClient()
     notifier, _ = await baseline(db, client)
     await control_actions.apply_control(
-        db, "pause", channel="DASHBOARD", actor="renzo", now=now() - 10 * timedelta(minutes=1),
+        db, "pause", channel="DASHBOARD", actor="admin", now=now() - 10 * timedelta(minutes=1),
     )
 
     await notifier.poll_once()
@@ -432,10 +432,10 @@ async def test_an_old_control_record_is_not_claimed_as_the_origin(db, gate):
 
 
 async def test_a_pause_that_changes_nothing_sends_nothing(db, gate):
-    await control_actions.apply_control(db, "pause", channel="DASHBOARD", actor="renzo")
+    await control_actions.apply_control(db, "pause", channel="DASHBOARD", actor="admin")
     client = FakeClient()
     notifier, _ = await baseline(db, client)
-    await control_actions.apply_control(db, "pause", channel="DASHBOARD", actor="renzo")
+    await control_actions.apply_control(db, "pause", channel="DASHBOARD", actor="admin")
 
     assert await notifier.poll_once() == 0
 
@@ -513,7 +513,7 @@ async def test_risk_alerts_never_carry_result_derived_numbers(db, gate):
     await system_state_repo.set_state(db, "circuit_breaker_until", (now() + H).isoformat())
     await system_state_repo.set_state(db, "drawdown_stop_active", "1")
     await system_state_repo.set_state(db, "daily_loss_limit_locked", "1")
-    await control_actions.apply_control(db, "kill", channel="DASHBOARD", actor="renzo")
+    await control_actions.apply_control(db, "kill", channel="DASHBOARD", actor="admin")
 
     await notifier.poll_once()
 
@@ -696,7 +696,7 @@ async def test_the_notifier_only_ever_writes_its_own_state_key(db, gate):
 
     db.execute = spy  # type: ignore[method-assign]
     trade = await new_trade(db)
-    await control_actions.apply_control(db, "kill", channel="DASHBOARD", actor="renzo")
+    await control_actions.apply_control(db, "kill", channel="DASHBOARD", actor="admin")
     await close(db, trade)
     await universe_repo.insert_snapshot(db, snapshot(now() - H, ["BTCUSDT"]))
     recording = True
@@ -715,7 +715,7 @@ async def test_the_notifier_only_ever_writes_its_own_state_key(db, gate):
 
 
 async def test_the_startup_message_confirms_the_channel_and_the_risk_state(db, gate):
-    await control_actions.apply_control(db, "pause", channel="DASHBOARD", actor="renzo")
+    await control_actions.apply_control(db, "pause", channel="DASHBOARD", actor="admin")
     client = FakeClient()
     notifier, _ = make_notifier(db, client)
     await notifier._ensure_state()

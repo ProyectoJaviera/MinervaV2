@@ -28,7 +28,7 @@ T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 def make_settings(**overrides) -> Settings:
     defaults = {
-        "AUTH_USERNAME": "renzo", "AUTH_PASSWORD_HASH": hash_password(VALID_PASSWORD),
+        "AUTH_USERNAME": "admin", "AUTH_PASSWORD_HASH": hash_password(VALID_PASSWORD),
         "JWT_SECRET": "un-secreto-de-prueba-bien-largo-no-el-real",
     }
     defaults.update(overrides)
@@ -49,7 +49,7 @@ def make_app(db: Database, settings: Settings | None = None) -> FastAPI:
 def make_authenticated_client(db: Database, settings: Settings | None = None) -> TestClient:
     client = TestClient(make_app(db, settings))
     login = client.post(
-        "/api/auth/login", json={"username": "renzo", "password": VALID_PASSWORD}
+        "/api/auth/login", json={"username": "admin", "password": VALID_PASSWORD}
     )
     assert login.status_code == 200
     return client

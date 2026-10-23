@@ -46,7 +46,7 @@ const AUDIT = {
       kill_after: false, changed: false,
     },
     {
-      id: 1, created_at: "2026-10-18T11:00:00+00:00", channel: "DASHBOARD", actor: "renzo",
+      id: 1, created_at: "2026-10-18T11:00:00+00:00", channel: "DASHBOARD", actor: "admin",
       action: "kill", paused_before: false, kill_before: false, paused_after: true,
       kill_after: true, changed: true,
     },
@@ -55,7 +55,7 @@ const AUDIT = {
 
 const RESULT = {
   ok: true, action: "pause", changed: true, before: { paused: false, kill_switch: false },
-  after: { paused: true, kill_switch: false }, actor: "renzo", audit_id: 3,
+  after: { paused: true, kill_switch: false }, actor: "admin", audit_id: 3,
   at: "2026-10-18T12:30:00+00:00", drawdown_stop_active: false,
   message: "Scheduler PAUSADO. La medicion esta DETENIDA (sin senales, sombras ni etiquetado).",
 };
@@ -252,7 +252,7 @@ describe("RiskTab: controles (pausar, reanudar, kill switch)", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Pausar medicion" }));
 
     const status = await screen.findByText(/Scheduler PAUSADO\. La medicion esta DETENIDA/);
-    expect(status).toHaveTextContent(/\(por renzo, /);
+    expect(status).toHaveTextContent(/\(por admin, /);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() =>
       expect(calledPaths(fetchMock).filter((p) => p === "/api/risk").length).toBeGreaterThan(
@@ -374,9 +374,9 @@ describe("RiskTab: controles (pausar, reanudar, kill switch)", () => {
 
     await screen.findByText("Registro de acciones de control");
     const rows = (await screen.findAllByRole("row")).filter((r) =>
-      within(r).queryByText("renzo") || within(r).queryByText("telegram")
+      within(r).queryByText("admin") || within(r).queryByText("telegram")
     );
-    const dashboard = rows.find((r) => within(r).queryByText("renzo")) as HTMLElement;
+    const dashboard = rows.find((r) => within(r).queryByText("admin")) as HTMLElement;
     expect(within(dashboard).getByText("dashboard")).toBeInTheDocument();
     expect(within(dashboard).getByText("Kill switch")).toBeInTheDocument();
     expect(within(dashboard).getByText("pausa no, kill switch no")).toBeInTheDocument();

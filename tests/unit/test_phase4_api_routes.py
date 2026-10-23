@@ -47,7 +47,7 @@ def now() -> datetime:
 
 def make_settings(**overrides) -> Settings:
     defaults = {
-        "AUTH_USERNAME": "renzo", "AUTH_PASSWORD_HASH": hash_password(PASSWORD),
+        "AUTH_USERNAME": "admin", "AUTH_PASSWORD_HASH": hash_password(PASSWORD),
         "JWT_SECRET": "un-secreto-de-prueba-bien-largo-no-el-real",
     }
     defaults.update(overrides)
@@ -68,7 +68,7 @@ def make_client(
     app.include_router(memory_routes.router)
     client = TestClient(app)
     if authenticated:
-        login = client.post("/api/auth/login", json={"username": "renzo", "password": PASSWORD})
+        login = client.post("/api/auth/login", json={"username": "admin", "password": PASSWORD})
         assert login.status_code == 200
     return client
 

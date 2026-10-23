@@ -37,7 +37,7 @@ JSON_HEADERS = {"Content-Type": "application/json"}
 
 def make_settings(**overrides) -> Settings:
     defaults = {
-        "AUTH_USERNAME": "renzo", "AUTH_PASSWORD_HASH": hash_password(PASSWORD),
+        "AUTH_USERNAME": "admin", "AUTH_PASSWORD_HASH": hash_password(PASSWORD),
         "JWT_SECRET": SECRET,
     }
     defaults.update(overrides)
@@ -54,7 +54,7 @@ def make_client(
     app.include_router(control_routes.router)
     client = TestClient(app)
     if authenticated:
-        login = client.post("/api/auth/login", json={"username": "renzo", "password": PASSWORD})
+        login = client.post("/api/auth/login", json={"username": "admin", "password": PASSWORD})
         assert login.status_code == 200
     return client
 
@@ -92,7 +92,7 @@ async def test_every_control_route_requires_a_login(db, method, path):
 
 async def test_a_forged_or_expired_session_changes_nothing(db):
     client = make_client(db, authenticated=False)
-    client.cookies.set(COOKIE_NAME, create_session_token("renzo", secret="otro-secreto-" * 4))
+    client.cookies.set(COOKIE_NAME, create_session_token("admin", secret="otro-secreto-" * 4))
 
     assert post(client, "kill", "KILL").status_code == 401
     assert await state(db) == (False, False)
@@ -145,11 +145,11 @@ async def test_pause_with_the_right_word_pauses_and_leaves_who_and_when(db):
     assert response.status_code == 200 and body["ok"] is True and body["changed"] is True
     assert body["before"] == {"paused": False, "kill_switch": False}
     assert body["after"] == {"paused": True, "kill_switch": False}
-    assert body["actor"] == "renzo" and body["action"] == "pause"
+    assert body["actor"] == "admin" and body["action"] == "pause"
     assert "DETENIDA" in body["message"]
     assert await state(db) == (True, False)
     [row] = await audit.get_recent(db)
-    assert (row.channel, row.actor, row.action) == ("DASHBOARD", "renzo", "pause")
+    assert (row.channel, row.actor, row.action) == ("DASHBOARD", "admin", "pause")
     assert (row.paused_before, row.paused_after) == (False, True)
     assert row.id == body["audit_id"]
 
@@ -323,7 +323,7 @@ async def test_the_real_app_mounts_the_controls_behind_the_login(db, monkeypatch
 
     assert client.post("/api/control/kill", json={"confirm": "KILL"}).status_code == 401
     assert client.get("/api/control/info").status_code == 401
-    login = client.post("/api/auth/login", json={"username": "renzo", "password": PASSWORD})
+    login = client.post("/api/auth/login", json={"username": "admin", "password": PASSWORD})
     assert login.status_code == 200
     assert client.post("/api/control/pause", json={"confirm": "PAUSAR"}).status_code == 200
     assert await state(db) == (True, False)
@@ -343,7 +343,7 @@ async def test_the_audit_endpoint_lists_the_latest_actions_newest_first(db):
     assert [(e["action"], e["changed"]) for e in body["entries"]] == [
         ("resume", True), ("pause", False), ("pause", True),
     ]
-    assert all(e["channel"] == "DASHBOARD" and e["actor"] == "renzo" for e in body["entries"])
+    assert all(e["channel"] == "DASHBOARD" and e["actor"] == "admin" for e in body["entries"])
     assert set(body["entries"][0]) == {
         "id", "created_at", "channel", "actor", "action", "paused_before", "kill_before",
         "paused_after", "kill_after", "changed",

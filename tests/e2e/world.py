@@ -50,7 +50,7 @@ from tests.e2e import series
 
 PASSWORD = "e2e-clave-de-prueba"
 JWT_SECRET = "e2e-secreto-de-prueba-" + "x" * 40
-USERNAME = "renzo"
+USERNAME = "admin"
 _PASSWORD_HASH = hash_password(PASSWORD)  # bcrypt cuesta ~0.2 s: una sola vez por proceso
 
 

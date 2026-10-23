@@ -81,7 +81,7 @@ function mockStatefulBackend(session: FakeSession) {
     if (path === "/api/auth/me") {
       return Promise.resolve(
         session.meValid
-          ? jsonResponse({ username: "renzo" })
+          ? jsonResponse({ username: "admin" })
           : jsonResponse({ detail: "No autenticado" }, 401)
       );
     }
@@ -105,7 +105,7 @@ function callsTo(fetchMock: ReturnType<typeof mockStatefulBackend>, path: string
 }
 
 function logInThroughForm() {
-  fireEvent.change(screen.getByLabelText("Usuario"), { target: { value: "renzo" } });
+  fireEvent.change(screen.getByLabelText("Usuario"), { target: { value: "admin" } });
   fireEvent.change(screen.getByLabelText("Contrasena"), { target: { value: "clave" } });
   fireEvent.click(screen.getByRole("button", { name: "Ingresar" }));
 }
@@ -131,7 +131,7 @@ describe("App: gate de sesion", () => {
     vi.stubGlobal(
       "fetch",
       mockFetchRoutedByPath({
-        "/api/auth/me": { status: 200, body: { username: "renzo" } },
+        "/api/auth/me": { status: 200, body: { username: "admin" } },
         "/health": { status: 200, body: HEALTH_BODY },
         "/api/measurement/status": { status: 200, body: MEASUREMENT_BODY },
         "/api/llm/decisions/recent": { status: 200, body: [] },
@@ -141,7 +141,7 @@ describe("App: gate de sesion", () => {
 
     render(withQueryClient(<App />));
 
-    expect(await screen.findByText(/Sesion: renzo/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Sesion: admin/i)).toBeInTheDocument();
   });
 
   it("siempre muestra el banner de MODO PAPER TRADING, incluso sin sesion", async () => {
@@ -163,13 +163,13 @@ describe("App: cierre y vencimiento de sesion en la misma pestana", () => {
     vi.stubGlobal("fetch", mockStatefulBackend(session));
 
     render(withQueryClient(<App />));
-    expect(await screen.findByText(/Sesion: renzo/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Sesion: admin/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cerrar sesion" }));
     expect(await screen.findByText(/iniciar sesion/i)).toBeInTheDocument();
 
     logInThroughForm();
-    expect(await screen.findByText(/Sesion: renzo/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Sesion: admin/i)).toBeInTheDocument();
   });
 
   it("un 401 en una query de datos lleva a LoginView y volver a entrar muestra el dashboard", async () => {
@@ -182,7 +182,7 @@ describe("App: cierre y vencimiento de sesion en la misma pestana", () => {
     expect(callsTo(fetchMock, "/api/auth/me")).toBe(1);
 
     logInThroughForm();
-    expect(await screen.findByText(/Sesion: renzo/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Sesion: admin/i)).toBeInTheDocument();
   });
 
   it("un 401 de /api/auth/me no provoca refetchs de /api/auth/me", async () => {

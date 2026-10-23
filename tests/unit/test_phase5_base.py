@@ -176,7 +176,7 @@ async def test_the_audit_table_only_accepts_known_channels_and_actions(db):
 
 async def test_the_audit_repo_stores_who_when_and_before_after(db):
     first = await audit.insert(
-        db, channel="DASHBOARD", actor="renzo", action="kill", paused_before=False,
+        db, channel="DASHBOARD", actor="admin", action="kill", paused_before=False,
         kill_before=False, paused_after=True, kill_after=True, created_at=T0,
     )
     second = await audit.insert(
@@ -188,7 +188,7 @@ async def test_the_audit_repo_stores_who_when_and_before_after(db):
     recent = await audit.get_recent(db, limit=5)
 
     assert [e.id for e in recent] == [second, first]  # la mas nueva primero
-    assert recent[1].actor == "renzo" and recent[1].created_at == T0
+    assert recent[1].actor == "admin" and recent[1].created_at == T0
     assert recent[1].changed is True and recent[0].changed is False  # pausa sobre pausa: nada
     assert recent[0].created_at == T0 + timedelta(hours=1)  # se guarda en UTC aunque llegue en -03
     assert (await audit.get_latest(db)).id == second
@@ -245,7 +245,7 @@ async def state_of(db):
 
 
 async def test_pause_pauses_without_the_kill_switch(db):
-    result = await apply_control(db, PAUSE, channel=CHANNEL_DASHBOARD, actor="renzo", now=T0)
+    result = await apply_control(db, PAUSE, channel=CHANNEL_DASHBOARD, actor="admin", now=T0)
 
     assert (result.before.paused, result.before.kill_switch) == (False, False)
     assert (result.after.paused, result.after.kill_switch) == (True, False)
@@ -255,7 +255,7 @@ async def test_pause_pauses_without_the_kill_switch(db):
 
 
 async def test_kill_activates_the_kill_switch_and_pauses(db):
-    result = await apply_control(db, KILL, channel=CHANNEL_DASHBOARD, actor="renzo", now=T0)
+    result = await apply_control(db, KILL, channel=CHANNEL_DASHBOARD, actor="admin", now=T0)
 
     assert (result.after.paused, result.after.kill_switch) == (True, True)
     assert await control_state.is_scheduler_paused(db) is True
@@ -263,10 +263,10 @@ async def test_kill_activates_the_kill_switch_and_pauses(db):
 
 
 async def test_resume_lifts_both_and_warns_about_the_drawdown_stop(db):
-    await apply_control(db, KILL, channel=CHANNEL_DASHBOARD, actor="renzo")
+    await apply_control(db, KILL, channel=CHANNEL_DASHBOARD, actor="admin")
     await system_state_repo.set_state(db, "drawdown_stop_active", "1")
 
-    result = await apply_control(db, RESUME, channel=CHANNEL_DASHBOARD, actor="renzo")
+    result = await apply_control(db, RESUME, channel=CHANNEL_DASHBOARD, actor="admin")
 
     assert (result.after.paused, result.after.kill_switch) == (False, False)
     assert result.drawdown_stop_active is True  # no se levanta aqui
@@ -274,21 +274,21 @@ async def test_resume_lifts_both_and_warns_about_the_drawdown_stop(db):
 
 
 async def test_every_valid_request_is_audited_even_when_nothing_changes(db):
-    await apply_control(db, PAUSE, channel=CHANNEL_DASHBOARD, actor="renzo", now=T0)
-    again = await apply_control(db, PAUSE, channel=CHANNEL_DASHBOARD, actor="renzo", now=T0)
+    await apply_control(db, PAUSE, channel=CHANNEL_DASHBOARD, actor="admin", now=T0)
+    again = await apply_control(db, PAUSE, channel=CHANNEL_DASHBOARD, actor="admin", now=T0)
 
     rows = await audit.get_recent(db)
 
     assert again.changed is False and len(rows) == 2
     assert [r.changed for r in rows] == [False, True]
-    assert all(r.channel == "DASHBOARD" and r.actor == "renzo" for r in rows)
+    assert all(r.channel == "DASHBOARD" and r.actor == "admin" for r in rows)
 
 
 async def test_unknown_actions_channels_and_blank_actors_are_handled(db):
     with pytest.raises(ValueError):
-        await apply_control(db, "borrar", channel=CHANNEL_DASHBOARD, actor="renzo")
+        await apply_control(db, "borrar", channel=CHANNEL_DASHBOARD, actor="admin")
     with pytest.raises(ValueError):
-        await apply_control(db, PAUSE, channel="WEB", actor="renzo")
+        await apply_control(db, PAUSE, channel="WEB", actor="admin")
     assert await state_of(db) == control_actions.ControlState(paused=False, kill_switch=False)
     assert await audit.get_recent(db) == []  # nada se registra si se rechazo
 

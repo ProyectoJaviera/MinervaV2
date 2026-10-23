@@ -39,7 +39,7 @@ TEST_SECRET = "s3cr3t-de-prueba-de-al-menos-32-bytes-de-largo"
 
 def make_settings(**overrides) -> Settings:
     defaults = {
-        "AUTH_USERNAME": "renzo", "AUTH_PASSWORD_HASH": hash_password(VALID_PASSWORD),
+        "AUTH_USERNAME": "admin", "AUTH_PASSWORD_HASH": hash_password(VALID_PASSWORD),
         "JWT_SECRET": "un-secreto-de-prueba-bien-largo-no-el-real",
     }
     defaults.update(overrides)
@@ -53,7 +53,7 @@ def make_client(settings: Settings | None = None) -> TestClient:
     return TestClient(app)
 
 
-def _login(client: TestClient, username: str = "renzo", password: str = VALID_PASSWORD):
+def _login(client: TestClient, username: str = "admin", password: str = VALID_PASSWORD):
     return client.post("/api/auth/login", json={"username": username, "password": password})
 
 
@@ -77,34 +77,34 @@ def test_verify_password_rejects_an_empty_hash():
 
 
 def test_verify_username_rejects_an_empty_expected_username():
-    assert verify_username("renzo", "") is False
+    assert verify_username("admin", "") is False
 
 
 def test_verify_username_accepts_the_matching_username():
-    assert verify_username("renzo", "renzo") is True
+    assert verify_username("admin", "admin") is True
 
 
 def test_verify_username_rejects_a_different_username():
-    assert verify_username("otro", "renzo") is False
+    assert verify_username("otro", "admin") is False
 
 
 # --- funciones puras: token JWT --------------------------------------------------
 
 
 def test_create_and_decode_session_token_round_trip():
-    token = create_session_token("renzo", secret=TEST_SECRET)
-    assert decode_session_token(token, secret=TEST_SECRET) == "renzo"
+    token = create_session_token("admin", secret=TEST_SECRET)
+    assert decode_session_token(token, secret=TEST_SECRET) == "admin"
 
 
 def test_decode_session_token_rejects_a_token_signed_with_a_different_secret():
-    token = create_session_token("renzo", secret=TEST_SECRET)
+    token = create_session_token("admin", secret=TEST_SECRET)
     with pytest.raises(jwt.InvalidTokenError):
         decode_session_token(token, secret=TEST_SECRET[::-1])
 
 
 def test_decode_session_token_rejects_an_expired_token():
     old_now = datetime.now(UTC) - timedelta(hours=100)
-    token = create_session_token("renzo", secret=TEST_SECRET, now=old_now)
+    token = create_session_token("admin", secret=TEST_SECRET, now=old_now)
     with pytest.raises(jwt.InvalidTokenError):
         decode_session_token(token, secret=TEST_SECRET)
 
@@ -182,7 +182,7 @@ def test_me_with_a_valid_session_returns_the_username():
     response = client.get("/api/auth/me")
 
     assert response.status_code == 200
-    assert response.json() == {"username": "renzo"}
+    assert response.json() == {"username": "admin"}
 
 
 def test_me_with_a_tampered_cookie_returns_401():
@@ -197,7 +197,7 @@ def test_me_with_a_tampered_cookie_returns_401():
 def test_me_with_a_token_signed_with_the_wrong_secret_returns_401():
     client = make_client()
     foreign_token = jwt.encode(
-        {"sub": "renzo", "iat": datetime.now(UTC), "exp": datetime.now(UTC) + timedelta(hours=1)},
+        {"sub": "admin", "iat": datetime.now(UTC), "exp": datetime.now(UTC) + timedelta(hours=1)},
         TEST_SECRET[::-1], algorithm=JWT_ALGORITHM,
     )
     client.cookies.set(COOKIE_NAME, foreign_token)
@@ -292,7 +292,7 @@ def test_decode_session_token_with_an_empty_secret_raises_a_pyjwt_error():
     secreto vacio lanza jwt.InvalidKeyError -- subclase directa de
     jwt.PyJWTError, NO de jwt.InvalidTokenError. Antes de la correccion,
     `except jwt.InvalidTokenError` en require_auth no la atrapaba."""
-    token = create_session_token("renzo", secret=TEST_SECRET)
+    token = create_session_token("admin", secret=TEST_SECRET)
 
     with pytest.raises(jwt.PyJWTError) as exc_info:
         decode_session_token(token, secret="")
@@ -329,7 +329,7 @@ def test_login_returns_503_not_500_with_a_jwk_shaped_secret_that_passes_the_leng
 
 def test_verify_username_accepts_non_ascii_characters_without_raising():
     assert verify_username("usuário", "usuário") is True
-    assert verify_username("usuário", "renzo") is False
+    assert verify_username("usuário", "admin") is False
 
 
 def test_login_with_a_non_ascii_username_returns_401_not_500():
@@ -362,7 +362,7 @@ def test_login_request_rejects_a_password_over_128_characters_at_the_validation_
     client = make_client()
 
     response = client.post(
-        "/api/auth/login", json={"username": "renzo", "password": "a" * 129}
+        "/api/auth/login", json={"username": "admin", "password": "a" * 129}
     )
 
     assert response.status_code == 422  # rechazado por pydantic, antes de verify_password

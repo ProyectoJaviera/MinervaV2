@@ -35,7 +35,7 @@ FORBIDDEN_KEYS = frozenset({
 })
 
 # Solo en las sombras: la hora de cierre tambien es un resultado (en la cuenta paper se muestra a
-# proposito, por pedido de Renzo; ver docs/FASE5_PLAN.md).
+# proposito, por pedido del autor; ver docs/historial/FASE5_PLAN.md).
 SHADOW_ONLY_FORBIDDEN = frozenset({"closed_at"})
 
 # Etiquetas de texto que solo salen cuando los resultados son visibles.

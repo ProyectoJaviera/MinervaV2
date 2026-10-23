@@ -144,7 +144,7 @@ async def test_kill_from_the_dashboard_needs_the_exact_word_and_stops_everything
     ok = await world.control("kill")
     assert ok.status_code == 200
     result = ok.json()
-    assert result["after"] == {"paused": True, "kill_switch": True} and result["actor"] == "renzo"
+    assert result["after"] == {"paused": True, "kill_switch": True} and result["actor"] == "admin"
 
     assert await world.cycle() == [] and await measured_rows(world) == before
     await world.tick("BTCUSDT", 94.0)  # el kill NO impide cerrar: el SL sigue funcionando
@@ -156,10 +156,10 @@ async def test_kill_from_the_dashboard_needs_the_exact_word_and_stops_everything
     assert health["control"] == {"paused": True, "kill_switch_active": True}
     audit = (await world.get("/api/control/audit")).json()["entries"]
     assert (audit[0]["channel"], audit[0]["actor"], audit[0]["action"]) == (
-        "DASHBOARD", "renzo", "kill",
+        "DASHBOARD", "admin", "kill",
     )
     note = next(n for n in await world.notifications() if "KILL SWITCH ACTIVADO" in n)
-    assert "DETENIDA" in note and "Origen: dashboard (renzo)" in note
+    assert "DETENIDA" in note and "Origen: dashboard (admin)" in note
     assert "KILL SWITCH ACTIVO" in await world.daily_summary()
 
 
@@ -178,7 +178,7 @@ async def test_resume_from_the_dashboard_lifts_a_kill_started_in_telegram(make_w
     assert [r["outcome"] for r in await world.arm_rows()] == ["OPENED", "OPENED"]
     audit = await world.query("SELECT channel, actor, action FROM control_audit ORDER BY id")
     assert [(a["channel"], a["actor"], a["action"]) for a in audit] == [
-        ("TELEGRAM", "telegram", "kill"), ("DASHBOARD", "renzo", "resume"),
+        ("TELEGRAM", "telegram", "kill"), ("DASHBOARD", "admin", "resume"),
     ]
 
 
