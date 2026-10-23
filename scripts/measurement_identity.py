@@ -1,4 +1,4 @@
-"""Identidad de la medicion (Fase 6, docs/MANUAL_OPERACION.md): ¿la medicion en curso usa UN solo
+"""Identidad de la medicion (Fase 6, docs/USO.md, rutina semanal): ¿la medicion en curso usa UN solo
 modelo, UN solo prompt (el congelado) y UNA sola version de features?
 
 El hash congelado (`FROZEN_PROMPT_SHA256`) cubre el texto del prompt y las features, pero NO el
@@ -116,7 +116,7 @@ def assess(
         lines.extend(f"  - {problem}" for problem in problems)
         lines.append(
             "No sigas operando sin decidirlo: cambiar el modelo o el prompt invalida la medicion "
-            "(docs/MANUAL_OPERACION.md, seccion 7.4)."
+            "(docs/CONFIGURACION.md, seccion 'Que no cambiar durante una medicion')."
         )
         return EXIT_ANOMALY, lines
     lines.append("OK: un solo modelo, el prompt congelado y una sola version de features.")

@@ -1,13 +1,13 @@
-# Minerva -- imagen Docker (Fase 6, docs/FASE6_PLAN.md). PAPER TRADING: nunca ordenes reales.
+# Minerva -- imagen Docker (Fase 6, docs/historial/FASE6_PLAN.md). PAPER TRADING: nunca ordenes reales.
 #
 # Tres etapas: (1) compila el frontend, (2) instala las dependencias de Python en un venv con las
 # versiones EXACTAS de docker/requirements.lock, (3) imagen final sin Node, sin compiladores y sin cache.
 #
-# Esta imagen NO lleva secretos: `.env` queda fuera (.dockerignore) y entra como variables de entorno en
-# tiempo de ejecucion (env_file del docker-compose.yml). Tampoco lleva datos (data/, logs/) ni docs/.
+# Esta imagen NO lleva secretos: `.env` queda fuera (.dockerignore) y se monta de solo lectura en
+# /app/.env en tiempo de ejecucion (ver docker-compose.yml). Tampoco lleva datos (data/, logs/) ni docs/.
 #
 #   docker compose build            # construir
-#   docker compose up -d            # arrancar (ver docs/MANUAL_OPERACION.md antes del primer uso)
+#   docker compose up -d            # arrancar (ver docs/GUIA_INSTALACION.md antes del primer uso)
 
 ARG NODE_VERSION=24
 ARG PYTHON_VERSION=3.11

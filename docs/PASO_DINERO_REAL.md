@@ -1,8 +1,12 @@
 # Reporte de paso a dinero real (subfase 3.8)
 
+> **Minerva es 100 % paper trading, experimental y no es asesoría financiera.** Este documento describe un reporte que
+> *recomienda* y los riesgos de un eventual paso a dinero real; no es una invitación a hacerlo. Con la evidencia actual
+> no hay base para ello.
+
 **Solo recomienda. v1 es 100 % paper trading.** El reporte nunca habilita ejecución real:
 `BitunixBackend` sigue desactivado, ni el módulo ni el script lo importan (hay tests
-estructurales que lo verifican) y pasar a dinero real es una decisión manual tuya que
+estructurales que lo verifican) y pasar a dinero real es una decisión manual de quien opera el bot que
 requeriría una fase nueva.
 
 - Lógica: `app/trading/real_money_report.py`. CLI: `scripts/real_money_report.py`.
@@ -55,7 +59,7 @@ Cada criterio devuelve `PASA`, `NO PASA` o `SIN DATOS`. **La falta de datos nunc
 | Valor de la IA | Veredicto oficial = `APORTA_VALOR` | **Se retiran los regímenes <30 / 30-100 / ≥100 por lado** y la "evidencia baja". La 3.6 fija un único punto de análisis (300 conglomerados efectivos por lado, δ = 3 %, tres veredictos); mostrar cifras antes contradice la regla de una sola mirada, y con N = 100 por lado solo se detectaría ~12-18 % del margen (seis veces δ) |
 | Días de paper trading | ≥ `MIN_PAPER_TRADING_DAYS` (30), contados desde `system_state.real_arm_started_at` | Se define el inicio (lo fija la 3.9); sin esa clave se usa la primera operación y se avisa |
 | Operaciones cerradas | ≥ `MIN_CLOSED_TRADES` (100) en el brazo ejecutado | Se mantiene, y se muestran los **conglomerados efectivos** (operaciones solapadas del mismo símbolo y dirección cuentan como una) |
-| Rentabilidad | PF > `MIN_PROFIT_FACTOR` (1,3) **y** límite inferior del IC 95 % del PF > 1,0 (bootstrap por conglomerados, mismas constantes que `ai_value.py`) | Se añade el IC: con 100 operaciones el PF puntual es ruido (decisión tuya del 2026-10-17). Con < 100 operaciones o sin pérdidas es `SIN DATOS` |
+| Rentabilidad | PF > `MIN_PROFIT_FACTOR` (1,3) **y** límite inferior del IC 95 % del PF > 1,0 (bootstrap por conglomerados, mismas constantes que `ai_value.py`) | Se añade el IC: con 100 operaciones el PF puntual es ruido (decisión del autor del 2026-10-17). Con < 100 operaciones o sin pérdidas es `SIN DATOS` |
 | Drawdown | `drawdown_stop_would_have_triggered_count` menos la línea base `real_arm_drawdown_baseline` ≤ 1 | El contador es acumulado: se necesita la línea base (la fija la 3.9); sin ella, `SIN DATOS` |
 | Concentración | Una operación o símbolo ≤ `BACKTEST_CONCENTRATION_LIMIT_PCT` (40 %) del PnL neto | Se reutiliza `concentration_pct` tal cual. PnL neto total ≤ 0 ⇒ `NO PASA` |
 | Reconciliación | Cero operaciones con `fill_source='TICK_UNRECONCILED'`, `close_reason='RECONCILE_FAILED'` o `reconciliation_failed=1`, más (con `--log-file`) cero líneas CRITICAL | Los CRITICAL solo existen en el log; la base ofrece estos sustitutos. Sin `--log-file` el informe lo dice |
@@ -72,7 +76,7 @@ muestra la diferencia de esperanza de las elegibles con su N, solo como contexto
 ## Dependencia: subfase 3.9 (brazo ejecutado)
 
 El brazo ejecutado (la cuenta paper operando solo las `APROBADA` a tiempo, a través del motor de
-riesgo) lo implementa la **subfase 3.9** (`docs/FASE3_9_BRAZO_EJECUTADO.md`). Mientras no esté
+riesgo) lo implementa la **subfase 3.9** ([`docs/historial/FASE3_9_BRAZO_EJECUTADO.md`](historial/FASE3_9_BRAZO_EJECUTADO.md)). Mientras no esté
 desplegado y no haya abierto y cerrado operaciones, la tabla `trades` está vacía y casi todos los
 criterios salen `SIN DATOS`. La 3.9:
 

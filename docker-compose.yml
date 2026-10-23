@@ -1,13 +1,13 @@
-# Minerva -- Docker Compose (Fase 6 y Fase 7, docs/FASE6_PLAN.md y docs/MUDANZA_DOCKER.md).
+# Minerva -- Docker Compose (Fase 6 y Fase 7, docs/GUIA_INSTALACION.md y docs/MUDANZA_DOCKER.md).
 # PAPER TRADING: nunca ordenes reales.
 #
-# Este compose es la forma de correr el bot real una vez hecha la mudanza (scripts/migrate_to_docker.ps1);
-# antes de ella el bot real corre con scripts/start_bot.ps1 en el puerto 8000. NO levantes los dos a la
-# vez (dos procesos con el mismo token de Telegram, la misma clave de Anthropic y datos duplicados). El
-# puerto 8000 publicado aqui choca a proposito con el bot nativo: si lo levantas por error, Docker falla
-# al enlazar el puerto ANTES de arrancar el proceso.
+# Este compose es la forma recomendada de correr el bot (instalacion nueva: docs/GUIA_INSTALACION.md; si ya
+# lo corrias de forma nativa con scripts/start_bot.ps1, la mudanza es scripts/migrate_to_docker.ps1). NO
+# levantes los dos a la vez (dos procesos con el mismo token de Telegram, la misma clave de Anthropic y datos
+# duplicados). El puerto 8000 publicado aqui choca a proposito con el bot nativo: si lo levantas por error,
+# Docker falla al enlazar el puerto ANTES de arrancar el proceso.
 #
-# Uso (detalle en docs/MANUAL_OPERACION.md):
+# Uso (detalle en docs/USO.md):
 #   docker compose up -d               # UN comando: construye la imagen si falta y arranca el bot
 #   docker compose ps                  # STATUS debe pasar a "healthy" (~1 min; hasta 5 la primera vez)
 #   docker compose logs -f minerva
@@ -31,7 +31,7 @@ services:
     image: minerva:local
     init: true
     # Por defecto vuelve solo tras reiniciar Docker o el PC (Docker Desktop debe iniciar con Windows: ver
-    # docs/MANUAL_OPERACION.md). Una parada a mano (`docker compose stop`) NO se deshace sola. Docker no
+    # docs/MUDANZA_DOCKER.md). Una parada a mano (`docker compose stop`) NO se deshace sola. Docker no
     # reinicia un contenedor "unhealthy" por si mismo: lo avisa la alerta externa (MinervaHealthAlert).
     # Las instancias de prueba usan MINERVA_RESTART=no.
     restart: "${MINERVA_RESTART:-unless-stopped}"

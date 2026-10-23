@@ -1,6 +1,16 @@
-# Subfase 3.6 -- Decisión del LLM sobre las señales (DISEÑO v2, APROBADO)
+# Diseño de la medición del valor del LLM (subfase 3.6)
 
-Estado: **fases (i), (ii), (iii) y (iv) implementadas (2026-10-09); nada conectado al
+> **Referencia técnica escrita durante el desarrollo.** Es el diseño detallado de cómo se mide si la decisión del LLM
+> aporta valor: qué recibe el modelo (a), el prompt y el esquema de salida (b), la tabla `llm_logs` (c), la etiqueta
+> inmutable (d), el control de costo (e), el placebo (f), la regla de decisión de tres veredictos (i), la potencia
+> estadística (j), los pilotos y el congelamiento del prompt (k), la concurrencia (l) y el reporte de `SIN_LLM` (m).
+> Para una explicación sin jerga, lee la [metodología](METODOLOGIA.md). Las secciones se escribieron en orden
+> cronológico: el párrafo «Estado» de abajo es del **2026-10-09** y está desactualizado (el etiquetado en vivo se
+> implementó y el prompt se congeló el 2026-10-12; ver la sección (k)). La sección (f) es además el **registro** donde
+> se pega el resultado del placebo oficial. Los planes por fase que cita (`FASE3_PLAN.md`, etc.) están en
+> [`historial/`](historial/README.md).
+
+Estado (2026-10-09, histórico): **fases (i), (ii), (iii) y (iv) implementadas; nada conectado al
 bot todavía**. Lo único que sigue pendiente de ti, y no bloquea lo ya escrito, es confirmar
 los precios de la sección 0 en tu consola antes de la primera llamada real
 (`scripts/llm_smoke.py` o `scripts/llm_pilot.py`, ambos con `--real --confirm-real`).
@@ -9,7 +19,7 @@ aparte, no tomada.
 
 Qué mide la 3.6: si la decisión del LLM sobre cada señal agrupada (APROBAR o RECHAZAR)
 aporta valor frente a no filtrar nada, comparando la esperanza por operación de las
-operaciones sombra APROBADA y RECHAZADA (`docs/FASE3_PLAN.md`, punto 2). La cuenta real
+operaciones sombra APROBADA y RECHAZADA (`docs/historial/FASE3_PLAN.md`, punto 2). La cuenta real
 solo abre con etiqueta APROBADA, y solo si la decisión llega a tiempo (sección l).
 
 ---
@@ -384,11 +394,11 @@ divisor se ajusta otra vez.
 **Número de grupos por día que se usa:**
 
 - **9,32 grupos/día (central):** es el ritmo OOS del backtest v2 de las seis estrategias
-  (4.846 operaciones en 520,17 días, `docs/FASE2_REEJECUCION.md`, sección 5.3). **No es
+  (4.846 operaciones en 520,17 días, `docs/historial/FASE2_REEJECUCION.md`, sección 5.3). **No es
   una medida de grupos de señal:** las operaciones del backtest bloquean solapes dentro
   de la misma celda y la sombra no los bloquea, así que el número real de grupos por
   día se conocerá con la sombra en vivo.
-- **25 grupos/día (cota superior):** el presupuesto de señales de `docs/FASE3_PLAN.md`.
+- **25 grupos/día (cota superior):** el presupuesto de señales de `docs/historial/FASE3_PLAN.md`.
 
 **Caché de prompt:** el mensaje de sistema es estático y se puede cachear (escritura
 1,25 veces el precio de entrada, lectura 0,10 veces). No se incluye en la estimación:
@@ -415,7 +425,7 @@ con frecuencia, el criterio está mal calibrado.
 
 **Criterio de calibración:** la frecuencia de APORTA_VALOR debe ser menor que 0,05
 (contraste unilateral, con un nivel de significación del 5 %). **Ajuste del 2026-10-17
-(decisión de Renzo, tomada antes de tener datos; ver el final de esta sección):** la
+(decisión del autor, tomada antes de tener datos; ver el final de esta sección):** la
 frecuencia se mide de forma *condicional* a llegar al punto de análisis, y solo si
 llegar es probable.
 
@@ -452,7 +462,7 @@ NO; código de salida 7); si es **≥ 50 %** se decide con la **tasa condicional
 (frecuencia / probabilidad de llegar) **< 5 %** → CALIBRADO, si no NO calibrado. La
 frecuencia bruta y su IC de Wilson se siguen imprimiendo, solo como información.
 
-**Regla de procedimiento (decisión de Renzo, 2026-10-17, tomada antes de ver
+**Regla de procedimiento (decisión del autor, 2026-10-17, tomada antes de ver
 resultados).** Cuando el gate se abra: (1) hacer la copia; (2) correr el placebo oficial
 con 1.000 repeticiones; (3) si sale NO INFORMATIVO, **NO correr el veredicto**: esperar
 7 días más de datos y repetir desde (1); (4) si sale CALIBRADO, correr
@@ -469,7 +479,7 @@ imprime el script, antes de la primera decisión).
 ## (g) La cuenta real solo abre con APROBADA y a tiempo; cómo se prueba sin red ni gasto
 
 > **Actualización de la subfase 3.9 (2026-10-17):** esta regla se implementó como un brazo
-> ejecutado de la cuenta **paper** (`app/trading/paper_execution.py`, `docs/FASE3_9_BRAZO_EJECUTADO.md`).
+> ejecutado de la cuenta **paper** (`app/trading/paper_execution.py`, `docs/historial/FASE3_9_BRAZO_EJECUTADO.md`).
 > La condición 1 (`AUTO_OPEN_WITHOUT_LLM = true`) se reemplazó por un interruptor propio,
 > `PAPER_EXECUTION_ENABLED` (solo el puerto 8000): `AUTO_OPEN_WITHOUT_LLM` sigue en `false` para
 > siempre y, si ambos están en `true`, el brazo se niega a activarse. Las condiciones 2 y 3 se aplican
@@ -1169,7 +1179,7 @@ gate, sensibilidad de JSON reparado y desglose solo con APORTA_VALOR).
 5. **Límite de SIN_LLM del 10 %** antes de INCONCLUSO por posible sesgo de exclusión
    (sección m).
 6. **Modelo:** `claude-sonnet-5-5`. Ya cambiado en `app/config.py` y `.env.example`
-   (commit `eb527bb`), junto con `DEFAULT_MARGIN_USDT` de 10 a 5 (`docs/FASE3_PLAN.md`).
+   (commit `eb527bb`), junto con `DEFAULT_MARGIN_USDT` de 10 a 5 (`docs/historial/FASE3_PLAN.md`).
 7. **SDK de Anthropic:** autorizado.
 8. **Precios:** los confirmas tú en tu consola antes de la primera llamada real. Es el
    único paso que sigue pendiente, y no bloquea escribir código con el cliente falso.
@@ -1183,7 +1193,7 @@ gate, sensibilidad de JSON reparado y desglose solo con APORTA_VALOR).
   pnl_net_usdt/margin_usdt`), `measurement_keys`, potencia y `placebo_calibration`.
   Tests.
 - **(iii)** ✅ `app/llm/prompts.py`, `scripts/llm_smoke.py`, `scripts/llm_pilot.py`
-  (la ejecuta Renzo) y `scripts/placebo_check.py`.
+  (la ejecuta el autor) y `scripts/placebo_check.py`.
 - **(iv)** ✅ Features de mercado completas (`app/llm/market_features.py`):
   timeframe y niveles planeados por estrategia, funding de `funding_cache`,
   ATR(14) y desviación de retornos en 1h, correlación con BTC a 30 y 100 velas, y

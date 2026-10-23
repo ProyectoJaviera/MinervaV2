@@ -1,4 +1,4 @@
-"""Respaldo CONSISTENTE de la base de datos del bot (Fase 6, docs/MANUAL_OPERACION.md).
+"""Respaldo CONSISTENTE de la base de datos del bot (Fase 6, docs/USO.md, seccion Respaldos).
 
 Usa la API de backup de SQLite con el origen abierto en SOLO LECTURA: es seguro con el bot corriendo
 (la base va en modo WAL, y copiar el archivo a mano puede dejar una copia inconsistente) y nunca

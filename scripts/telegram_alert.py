@@ -39,7 +39,7 @@ El script fija su propio directorio de trabajo al arrancar (ver el
 dispare el Programador de tareas (tipicamente System32, no la raiz del
 repo) -- lo unico que SI debe ser una ruta absoluta es el `/TR` de abajo
 (schtasks lo exige). Tarea de Windows cada 10 min. Corre esto desde cmd.exe
-parado en D:\Estudio\IA\Minerva: el `%cd%` se expande ANTES de que schtasks
+parado en la raiz del repositorio: el `%cd%` se expande ANTES de que schtasks
 lo vea (verificado), asi que el comando que queda guardado en la tarea ya
 tiene la ruta absoluta de verdad:
 
@@ -54,7 +54,7 @@ tambien parpadea. `conhost.exe --headless` (Windows 10 1809 o posterior) corre
 el programa sin ninguna ventana y la tarea funciona igual. Para cambiar una
 tarea YA registrada sin tocar sus otros ajustes (conserva el "Iniciar en"):
 
-    $py = "D:\Estudio\IA\Minerva\.venv\Scripts\python.exe"
+    $py = "<carpeta del repo>\.venv\Scripts\python.exe"
     $t = Get-ScheduledTask -TaskName MinervaHealthAlert
     $t.Actions[0].Execute = "conhost.exe"
     $t.Actions[0].Arguments = "--headless $py scripts\telegram_alert.py"

@@ -6,7 +6,7 @@ herramienta es `scripts/ai_value_report.py` (lógica en
 `app/trading/ai_value_report.py`). Todo se hace sobre una **copia** de la base;
 la base de trabajo del bot nunca se abre con estas herramientas.
 
-## Regla de procedimiento (decisión de Renzo, 2026-10-17, tomada ANTES de ver resultados)
+## Regla de procedimiento (decisión del autor, 2026-10-17, tomada ANTES de ver resultados)
 
 Cuando el gate se abra:
 
@@ -48,7 +48,10 @@ al instante exacto de los 300), por eso:
 ## Pasos
 
 1. **Copia consistente** con la API de backup de sqlite (nunca copiar el archivo: en
-   modo WAL puede quedar inconsistente):
+   modo WAL puede quedar inconsistente). Con el bot en **Docker**, la base viva está en un volumen: usa
+   `python scripts/docker_db.py export --out-dir data/backups --prefix veredicto`, que hace la copia dentro del
+   contenedor, verifica su SHA-256 e imprime su ruta (`data/backups/veredicto_AAAAMMDD_HHMMSS.db`; en los pasos
+   siguientes, esa ruta hace de `veredicto_copia.db`). Con el bot **nativo** de Windows:
 
    ```powershell
    .\.venv\Scripts\python.exe -c "import sqlite3; src = sqlite3.connect('file:data/minerva_estabilidad.db?mode=ro', uri=True); dst = sqlite3.connect('data/backups/veredicto_copia.db'); src.backup(dst); dst.close(); src.close()"

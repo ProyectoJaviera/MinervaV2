@@ -38,8 +38,8 @@ se imprimen ni se loguean. Probalo primero a mano, sin enviar nada:
 
     python scripts/telegram_daily.py --dry-run
 
-Tarea de Windows "MinervaDailySummary" a las 09:15 (hora de Chile del PC): comando
-exacto (Register-ScheduledTask, con la hora fija en LOCAL) en docs/MIGRACION_PC.md.
+Tarea de Windows "MinervaDailySummary" a la hora local que elijas (p. ej. 09:15): comando
+exacto (Register-ScheduledTask, con la hora fija en LOCAL) en docs/USO.md ("Tareas programadas").
 El script fija su propio directorio de trabajo, asi que funciona igual desde donde lo
 dispare el Programador de tareas.
 """

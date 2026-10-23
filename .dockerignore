@@ -29,6 +29,8 @@ logs
 tests
 docs
 *.md
+LICENSE
+.github
 Dockerfile
 docker-compose.yml
 .dockerignore

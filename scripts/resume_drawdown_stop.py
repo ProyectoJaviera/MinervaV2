@@ -1,5 +1,5 @@
 """Levanta A MANO el stop por drawdown (modo `duro`) del motor de riesgo (Fase 6,
-docs/MANUAL_OPERACION.md).
+docs/USO.md).
 
 El stop por drawdown bloquea las entradas nuevas de la cuenta paper cuando el equity cae
 `MAX_DRAWDOWN_PCT` (20 % por defecto) desde su pico, y NUNCA se levanta solo ni desde Telegram o el

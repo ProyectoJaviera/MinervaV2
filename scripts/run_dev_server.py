@@ -2,7 +2,7 @@
 base real (pre-Fase 5, seccion 6 del plan aprobado 2026-10-14) -- NUNCA toca
 el bot real del puerto 8000 ni su base de trabajo. Reemplaza el
 procedimiento manual que se rehacia a mano en TAREA B/TAREA D (ver
-PROGRESS.md/docs/FASE3_6_LLM.md) por un script reusable.
+docs/historial/PROGRESS.md y docs/FASE3_6_LLM.md) por un script reusable.
 
 Copia `--source-db` (OBLIGATORIO -- a proposito sin default derivado de
 `settings.database_path`: leer esa settings ANTES de fijar las variables de

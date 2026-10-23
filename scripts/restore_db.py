@@ -1,5 +1,5 @@
 """Restaura (importa) un respaldo de la base del bot en la ruta configurada (Fase 6,
-docs/MANUAL_OPERACION.md): lo que se usa para MUDAR el bot a otro PC o a Docker sin perder la
+docs/USO.md): lo que se usa para MUDAR el bot a otro PC o a Docker sin perder la
 medicion en curso, y para volver a un respaldo.
 
 Con el BOT DETENIDO (nunca con el proceso escribiendo la base). Pasos de seguridad:

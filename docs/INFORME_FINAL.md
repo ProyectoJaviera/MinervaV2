@@ -2,6 +2,12 @@
 
 **Fecha:** 2026-10-18 · **Alcance:** Fases 0 a 7 · **Modo:** 100 % paper trading (ninguna orden real)
 
+> **Es una fotografía del 2026-10-18.** Cierra el desarrollo de las fases 0 a 7 y describe el estado de ese día en la
+> instalación del autor: por eso habla del «bot real» del puerto 8000, de «este PC» y de pasos pendientes, y sus cifras
+> de avance de la medición no se actualizan. No recoge cambios posteriores. Para instalar y operar, usa la
+> documentación vigente ([índice](README.md)); lo **no verificado** de §5.2 sigue valiendo y está consolidado en
+> [Costos y límites](COSTOS_Y_LIMITES.md#lo-no-verificado).
+
 > ## ⚠ Aviso de riesgos
 >
 > El bot puede perder dinero y nada garantiza ganancias. Esta versión **no envía órdenes reales** y, con la
@@ -63,7 +69,7 @@ escritura**: login, logout y `POST /api/control/{action}`.
 
 | Fase | Entregable | Estado |
 |---|---|---|
-| 0 | Evaluación crítica de `openspec.md`, verificación de APIs y diseño (`docs/FASE0.md`) | Aprobada |
+| 0 | Evaluación crítica de `openspec.md`, verificación de APIs y diseño (`docs/historial/FASE0.md`) | Aprobada |
 | 1 | Estructura, datos de mercado de Bitunix, vertical mínima de punta a punta | Aprobada |
 | 2 | Universo dinámico y backtest riguroso | Cerrada |
 | 3 | Riesgo, simulador realista, señales en vivo, sombras, medición del LLM, brazo ejecutado (3.1–3.9) | Implementada |
@@ -74,7 +80,7 @@ escritura**: login, logout y `POST /api/control/{action}`.
 
 ### Fase 0: evaluación y decisiones
 
-Se evaluó `docs/openspec.md` contra la especificación: se reutilizó como referencia de bajo nivel (firma HMAC,
+Se evaluó `docs/historial/openspec.md` contra la especificación: se reutilizó como referencia de bajo nivel (firma HMAC,
 reconexión del WebSocket, mecánica de TP parcial y trailing) y se descartó su alcance mono-activo, sus SL/TP fijos y
 su LLM binario sin medición. Se verificaron los endpoints públicos de Bitunix contra su documentación oficial (sin
 tarifa pública: se usa VIP0; sin open interest público: se omite). CoinGecko Demo exige una clave gratuita (100
@@ -96,7 +102,7 @@ Universo dinámico (CoinGecko menos stablecoins, envueltos y liquid-staking, int
 con un grupo de control BTC/ETH. Motor de backtest **sin sesgo de anticipación** (fill en la apertura de la vela
 siguiente, liquidación por mark price, SL/TP por último precio, funding real prorrateado) y seis candidatas de
 familias distintas, validadas dentro/fuera de muestra y con *walk-forward*, con **criterios de descarte escritos antes
-de correr** (`docs/FASE2_CRITERIOS.md`). Una simulación de cartera Monte Carlo (200 corridas) se reporta solo como
+de correr** (`docs/historial/FASE2_CRITERIOS.md`). Una simulación de cartera Monte Carlo (200 corridas) se reporta solo como
 información.
 
 **Resultado:** ninguna estrategia supera los criterios congelados. Un error de redondeo en el tope de SL
@@ -171,7 +177,8 @@ CoinGecko". Con la puerta cerrada, el servidor no consulta siquiera el PnL, y el
 - **Herramientas de operación**: `scripts/backup_db.py` y `scripts/restore_db.py` (consistentes, verificados y
   reversibles), `scripts/resume_drawdown_stop.py` y `scripts/export_schema_doc.py` (genera `docs/ESQUEMA_BD.md`: 28
   tablas, 13 índices explícitos, 1 disparador).
-- **Documentación final**: README, `docs/MANUAL_OPERACION.md` y este informe.
+- **Documentación final**: README, `docs/historial/MANUAL_OPERACION.md` (sustituido después por
+  [`docs/USO.md`](USO.md)) y este informe.
 - **Limpieza**: análisis de código muerto con `vulture` (entorno aislado, usando `app/`, `scripts/` y `tests/` como
   fuentes de uso) y comprobación aparte de cada campo de `Settings` por nombre y alias. Se **retiraron 7 campos de
   configuración sin ninguna referencia** (`TRADING_SYMBOLS`, `KLINE_INTERVAL`, `STRATEGY_HISTORY_BARS`,
@@ -224,7 +231,7 @@ en este PC.
 
 ## 3. Cumplimiento de la especificación
 
-Contrastado línea por línea con `docs/SPEC.md`.
+Contrastado línea por línea con `docs/historial/SPEC.md`.
 
 | Requisito | Estado | Nota |
 |---|---|---|
@@ -320,7 +327,8 @@ Contrastado línea por línea con `docs/SPEC.md`.
   de operación continua (crecimiento del volumen, rotación de logs) ni un **Ctrl+C a mitad de la mudanza** (el
   bloque `finally` que deshace lo hecho no tiene prueba automática). Tampoco una mudanza con el bot nativo y el
   contenedor **ambos en el puerto 8000** contra Docker real: el ensayo real usó el 8001 y el 8002 (más una repetición
-  con el mismo puerto, §13 de `docs/MUDANZA_DOCKER.md`) y las pruebas automáticas cubren el caso del mismo puerto.
+  con el mismo puerto, §13 de `docs/historial/MUDANZA_DOCKER_ENSAYO.md`) y las pruebas automáticas cubren el caso del
+  mismo puerto.
 - **Entrega real de mensajes de Telegram** en el chat del usuario (requiere el token del `.env`, que no se lee). El
   notificador envía un mensaje de arranque para comprobarlo la primera vez.
 - **Aspecto visual del dashboard** en un navegador real (solo Vitest/jsdom, `tsc` y `vite build`), y una mutación de
@@ -413,8 +421,8 @@ Contrastado línea por línea con `docs/SPEC.md`.
    (PowerShell no distingue mayúsculas) y, con dos tablas distintas, la segunda se informaba mal. Corregido con una
    prueba que altera dos tablas.
 5. **`MinervaStartBot` y `MinervaDailySummary` no existen en este PC** (solo `MinervaHealthAlert`): el resumen diario
-   por Telegram no se está enviando. No se creó ninguna: es una decisión del usuario (comando en
-   `docs/MIGRACION_PC.md`).
+   por Telegram no se está enviando. No se creó ninguna: es una decisión del usuario (comandos en
+   [`docs/USO.md`](USO.md#tareas-programadas)).
 6. **Un contenedor `unhealthy` no se reinicia solo** (Docker reinicia procesos que terminan, no que se cuelgan): la
    alerta externa sigue siendo necesaria.
 7. **`create_host_path: false` no se respeta en Docker Desktop para Windows:** si falta el `.env`, crea una carpeta
@@ -425,7 +433,8 @@ Contrastado línea por línea con `docs/SPEC.md`.
    `CREATE_NO_WINDOW` en todos los procesos hijos de pruebas y scripts y `-WindowStyle Hidden` en PowerShell,
    vigilado por pruebas estáticas y por una comprobación empírica. Mismo origen: **`MinervaHealthAlert` abre una
    consola visible cada 10 minutos** porque su acción es el `pythonw.exe` del venv (también de consola);
-   `conhost.exe --headless` lo evita (probado con tareas de prueba; el cambio, en `docs/MIGRACION_PC.md`).
+   `conhost.exe --headless` lo evita (probado con tareas de prueba; el cambio, en
+   [`docs/USO.md`](USO.md#tareas-programadas)).
 9. **Ninguna prueba toca el Programador de tareas real**, y ahora está garantizado: una trampa (`schtasks` que no
    hace nada) ocupa su puerta durante toda la sesión de pruebas y una prueba estática impide que otro código lo
    nombre.
@@ -484,14 +493,19 @@ comprobó que seguía escuchando), `data/minerva_estabilidad.db` solo se leyó c
 lectura para crear copias en el scratchpad, y no se leyó ni se imprimió ninguna credencial. **Una excepción
 declarada en la Fase 7:** por un error del arnés del ensayo, dos ejecuciones de `backup_db.py` sin `--db` crearon
 dos respaldos consistentes de más en `data/backups/` (`minerva_20261019_002121.db` y `minerva_20261019_021843.db`;
-sin modificar ni borrar nada existente; detalle en `docs/MUDANZA_DOCKER.md` §13). Además creó y borró una tarea
+sin modificar ni borrar nada existente; detalle en `docs/historial/MUDANZA_DOCKER_ENSAYO.md` §13). Además creó y borró una tarea
 programada ficticia (`MinervaRehearsalDummy`) para probar `schtasks /Change` y no tocó ninguna de las tareas reales.
 
 ## 10. Mapa de documentos
 
-`README.md` (qué es y cómo arrancar) · `docs/MANUAL_OPERACION.md` (operar) · este informe · `docs/ESQUEMA_BD.md`
-(generado) · `docs/SPEC.md` (especificación) · `docs/FASE0.md` … `docs/FASE6_PLAN.md` (plan y decisiones de cada fase)
-· `docs/FASE3_6_LLM.md` (diseño de la medición) · `docs/VEREDICTO_3_6.md` (procedimiento del veredicto) ·
-`docs/PASO_DINERO_REAL.md` (criterios y riesgos de un eventual paso a real) · `docs/MIGRACION_PC.md` (tareas de
-Windows y mudanza nativa) · `docs/MUDANZA_DOCKER.md` (pasar el bot real a Docker, volver atrás, qué se probó) ·
-`PROGRESS.md` (bitácora completa).
+El índice vigente de toda la documentación es [`docs/README.md`](README.md). En resumen:
+[`README.md`](../README.md) (qué es y cómo arrancar) · [`GUIA_INSTALACION.md`](GUIA_INSTALACION.md) ·
+[`CONFIGURACION.md`](CONFIGURACION.md) · [`USO.md`](USO.md) (operar) · [`ARQUITECTURA.md`](ARQUITECTURA.md) ·
+[`METODOLOGIA.md`](METODOLOGIA.md) · [`SOLUCION_PROBLEMAS.md`](SOLUCION_PROBLEMAS.md) · [`SEGURIDAD.md`](SEGURIDAD.md) ·
+[`COSTOS_Y_LIMITES.md`](COSTOS_Y_LIMITES.md) · [`GLOSARIO.md`](GLOSARIO.md) · este informe ·
+[`ESQUEMA_BD.md`](ESQUEMA_BD.md) (generado) · [`FASE3_6_LLM.md`](FASE3_6_LLM.md) (diseño de la medición) ·
+[`VEREDICTO_3_6.md`](VEREDICTO_3_6.md) (procedimiento del veredicto) · [`PASO_DINERO_REAL.md`](PASO_DINERO_REAL.md)
+(criterios y riesgos de un eventual paso a real) · [`MUDANZA_DOCKER.md`](MUDANZA_DOCKER.md) (pasar un bot nativo a
+Docker y volver atrás). Los planes por fase (`FASE0.md` … `FASE6_PLAN.md`), la especificación inicial (`SPEC.md`), el
+manual original, la guía de migración de PC, la guía de la mudanza con el relato del ensayo y la bitácora completa
+(`PROGRESS.md`) están en [`docs/historial/`](historial/README.md).

@@ -1,5 +1,5 @@
 """La base del bot cuando corre en Docker: respaldar, sacar una copia y correr informes (Fase 7,
-docs/MUDANZA_DOCKER.md y docs/MANUAL_OPERACION.md).
+docs/MUDANZA_DOCKER.md y docs/USO.md).
 
 Tras la mudanza la base viva esta en un volumen de Docker, no en `data/`. Estas herramientas hacen
 la copia con la API de backup de SQLite DENTRO del contenedor (seguro con el bot escribiendo), la

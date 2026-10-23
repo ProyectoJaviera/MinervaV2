@@ -158,7 +158,7 @@ function Format-LocalTime([datetime]$Utc) {
     return $local.ToString("HH:mm")
 }
 
-# La ventana segura de la medicion (docs/MANUAL_OPERACION.md, seccion 4.1): minutos :10 a :40 de una
+# La ventana segura de la medicion (docs/USO.md, seccion Reinicios seguros): minutos :10 a :40 de una
 # hora UTC que NO sea de cierre de vela de 4 h (00, 04, 08, 12, 16, 20). Todas las filas de la
 # medicion caen en :00/:01; a partir de :10 ya no queda un etiquetado en vuelo que cortar.
 function Test-SafeWindow([datetime]$NowUtc) {
