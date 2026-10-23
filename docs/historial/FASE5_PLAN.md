@@ -218,7 +218,7 @@ Las únicas rutas de escritura de toda la API son login, logout y los tres POST 
   lectura responden 200 con la compuerta **real** cerrada y ningún JSON contiene campos ni palabras de resultado; universo de 30
   candidatos (10 incluidos, 3 cambios históricos), 6 veredictos de backtest (3 estrategias elegibles); brazo con 2 omitidas
   (`RISK_STRATEGY_NOT_ELIGIBLE`), 0 abiertas. Los controles contra el esquema real: palabra incorrecta → 422 sin cambios, origen ajeno
-  → 403, pausar y reanudar quedan auditados con `renzo`. Con **operaciones sintéticas** (una abierta y una cerrada, con valores
+  → 403, pausar y reanudar quedan auditados con `admin`. Con **operaciones sintéticas** (una abierta y una cerrada, con valores
   centinela de PnL, salida y motivo) en la copia, esos valores no aparecen en ninguna ruta y la cerrada solo trae las claves de la
   lista blanca más `closed_at`.
 - **Arranque real en el 8001** (`scripts/run_dev_server.py` sobre una copia, red real de solo lectura a Bitunix, push forzado a apagado):

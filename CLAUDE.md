@@ -1,7 +1,7 @@
 # Minerva: bot de trading autónomo (PAPER TRADING v1)
 
 ## Contexto
-Especificación completa en docs/SPEC.md y base previa en docs/openspec.md (nunca probada: evalúala críticamente, no la copies a ciegas). Lee SPEC.md al inicio de cada sesión.
+Especificación completa en docs/historial/SPEC.md y base previa en docs/historial/openspec.md (nunca probada: evalúala críticamente, no la copies a ciegas). Lee SPEC.md al inicio de cada sesión. El índice de la documentación vigente está en docs/README.md.
 
 ## Idioma
 A partir de ahora, todas las respuestas, resúmenes y documentos para este proyecto deben estar en español. Los identificadores de código (variables, funciones, clases, tablas, columnas) siguen en inglés.
@@ -10,7 +10,7 @@ A partir de ahora, todas las respuestas, resúmenes y documentos para este proye
 - v1 es 100% paper trading. Prohibido escribir código que envíe órdenes reales a Bitunix. La ejecución real solo existe como interfaz/documentación (BitunixBackend desactivado).
 - Nunca leas, imprimas ni pidas archivos .env ni credenciales. Usa solo .env.example con valores vacíos. Nunca incluyas claves en código, tests, logs ni commits.
 - No inventes endpoints, parámetros ni firmas de Bitunix/CoinGecko. Verifica con la documentación oficial o los ejemplos del repo oficial antes de implementar; si no puedes verificar, dilo.
-- Trabaja por fases (ver SPEC.md). Al terminar cada fase: corre los tests, actualiza PROGRESS.md y detente a esperar mi aprobación. No avances de fase sin confirmación.
+- Trabaja por fases (ver SPEC.md). Al terminar cada fase: corre los tests, actualiza docs/historial/PROGRESS.md y detente a esperar mi aprobación. No avances de fase sin confirmación.
 
 ## Flujo de trabajo
 - Antes de implementar una fase: investiga, propón un plan en Plan Mode y espera aprobación.
@@ -18,10 +18,10 @@ A partir de ahora, todas las respuestas, resúmenes y documentos para este proye
 - Pruebas: pytest + pytest-asyncio. Toda función de riesgo y de simulación (SL/TP/trailing, liquidación, comisiones, funding) debe tener tests con casos límite.
 - Antes de dar por terminada cualquier tarea que toque el pipeline de datos o la persistencia, ejecuta un smoke test de punta a punta con un subconjunto pequeño; que los tests unitarios pasen no es suficiente.
 - Todo script que lea la base real debe ejecutarse antes de entregarlo contra una copia temporal de esa base (ruta distinta de `settings.database_path`, verificada con un assert explícito) y confirmar que termina sin errores con sus datos reales; los tests con datos sintéticos no bastan para esto (ver el fallo real de `scripts/analyze_risk.py` que esta regla previene).
-- Mantén PROGRESS.md: estado por fase, decisiones y pendientes.
+- Mantén docs/historial/PROGRESS.md: estado por fase, decisiones y pendientes.
 
 ## Autonomía
-- Trabaja de corrido hasta terminar la tarea completa. No pidas confirmación ni hagas preguntas intermedias: decide con criterio, anota la decisión en PROGRESS.md y sigue. Solo te detienes al terminar, o si algo exige una decisión mía irreversible.
+- Trabaja de corrido hasta terminar la tarea completa. No pidas confirmación ni hagas preguntas intermedias: decide con criterio, anota la decisión en docs/historial/PROGRESS.md y sigue. Solo te detienes al terminar, o si algo exige una decisión mía irreversible.
 - Los scripts de prueba temporales van en el directorio scratchpad y se reutilizan; no crees un archivo de prueba nuevo por intento.
 - Límites absolutos aunque ningún permiso los frene: nunca detener, matar ni reiniciar el proceso del bot real en el puerto 8000; nunca modificar, mover ni borrar archivos en `data/` (en especial `data/minerva_estabilidad.db` y sus respaldos); nunca leer ni imprimir `.env`; nunca tocar el prompt congelado (`SYSTEM_PROMPT`, `FEATURES_VERSION`, `FROZEN_PROMPT_SHA256`).
 - Push: al terminar cada tarea, con pytest y ruff en verde, haz `git push origin master`; nunca `--force`, nunca otra rama, y nunca subas `.env`, `data/` ni `logs/`.

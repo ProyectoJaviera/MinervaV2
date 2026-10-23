@@ -29,8 +29,8 @@
 
 **Estado: APROBADA.**
 
-Plan aprobado: `C:\Users\Renzo\.claude\plans\abundant-knitting-pearl.md`
-(resumen tambien en la conversacion). Instrucciones adicionales del usuario
+Plan aprobado (archivo de plan local de la sesion de IA, no versionado;
+resumen tambien en la conversacion). Instrucciones adicionales del usuario
 seguidas: vertical minima antes de ampliar breadth; sin pandas-ta (EMA/RSI/ATR
 con pandas puro); descarga historica paginada y cacheada; verificacion de
 funding historico; aclaracion de que el backtest (Fase 2) solo valida
@@ -752,7 +752,7 @@ una:
     - `AUTO_OPEN_WITHOUT_LLM` sigue en `false`; nada de la fase (iii) toca
       `app/core/scheduler.py`.
     - Suite completa: 423 passed, 2 skipped; `ruff check .` limpio.
-    - **Pendiente operativo de Renzo:** correr `scripts/llm_smoke.py --real
+    - **Pendiente operativo del autor:** correr `scripts/llm_smoke.py --real
       --confirm-real` sobre una copia, comparando el coste con su consola de
       Anthropic, antes de confiar en el calculo de precios.
   - **Subfase 3.6 (iv) completada (2026-10-09): features de mercado completas,
@@ -1536,8 +1536,8 @@ etiquetado en vivo esta funcionando en produccion.
 ## Pre-Fase 5: plan aprobado (2026-10-14) y Subfase A (alerta Telegram)
 
 Plan de 3 items (alerta Telegram, auth + endpoints de solo lectura, dashboard
-React) propuesto en Plan Mode y aprobado por el usuario -- plan completo en
-`C:\Users\Renzo\.claude\plans\radiant-twirling-waterfall.md`. Resumen de lo
+React) propuesto en Plan Mode y aprobado por el usuario -- el plan completo es
+un archivo local de la sesion de IA (no versionado). Resumen de lo
 acordado: el bot real (puerto 8000, `data/minerva_estabilidad.db`,
 `LLM_LIVE_LABELING_ENABLED=true`) no se toca salvo UN restart al final (tras
 auth + endpoints nuevos bajo `/api/` + el mount de `StaticFiles`), cronometrado
@@ -1912,8 +1912,8 @@ arriba).
 
 ## Subfase D: dashboard React (2026-10-14)
 
-Plan propuesto y aprobado en Plan Mode (`C:\Users\Renzo\.claude\plans\
-radiant-twirling-waterfall.md`), implementado de corrido segun la nueva
+Plan propuesto y aprobado en Plan Mode (archivo local de la sesion de IA, no
+versionado), implementado de corrido segun la nueva
 seccion "Autonomia" de CLAUDE.md. Reemplaza `frontend/src/App.tsx` (el
 frontend minimo de Fase 1, sin auth ni estilo) por un dashboard que consume
 los 3 endpoints nuevos de la Subfase C mas `/health`.
@@ -2004,7 +2004,7 @@ el unico restart real que lo pondria en produccion.
 
 ## Revision de 940eb2d (2026-10-14): correcciones post-Subfase D
 
-- **Bug de sesion en App.tsx (reproducido por el usuario)**: tras "Cerrar sesion" y volver a entrar en la misma pestana (o tras vencer la sesion de 24h), `/api/auth/me` respondia 200 pero la UI quedaba en LoginView. Causa: `forcedLoggedOut` solo se limpiaba cuando cambiaba `me.data?.username`, y React Query conserva el ultimo `data` ("renzo") durante un error, asi que el valor nunca cambiaba. Decision: eliminar `forcedLoggedOut` y hacer que la cache de `["me"]` sea la unica fuente de verdad. Un 401 de cualquier query (o del propio `/me`) llama a `clearSession`, que escribe `null` en `["me"]` y borra el resto de las queries cacheadas; logout hace lo mismo. Escribir la cache no provoca refetch, asi que no hay bucle; ademas `useMe` ya no hace polling (los 401 se detectan por las queries de datos). Login sigue invalidando `["me"]`.
+- **Bug de sesion en App.tsx (reproducido por el usuario)**: tras "Cerrar sesion" y volver a entrar en la misma pestana (o tras vencer la sesion de 24h), `/api/auth/me` respondia 200 pero la UI quedaba en LoginView. Causa: `forcedLoggedOut` solo se limpiaba cuando cambiaba `me.data?.username`, y React Query conserva el ultimo `data` ("admin") durante un error, asi que el valor nunca cambiaba. Decision: eliminar `forcedLoggedOut` y hacer que la cache de `["me"]` sea la unica fuente de verdad. Un 401 de cualquier query (o del propio `/me`) llama a `clearSession`, que escribe `null` en `["me"]` y borra el resto de las queries cacheadas; logout hace lo mismo. Escribir la cache no provoca refetch, asi que no hay bucle; ademas `useMe` ya no hace polling (los 401 se detectan por las queries de datos). Login sigue invalidando `["me"]`.
 - Pruebas Vitest nuevas (3, backend simulado con estado): (a) cerrar sesion y reingresar muestra el dashboard; (b) un 401 en una query de datos lleva a LoginView y reingresar muestra el dashboard; (c) un 401 de `/me` no provoca refetchs (1 sola llamada tras 300 ms). Verificado que (a) y (b) FALLAN con el codigo anterior (stash temporal del arreglo) y pasan con el nuevo.
 - `frontend/package.json`: `build` ahora es `tsc --noEmit && vite build`.
 - `docs/MIGRACION_PC.md`: paso 4 aclara que `start_bot.ps1` ignora `DATABASE_PATH` del `.env` (fija el suyo en el entorno del proceso, que tiene prioridad) y que el respaldo debe quedar como `data\minerva_estabilidad.db`; todos los comandos usan `.\.venv\Scripts\python.exe` y los `.ps1` se invocan con `powershell -NoProfile -ExecutionPolicy Bypass -File`.
@@ -2037,7 +2037,7 @@ Plan aprobado en Plan Mode (tras 5 commits de pre-Fase 5 ya cerrados en e6d3527)
 
 ## Criterio condicional del placebo y regla de procedimiento (2026-10-17)
 
-Ajuste de criterio decidido por Renzo ANTES de tener datos (revision de 51ee00f).
+Ajuste de criterio decidido por el autor ANTES de tener datos (revision de 51ee00f).
 
 - **`app/trading/ai_value_placebo.py`** (no `ai_value.py`): "Calibrado" se decide con la tasa condicional (frecuencia de APORTA_VALOR por azar / probabilidad exacta de que una repeticion llegue al punto de analisis) < 5 %, y solo si esa probabilidad es >= 50 %. Si es menor: NO INFORMATIVO (ni SI ni NO), codigo de salida 7. `classify_calibration` es la unica funcion que decide; el `calibrated` de `PlaceboResult` (frecuencia bruta) ya no decide. La frecuencia bruta y su IC de Wilson se imprimen rotulados [informativo]. El bloque de registro lleva el resultado y la regla.
 - Se guarda con `--out` tambien un resultado NO INFORMATIVO o NO calibrado (son resultados del procedimiento): el nombre debe llevar fecha porque `--out` no sobrescribe. Codigos: 0 CALIBRADO, 6 NO calibrado, 7 NO INFORMATIVO, 3 nada que calibrar, 4 bandera sintetica rechazada, 5 `--out` existe.

@@ -12,7 +12,7 @@ PC 24/7 sin perder la medición en vivo en curso.
 >
 > **Fase 7 (Docker):** el bot real puede pasar a Docker, con su base en un volumen interno y arranque con
 > `docker compose up -d`, con `scripts\migrate_to_docker.ps1` (y volver con `scripts\rollback_from_docker.ps1`):
-> [`docs/MUDANZA_DOCKER.md`](MUDANZA_DOCKER.md). Lo de este documento sigue valiendo para el arranque nativo
+> [`docs/MUDANZA_DOCKER.md`](MUDANZA_DOCKER_ENSAYO.md). Lo de este documento sigue valiendo para el arranque nativo
 > (que es también el camino de vuelta); lo que cambia con Docker está en la sección «Con Docker» del final.
 > **Estado de las tareas en este PC (2026-10-18):** solo existía `MinervaHealthAlert`; `MinervaStartBot` y
 > `MinervaDailySummary` **no estaban registradas** (compruébalo con `schtasks /Query /FO CSV /NH`). Sin la tarea
@@ -67,7 +67,7 @@ denegado" en tu sesión normal, abrí PowerShell como Administrador):
 **Registrar** (ajustá `$RepoRoot` si tu checkout está en otra ruta):
 
 ```powershell
-$RepoRoot = "D:\Estudio\IA\Minerva"
+$RepoRoot = "<carpeta del repo>"
 $action = New-ScheduledTaskAction -Execute "conhost.exe" `
     -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$RepoRoot\scripts\start_bot.ps1`"" `
     -WorkingDirectory $RepoRoot
@@ -109,7 +109,7 @@ exacto se probó antes con una tarea de prueba idéntica):
 ```powershell
 $t = Get-ScheduledTask -TaskName MinervaHealthAlert
 $t.Actions[0].Execute = "conhost.exe"
-$t.Actions[0].Arguments = "--headless D:\Estudio\IA\Minerva\.venv\Scripts\python.exe scripts\telegram_alert.py"
+$t.Actions[0].Arguments = "--headless <carpeta del repo>\.venv\Scripts\python.exe scripts\telegram_alert.py"
 Set-ScheduledTask -InputObject $t
 ```
 
@@ -142,7 +142,7 @@ debe estar en la zona horaria de Chile -- Windows: "Pacific SA Standard Time" --
 `-StartWhenAvailable` lo corre en cuanto se pueda si el PC estaba apagado a esa hora):
 
 ```powershell
-$RepoRoot = "D:\Estudio\IA\Minerva"
+$RepoRoot = "<carpeta del repo>"
 $action = New-ScheduledTaskAction -Execute "conhost.exe" `
     -Argument "--headless $RepoRoot\.venv\Scripts\python.exe `"$RepoRoot\scripts\telegram_daily.py`"" `
     -WorkingDirectory $RepoRoot

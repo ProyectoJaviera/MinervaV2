@@ -6,7 +6,7 @@ mudar el bot, cómo cuidar las claves y qué hacer cuando la medición llegue a 
 - **Minerva es 100 % paper trading.** Nada de lo que hay aquí envía órdenes reales.
 - Las rutas son relativas a la raíz del repositorio. **Nativo** = Windows con `scripts/start_bot.ps1`
   (como corre el bot real hasta la mudanza, puerto 8000). **Docker** = `docker compose`, **probado con un
-  daemon real** (Docker Desktop en este PC, Fase 7: [`docs/MUDANZA_DOCKER.md`](MUDANZA_DOCKER.md)); el bot real
+  daemon real** (Docker Desktop en este PC, Fase 7: [`docs/MUDANZA_DOCKER.md`](MUDANZA_DOCKER_ENSAYO.md)); el bot real
   pasa de uno a otro con `scripts/migrate_to_docker.ps1` y vuelve con `scripts/rollback_from_docker.ps1`.
 - Los comandos de PowerShell llevan `.\.venv\Scripts\python.exe`. **Con Docker la base viva está en un volumen**,
   no en `data\`: lo que lee la base (respaldos, informes, estado de la medición) corre en el host sobre una
@@ -293,7 +293,7 @@ Mismo patrón que las otras tareas de `docs/MIGRACION_PC.md`. **Docker no se pue
 volumen**, y reiniciar o reinstalar Docker Desktop puede borrarlo (§5.6): el respaldo diario es la red de seguridad.
 
 ```powershell
-$RepoRoot = "D:\Estudio\IA\Minerva"
+$RepoRoot = "<carpeta del repo>"
 $action = New-ScheduledTaskAction -Execute "conhost.exe" `
     -Argument "--headless $RepoRoot\.venv\Scripts\python.exe scripts\docker_db.py backup --keep 14" `
     -WorkingDirectory $RepoRoot
