@@ -114,6 +114,23 @@ def test_check_constraints_are_extracted_with_balanced_parentheses(sql, expected
     assert schema_doc.extract_checks(sql) == expected
 
 
+def test_the_document_cites_the_moved_phase_documents_at_their_current_path():
+    text = DOC.read_text(encoding="utf-8")
+
+    assert "docs/historial/FASE3_PLAN.md" in text  # el comentario del DDL dice docs/FASE3_PLAN.md
+    for name in schema_doc.MOVED_TO_HISTORY:
+        assert f"docs/{name}.md" not in text.replace(f"docs/historial/{name}.md", ""), name
+
+
+def test_legacy_paths_are_rewritten_only_for_moved_documents():
+    assert schema_doc.modernize_doc_paths("ver docs/FASE2_PLAN.md y docs/FASE3_6_LLM.md") == (
+        "ver docs/historial/FASE2_PLAN.md y docs/FASE3_6_LLM.md"
+    )
+    assert schema_doc.modernize_doc_paths("docs/FASE2_REEJECUCION_TABLAS.md") == (
+        "docs/historial/FASE2_REEJECUCION_TABLAS.md"
+    )
+
+
 def test_the_document_hides_nothing_about_result_columns_but_holds_no_data():
     text = DOC.read_text(encoding="utf-8")
 

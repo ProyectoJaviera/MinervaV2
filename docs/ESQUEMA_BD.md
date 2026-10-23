@@ -7,8 +7,10 @@
 
 Motor: SQLite en modo **WAL** (`PRAGMA journal_mode=WAL`, `synchronous=NORMAL`), una sola conexion
 `aiosqlite` con un candado de escritura. Las fechas son texto ISO-8601 en UTC; los tiempos de velas,
-enteros en milisegundos Unix. Para respaldar o mudar la base usa `scripts/backup_db.py` y
-`scripts/restore_db.py` (nunca copies el archivo a mano: en modo WAL puede quedar inconsistente).
+enteros en milisegundos Unix. Para respaldar o mudar la base usa `scripts/docker_db.py` (con Docker)
+o `scripts/backup_db.py` y `scripts/restore_db.py` (nunca copies el archivo a mano: en modo WAL
+puede quedar inconsistente). Los comentarios de cada tabla vienen del codigo y citan documentos de
+fase, que estan en [`docs/historial/`](historial/README.md).
 
 **28 tablas**, 13 indices explicitos y 1 disparador(es).
 
@@ -104,7 +106,7 @@ Indices:
 
 ### paper_execution_log
 
-Brazo ejecutado de la cuenta PAPER (subfase 3.9, docs/FASE3_9_BRAZO_EJECUTADO.md): una fila por cada decision APROBADA que el brazo considero, abra o no. `signal_group_key` es UNICA (reclamo idempotente: un grupo nunca abre dos veces). `outcome` PENDING solo dura el instante entre el reclamo y la apertura (o hasta que el arranque lo resuelve); `reason` explica un SKIPPED (LATE_DECISION, SCHEDULER_PAUSED, POSITION_ALREADY_OPEN, NO_CONTRACT_SPEC, BELOW_MIN_ORDER, LEVELS_INVALID, RISK_<codigo>, OPEN_ERROR, ABORTED_RESTART). Sin PnL ni ningun resultado: solo la decision de ejecucion, con sus detalles en `details_json`.
+Brazo ejecutado de la cuenta PAPER (subfase 3.9, docs/historial/FASE3_9_BRAZO_EJECUTADO.md): una fila por cada decision APROBADA que el brazo considero, abra o no. `signal_group_key` es UNICA (reclamo idempotente: un grupo nunca abre dos veces). `outcome` PENDING solo dura el instante entre el reclamo y la apertura (o hasta que el arranque lo resuelve); `reason` explica un SKIPPED (LATE_DECISION, SCHEDULER_PAUSED, POSITION_ALREADY_OPEN, NO_CONTRACT_SPEC, BELOW_MIN_ORDER, LEVELS_INVALID, RISK_<codigo>, OPEN_ERROR, ABORTED_RESTART). Sin PnL ni ningun resultado: solo la decision de ejecucion, con sus detalles en `details_json`.
 
 | Columna | Tipo | Nulo | Por defecto | Clave |
 |---|---|---|---|---|
@@ -134,7 +136,7 @@ Indices:
 
 ### control_audit
 
-Fase 5 (docs/FASE5_PLAN.md): rastro auditable de cada accion de control (pausar, reanudar, kill switch) pedida por el dashboard o por Telegram: quien, cuando y el estado antes/despues. No guarda datos del chat de Telegram ni ningun resultado de operaciones.
+Fase 5 (docs/historial/FASE5_PLAN.md): rastro auditable de cada accion de control (pausar, reanudar, kill switch) pedida por el dashboard o por Telegram: quien, cuando y el estado antes/despues. No guarda datos del chat de Telegram ni ningun resultado de operaciones.
 
 | Columna | Tipo | Nulo | Por defecto | Clave |
 |---|---|---|---|---|
@@ -163,7 +165,7 @@ La medicion en vivo del valor del LLM: cada evaluacion de estrategia, las operac
 
 ### signals
 
-Generador de senales en vivo (Fase 3, subfase 3.3) -- una fila por CADA evaluacion (simbolo, estrategia, timeframe, vela cerrada), HOLD incluido (registro auditable completo, ver `app/trading/signal_generator.py`). `UNIQUE` + `INSERT OR IGNORE` evita duplicar la fila si el scheduler vuelve a evaluar la misma vela ya cerrada en un poll posterior. `sl_margin_loss_pct` NO esta en la lista de columnas de docs/FASE3_PLAN.md punto 1, pero se agrega aqui para auditar el MISMO numero que decide `status`/`signals_discarded_by_sl_cap` sin tener que recalcularlo despues.
+Generador de senales en vivo (Fase 3, subfase 3.3) -- una fila por CADA evaluacion (simbolo, estrategia, timeframe, vela cerrada), HOLD incluido (registro auditable completo, ver `app/trading/signal_generator.py`). `UNIQUE` + `INSERT OR IGNORE` evita duplicar la fila si el scheduler vuelve a evaluar la misma vela ya cerrada en un poll posterior. `sl_margin_loss_pct` NO esta en la lista de columnas de docs/historial/FASE3_PLAN.md punto 1, pero se agrega aqui para auditar el MISMO numero que decide `status`/`signals_discarded_by_sl_cap` sin tener que recalcularlo despues.
 
 | Columna | Tipo | Nulo | Por defecto | Clave |
 |---|---|---|---|---|
@@ -197,7 +199,7 @@ Indices:
 
 ### signals_discarded_by_sl_cap
 
-Senal accionable (LONG/SHORT) cuyo `sl_margin_loss_pct` supero `LIVE_SL_MARGIN_CAP_PCT` -- se descarta ANTES de cualquier simulacion o decision del LLM (docs/FASE3_PLAN.md punto 2). `signal_id` referencia la fila ya existente en `signals` (que queda con `status='DISCARDED_SL_CAP'`, nunca se borra -- sigue siendo el registro auditable completo).
+Senal accionable (LONG/SHORT) cuyo `sl_margin_loss_pct` supero `LIVE_SL_MARGIN_CAP_PCT` -- se descarta ANTES de cualquier simulacion o decision del LLM (docs/historial/FASE3_PLAN.md punto 2). `signal_id` referencia la fila ya existente en `signals` (que queda con `status='DISCARDED_SL_CAP'`, nunca se borra -- sigue siendo el registro auditable completo).
 
 | Columna | Tipo | Nulo | Por defecto | Clave |
 |---|---|---|---|---|
@@ -218,7 +220,7 @@ Restricciones `CHECK`:
 
 ### shadow_trades
 
-Operaciones sombra (subfase 3.5, docs/FASE3_PLAN.md punto 2): una por senal agrupada (simbolo, direccion, vela), simuladas con margen ilimitado. `signal_group_key` es UNICA: la misma senal agrupada nunca genera dos operaciones sombra. `llm_decision` queda SIN_LLM hasta la subfase 3.6 (APROBADA/RECHAZADA cuando exista el LLM).
+Operaciones sombra (subfase 3.5, docs/historial/FASE3_PLAN.md punto 2): una por senal agrupada (simbolo, direccion, vela), simuladas con margen ilimitado. `signal_group_key` es UNICA: la misma senal agrupada nunca genera dos operaciones sombra. `llm_decision` queda SIN_LLM hasta la subfase 3.6 (APROBADA/RECHAZADA cuando exista el LLM).
 
 | Columna | Tipo | Nulo | Por defecto | Clave |
 |---|---|---|---|---|
@@ -360,7 +362,7 @@ Marca afirmativa de "esta serie se descargo completa" escrita por scripts/downlo
 
 ### ohlcv_unrepairable_gaps
 
-Huecos puntuales que `fill_gaps` ya intento reparar con un pedido estrecho y SIGUEN sin aparecer (incidente de estabilidad 2026-10-10, "Añadido 0" -- ver docs/FASE2_INTEGRIDAD_VELAS.md). Evita que `_verify_and_repair` los reintente contra la API en cada ciclo del generador de señales: los vuelve a intentar solo despues de `GAP_RETRY_COOLDOWN_HOURS` (app/market/ ohlcv_history.py), y se borra la fila si un reintento SI lo recupera.
+Huecos puntuales que `fill_gaps` ya intento reparar con un pedido estrecho y SIGUEN sin aparecer (incidente de estabilidad 2026-10-10, "Añadido 0" -- ver docs/historial/FASE2_INTEGRIDAD_VELAS.md). Evita que `_verify_and_repair` los reintente contra la API en cada ciclo del generador de señales: los vuelve a intentar solo despues de `GAP_RETRY_COOLDOWN_HOURS` (app/market/ ohlcv_history.py), y se borra la fila si un reintento SI lo recupera.
 
 | Columna | Tipo | Nulo | Por defecto | Clave |
 |---|---|---|---|---|
@@ -374,7 +376,7 @@ Huecos puntuales que `fill_gaps` ya intento reparar con un pedido estrecho y SIG
 
 ### funding_cache
 
-Cache de funding_rate_history (igual proposito que ohlcv_cache): evita re-descargar en cada corrida/reintento del backtest. `floor_time` (en `ohlcv_floor` con interval='__funding__', price_type='__funding__' para reusar la misma tabla de piso) marca cuando se alcanzo el principio real del historial de funding de Bitunix (mas corto que el de velas, ver docs/FASE2_PLAN.md).
+Cache de funding_rate_history (igual proposito que ohlcv_cache): evita re-descargar en cada corrida/reintento del backtest. `floor_time` (en `ohlcv_floor` con interval='__funding__', price_type='__funding__' para reusar la misma tabla de piso) marca cuando se alcanzo el principio real del historial de funding de Bitunix (mas corto que el de velas, ver docs/historial/FASE2_PLAN.md).
 
 | Columna | Tipo | Nulo | Por defecto | Clave |
 |---|---|---|---|---|
@@ -421,7 +423,7 @@ Indices:
 
 ### data_source_health
 
-Salud de las fuentes de datos en vivo (subfase 3.4, punto 7 de docs/FASE3_PLAN.md): ultimo exito, ultimo error y fallos seguidos. Hoy la fuente `ws_feed` es el latido del WebSocket publico (cualquier mensaje del servidor, incluido el pong) -- si se queda sin latido, no se abren entradas.
+Salud de las fuentes de datos en vivo (subfase 3.4, punto 7 de docs/historial/FASE3_PLAN.md): ultimo exito, ultimo error y fallos seguidos. Hoy la fuente `ws_feed` es el latido del WebSocket publico (cualquier mensaje del servidor, incluido el pong) -- si se queda sin latido, no se abren entradas.
 
 | Columna | Tipo | Nulo | Por defecto | Clave |
 |---|---|---|---|---|
@@ -577,7 +579,7 @@ Titulares recolectados (texto NO confiable), estado de cada fuente e indice Fear
 
 ### news_items
 
-Fase 4 (docs/FASE4_PLAN.md), todo aditivo y fuera del prompt congelado de la medicion.  Noticias recolectadas (app/news/): SOLO titulo, URL, dominio y fecha -- nunca el cuerpo. `url_hash` es UNICO (la misma noticia no se guarda dos veces); un titular casi duplicado se guarda con `dup_of` y se excluye del contexto. `fetched_at` es cuando LO VIO el bot: el contexto para una decision exige `fetched_at <= instante` (sin mirar al futuro).
+Fase 4 (docs/historial/FASE4_PLAN.md), todo aditivo y fuera del prompt congelado de la medicion.  Noticias recolectadas (app/news/): SOLO titulo, URL, dominio y fecha -- nunca el cuerpo. `url_hash` es UNICO (la misma noticia no se guarda dos veces); un titular casi duplicado se guarda con `dup_of` y se excluye del contexto. `fetched_at` es cuando LO VIO el bot: el contexto para una decision exige `fetched_at <= instante` (sin mirar al futuro).
 
 | Columna | Tipo | Nulo | Por defecto | Clave |
 |---|---|---|---|---|

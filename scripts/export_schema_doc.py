@@ -80,9 +80,26 @@ HEADER = """\
 
 Motor: SQLite en modo **WAL** (`PRAGMA journal_mode=WAL`, `synchronous=NORMAL`), una sola conexion
 `aiosqlite` con un candado de escritura. Las fechas son texto ISO-8601 en UTC; los tiempos de velas,
-enteros en milisegundos Unix. Para respaldar o mudar la base usa `scripts/backup_db.py` y
-`scripts/restore_db.py` (nunca copies el archivo a mano: en modo WAL puede quedar inconsistente).
+enteros en milisegundos Unix. Para respaldar o mudar la base usa `scripts/docker_db.py` (con Docker)
+o `scripts/backup_db.py` y `scripts/restore_db.py` (nunca copies el archivo a mano: en modo WAL
+puede quedar inconsistente). Los comentarios de cada tabla vienen del codigo y citan documentos de
+fase, que estan en [`docs/historial/`](historial/README.md).
 """
+
+# Documentos de fase que se movieron a docs/historial/: los comentarios del DDL (en app/, que no se
+# toca) los citan por su ruta antigua, y el documento generado los muestra con la ruta actual.
+MOVED_TO_HISTORY = (
+    "FASE0", "FASE2_BLOQUEO_RED", "FASE2_CRITERIOS", "FASE2_INTEGRIDAD_VELAS", "FASE2_PLAN",
+    "FASE2_REEJECUCION_TABLAS", "FASE2_REEJECUCION", "FASE2_RESULTADOS", "FASE2_RIESGO_v1",
+    "FASE2_RIESGO", "FASE3_PLAN", "FASE3_7_TELEGRAM", "FASE3_9_BRAZO_EJECUTADO", "FASE4_PLAN",
+    "FASE5_PLAN", "FASE6_PLAN", "SPEC", "openspec", "MANUAL_OPERACION", "MIGRACION_PC",
+)
+_MOVED_PATH = re.compile(r"\bdocs/(" + "|".join(MOVED_TO_HISTORY) + r")\.md")
+
+
+def modernize_doc_paths(text: str) -> str:
+    """Sustituye la ruta antigua de un documento movido a `docs/historial/` por la actual."""
+    return _MOVED_PATH.sub(r"docs/historial/\1.md", text)
 
 
 def table_comments(schema: str) -> dict[str, str]:
@@ -177,7 +194,7 @@ def render(schema: dict, comments: dict[str, str]) -> str:
             table = tables[name]
             out += [f"### {name}", ""]
             if comments.get(name):
-                out += [comments[name], ""]
+                out += [modernize_doc_paths(comments[name]), ""]
             out += ["| Columna | Tipo | Nulo | Por defecto | Clave |", "|---|---|---|---|---|"]
             for col in table["columns"]:
                 key = f"PK{col['pk']}" if col["pk"] else ""
