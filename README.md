@@ -1,224 +1,219 @@
-# Minerva: bot de trading autónomo asistido por IA (PAPER TRADING v1)
+# Minerva: ¿mejora un LLM las señales técnicas de trading?
 
-> ## ⚠ Aviso de riesgos
+![Licencia MIT](https://img.shields.io/badge/licencia-MIT-green)
+![Python 3.11 y 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
+![Solo paper trading](https://img.shields.io/badge/modo-solo%20paper%20trading-orange)
+![Estado experimental](https://img.shields.io/badge/estado-experimental-yellow)
+
+> ## ⚠ Aviso: solo paper trading, experimental y no es asesoría financiera
 >
-> **Esta versión nunca envía órdenes reales.** Es 100 % *paper trading*: usa solo datos públicos de
-> mercado de Bitunix y simula las operaciones localmente. Aun así, el trading de futuros apalancados
-> (real o simulado) **puede perder dinero y nada de lo que hay aquí garantiza ganancias**. Que el
-> simulador gane no implica que una cuenta real ganaría: la ejecución real tiene latencia, comisiones,
-> deslizamiento y límites que el simulador solo aproxima (`docs/PASO_DINERO_REAL.md`).
->
-> **Estado de la evidencia (2026-10-18):** el backtest de las estrategias por reglas **no encontró
-> ventaja demostrable** (ninguna superó los criterios congelados de antemano), y el valor que aporta el
-> filtro de IA todavía **no se ha medido**: la medición va en curso y es *ciega* a propósito (ver
-> abajo). No hay base para pasar a dinero real. Lee `docs/INFORME_FINAL.md`.
+> **Minerva nunca envía órdenes reales.** Es 100 % *paper trading*: usa solo datos públicos de mercado de Bitunix y
+> simula las operaciones localmente. Es un proyecto de investigación **experimental**, **no es asesoría financiera** ni
+> una recomendación de inversión. El trading de futuros apalancados (real o simulado) **puede perder dinero** y nada de
+> lo que hay aquí garantiza ganancias: que el simulador gane no implica que una cuenta real ganaría, porque la
+> ejecución real tiene latencia, comisiones, deslizamiento y límites que el simulador solo aproxima
+> ([lo que no se pudo verificar](docs/COSTOS_Y_LIMITES.md#lo-no-verificado)).
 
-Minerva evalúa, en cada cierre de vela, un universo dinámico de criptomonedas (top por capitalización
-con perpetuo USDT en Bitunix) con seis estrategias por reglas; cada señal se simula como *operación
-sombra*, Claude (Anthropic) la etiqueta `APROBADA` o `RECHAZADA`, y la cuenta paper solo abre las
-aprobadas a tiempo, pasando por un motor de riesgo (y solo de las estrategias elegibles:
-`REAL_ACCOUNT_ELIGIBLE_STRATEGIES`). El objetivo de esta versión es **medir con rigor si el filtro
-de IA aporta valor** antes de que cualquiera piense en dinero real.
+## Qué es
 
-## Cómo funciona (arquitectura)
+Minerva evalúa, en cada cierre de vela, un universo dinámico de las principales criptomonedas con seis estrategias por
+reglas; cada señal se simula como una *operación sombra* y Claude (Anthropic) la etiqueta `APROBADA` o `RECHAZADA` con un
+prompt **congelado**, mientras una cuenta de papel opera solo las aprobadas a través de un motor de riesgo.
+Su único objetivo es **medir con rigor estadístico, y a ciegas, si el filtro de IA aporta valor** sobre las señales por
+reglas, antes de que cualquiera piense en dinero real.
+Incluye un simulador con comisiones, funding, deslizamiento y liquidación, un dashboard web, un bot de Telegram y todo
+empaquetado en Docker.
 
-```text
-  Bitunix (REST + WebSocket públicos)      CoinGecko (universo)      Noticias (GDELT, Fed, Fear&Greed)
-              │                                    │                            │ (solo informativas)
-              ▼                                    ▼                            ▼
-   ┌──────────────────────────── proceso único: FastAPI + asyncio ─────────────────────────────┐
-   │  Scheduler ──► Generador de señales ──► Libro de SOMBRAS ──► Etiquetador en vivo (Claude)  │
-   │  (cada 60 s)   (6 estrategias)           (1 por señal)         prompt CONGELADO + hash      │
-   │                                                                      │ APROBADA a ≤ 60 s    │
-   │                                                                      ▼                      │
-   │   Monitor de posiciones ◄── ticks WS ── PaperBackend ◄── Brazo ejecutado ◄── Motor de       │
-   │   (SL, TP, trailing,       + reconciliación  (cuenta paper)   (solo APROBADA)    riesgo      │
-   │    liquidación)            al reiniciar                                                      │
-   │                                                                                              │
-   │  SQLite (WAL)  ◄── todo se registra: señales, sombras, consultas al LLM, rechazos, auditoría │
-   └────────┬──────────────────────────────┬──────────────────────────────┬─────────────────────┘
-            ▼                              ▼                              ▼
-     API /api/* (login)             Telegram (comandos +            Dashboard React
-     solo lectura + 3 controles     avisos push + resumen diario)   (5 pestañas, mismo origen)
+## El problema que investiga
+
+> Si un modelo de lenguaje revisa cada señal técnica y decide aprobarla o rechazarla, ¿mejora el resultado medio por
+> operación frente a operar todas las señales sin filtrar?
+
+Para responderlo sin engañarse, el diseño es deliberadamente estricto: cada señal se simula como una **sombra** (así existe
+el contrafactual de las rechazadas), el prompt y el modelo se **congelan** y se vigilan con un hash, el análisis cuenta
+**conglomerados** de operaciones solapadas en vez de operaciones, el veredicto se calcula **una sola vez**, con un
+**placebo** de calibración previo, y **ningún canal muestra resultados** hasta que exista el registro oficial del veredicto.
+Explicado paso a paso y sin jerga: [Metodología](docs/METODOLOGIA.md).
+
+### Estado actual
+
+- **Backtest de las estrategias por reglas (Fase 2): ninguna mostró ventaja demostrable.** Ninguna superó los criterios
+  fijados de antemano. Se conservan como *generadores de señales* para la medición, no como estrategias rentables.
+- **Medición del valor del LLM: en curso, ciega, con el veredicto pendiente.** Llegar a los 300 conglomerados por lado
+  que exige el diseño toma **meses**, y si el efecto real es pequeño lo esperable es un veredicto `INCONCLUSO`.
+- **No hay resultados publicados**: la medición es ciega a propósito y este repositorio no incluye ninguno.
+- **No hay base para pasar a dinero real.** Y esta versión no tiene ejecución real: solo una interfaz documentada y desactivada.
+
+El último resumen de lo construido, lo verificado y lo no verificado está en el [informe final](docs/INFORME_FINAL.md)
+(fotografía del 2026-10-18).
+
+## Cómo funciona
+
+```mermaid
+flowchart LR
+    subgraph datos["Datos públicos y gratuitos"]
+        CG["CoinGecko<br/>ranking"]
+        BX["Bitunix<br/>velas y funding"]
+    end
+    CG --> U["Universo<br/>10 monedas"]
+    BX --> S["6 estrategias<br/>por reglas"]
+    U --> S
+    S --> SH["Operación sombra<br/>por cada señal"]
+    SH --> L["Claude etiqueta<br/>APROBADA o RECHAZADA<br/>prompt congelado"]
+    L --> A["Cuenta paper<br/>solo las aprobadas<br/>con motor de riesgo"]
+    L --> VD["Veredicto único<br/>300 conglomerados por lado"]
+    SH --> VD
+    A --> M["Monitor<br/>SL, TP, trailing, liquidación"]
 ```
 
-**Una señal, paso a paso:** (1) el cierre de una vela dispara el generador; cada evaluación queda en
-`signals` (HOLD incluido); (2) las señales accionables de un mismo símbolo y vela se agrupan; (3) se abre
-una **sombra** (margen ilimitado, mismo cálculo de costos que la cuenta paper); (4) el etiquetador
-consulta a Claude con el prompt congelado y guarda la decisión *completa* en `llm_logs`; (5) si es
-`APROBADA` y llegó en ≤ 60 s, el **brazo ejecutado** pide abrir una posición a través del motor de
-riesgo (kill switch, stop por drawdown, circuit breaker, pérdida diaria, datos obsoletos, elegibilidad
-por estrategia, cupos, tope de SL); (6) el **monitor** vigila SL, TP, trailing y liquidación con ticks en
-vivo; (7) si el bot estuvo caído, **reconcilia** con velas de 1 minuto lo que habría ocurrido.
+Todo corre en **un solo proceso** (FastAPI + asyncio) con una base SQLite, y expone una API con login, un dashboard web y
+un bot de Telegram. Detalle de componentes, flujo y decisiones de diseño: [Arquitectura](docs/ARQUITECTURA.md).
 
-Tres ideas de diseño que conviene tener presentes:
+## Funcionalidades
 
-- **Medición ciega.** Hasta juntar 300 conglomerados efectivos por lado *y* existir un registro oficial
-  del veredicto, ningún canal (API, dashboard, Telegram, avisos, resumen diario) muestra PnL, precio de
-  salida, motivo de cierre, saldo ni equity. La puerta falla cerrada (`app/trading/reveal.py`).
-- **El prompt está congelado.** Su hash (`FROZEN_PROMPT_SHA256`) se comprueba en cada ciclo; si el
-  código lo cambiara, el etiquetado se detiene solo en vez de contaminar la medición.
-- **Nada del exterior es fiable por defecto.** Datos gratuitos con caché local, reintentos con espera,
-  salud por fuente, bloqueo de nuevas operaciones con datos obsoletos y tareas aisladas: un fallo de
-  Telegram, noticias o memoria no alcanza al scheduler, al etiquetado ni al monitor.
+- **Universo dinámico:** las mayores criptomonedas por capitalización (CoinGecko) con perpetuo USDT en Bitunix, sin
+  stablecoins ni tokens envueltos, refrescado cada 24 h.
+- **Seis estrategias por reglas** (cruce de medias, tendencia con stop ATR, reversión RSI/Bollinger, ruptura de Donchian
+  y dos variantes de funding contrario), con backtest propio sin sesgo de anticipación y criterios pre-registrados.
+- **Simulador de operaciones:** comisiones, funding, deslizamiento, liquidación en margen aislado, mínimos del contrato,
+  SL/TP/trailing evaluados con ticks en vivo y **reconciliación al reiniciar** con velas de 1 minuto. Aproxima la
+  ejecución real; no la reproduce ([límites](docs/COSTOS_Y_LIMITES.md#de-la-simulación-frente-a-la-realidad)).
+- **Motor de riesgo:** kill switch, stop por drawdown, *circuit breaker*, pérdida diaria, cupos por posición y dirección,
+  tope de SL y bloqueo ante datos obsoletos. Solo bloquea entradas, nunca cierres.
+- **Medición del valor del LLM:** sombras, etiquetas inmutables, prompt congelado con hash vigilado en cada ciclo, registro
+  completo de cada llamada, presupuesto diario con corte duro, placebo y veredicto de tres estados.
+- **Resultados ocultos por código** hasta el registro oficial del veredicto, en la API, el dashboard, Telegram y los informes.
+- **Dashboard web** de cinco pestañas (resumen, cuenta paper, brazo ejecutado, riesgo y controles, universo) y **API** con
+  sesión, de solo lectura salvo tres controles con confirmación.
+- **Bot de Telegram:** comandos, avisos de posiciones y riesgo, resumen diario y alerta de caída.
+- **Noticias gratuitas y memoria de lecciones** (apagadas durante la medición y fuera del prompt congelado).
+- **Operación:** Docker (imagen sin privilegios, puerto solo en `127.0.0.1`), respaldos consistentes, mudanza de
+  nativo a Docker con vuelta atrás y más de 2.100 pruebas automáticas de Python y más de 100 del frontend.
 
 ## Requisitos
 
 | Para | Necesitas |
 |---|---|
-| Ejecutar el bot (nativo) | Python **3.11 o 3.12** (`requires-python = ">=3.11,<3.13"`), acceso a internet. Windows es donde se ha desarrollado y operado |
-| Compilar el dashboard | Node 18 o superior y `npm` (la imagen Docker usa Node 24) |
-| Usar el LLM | Clave de la API de Anthropic (**lo único que cuesta dinero**; tope diario configurable, 1 USD por defecto) |
-| Avisos y comandos | Un bot de Telegram (gratis) |
-| Docker (opcional) | Docker Engine / Docker Desktop con Compose v2 |
+| Ejecutar el bot | **Docker** (Docker Desktop, o Docker Engine con Compose v2) y **Git** |
+| Herramientas auxiliares (contraseña, respaldos, informes) | **Python 3.11 o 3.12** (no 3.13 ni superiores) |
+| La IA (etiquetado) | Una cuenta de la **Claude Console** con facturación. Es lo **único que cuesta dinero**: del orden de 0,005 USD por señal, con tope diario (1 USD por defecto) |
+| Avisos y comandos | Un bot de **Telegram** (gratis). Opcional |
+| Compilar el dashboard sin Docker | **Node.js 22.22 o superior**. Opcional |
 
-Todo lo demás (datos de mercado, universo, noticias) usa fuentes gratuitas sin tarjeta.
+Todo lo demás (datos de mercado, universo, noticias) usa fuentes gratuitas sin tarjeta
+([términos y atribuciones](docs/COSTOS_Y_LIMITES.md#fuentes-gratuitas-términos-y-atribuciones)). Desarrollado y probado en
+Windows; la imagen de Docker es de Linux.
 
-## Puesta en marcha
-
-### A) Nativa en Windows (la forma en uso hoy)
-
-```powershell
-# 1. Entorno de Python (con uv; con pip estándar también sirve) y dependencias
-uv venv --python 3.11 .venv
-uv pip install --python .venv\Scripts\python.exe -e ".[dev]"
-
-# 2. Configuración: copia la plantilla y completa SOLO tus datos. Nunca subas ni pegues el .env.
-Copy-Item .env.example .env
-.\.venv\Scripts\python.exe scripts\hash_password.py     # genera AUTH_PASSWORD_HASH (pide la clave oculta)
-# JWT_SECRET: una cadena aleatoria de al menos 32 caracteres. TELEGRAM_*, ANTHROPIC_API_KEY: ver el manual.
-
-# 3. Dashboard (una vez, y tras cada cambio del frontend)
-npm --prefix frontend ci
-npm --prefix frontend run build
-
-# 4. Comprobar que todo pasa antes de arrancar
-.\.venv\Scripts\python.exe -m pytest
-.\.venv\Scripts\ruff.exe check .
-
-# 5. Arrancar / detener el bot real (puerto 8000, sin consola visible, con las variables fijas de hoy)
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_bot.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop_bot.ps1
-```
-
-Para probar sin tocar nada real: `python scripts/run_dev_server.py --source-db <respaldo>` levanta una
-copia temporal en el puerto **8001** con el LLM, Telegram, el brazo, las noticias y los avisos
-apagados por construcción.
-
-### B) Con Docker (un solo comando; la forma prevista para el PC 24/7)
-
-> **⚠ Si hoy el bot real corre nativo, NO uses `docker compose up -d` para pasarlo a Docker.** Con el bot nativo apagado
-> crearía un volumen *vacío* y empezaría una medición nueva, sin historial y con el etiquetado real encendido (gasta
-> API). La mudanza correcta es con el script de más abajo (`migrate_to_docker.ps1`), que copia la base, la verifica y
-> puede deshacerse. `docker compose up -d` a secas es para **después** de la mudanza, o para una instalación nueva.
-
-```powershell
-docker compose up -d       # la primera vez construye la imagen (~1 min) y arranca el bot real
-docker compose ps          # STATUS pasa a "healthy" en ~1 min
-docker compose logs -f minerva
-docker compose stop        # parada ordenada (SIGTERM, hasta 30 s)
-```
-
-- La **base y los logs viven en volúmenes internos de Docker** (`minerva_data`, `minerva_logs`), no en carpetas de
-  Windows: SQLite en modo WAL no es fiable sobre ellas. Por eso los respaldos y los informes se hacen con
-  `python scripts\docker_db.py ...` (copia con la API de backup *dentro* del contenedor, SHA-256 verificado al
-  sacarla al host). Ver el manual, §5 y §9.
-- El `.env` **no entra en la imagen**: se monta de solo lectura en `/app/.env`. El puerto se publica solo en
-  `127.0.0.1:8000`, el código de la imagen es de solo lectura para el usuario del proceso (uid 10001, sin
-  capacidades) y el contenedor se reinicia solo (`restart: unless-stopped`).
-- Para que el bot vuelva tras reiniciar el PC, **Docker Desktop debe iniciar con Windows**
-  ([`docs/MUDANZA_DOCKER.md`](docs/MUDANZA_DOCKER.md) §5).
-- **No lo levantes a la vez que `start_bot.ps1`** (dos procesos con el mismo token de Telegram y la misma clave):
-  tras la mudanza, `start_bot.ps1` se niega a arrancar.
-
-**Pasar a Docker el bot real que hoy corre nativo**, con su base y su medición intactas (guía completa en
-[`docs/MUDANZA_DOCKER.md`](docs/MUDANZA_DOCKER.md)):
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\migrate_to_docker.ps1 -DryRun   # ensayo: no cambia nada
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\migrate_to_docker.ps1            # la mudanza (ventana segura; escribe MIGRAR)
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\rollback_from_docker.ps1         # la vuelta atrás (escribe VOLVER)
-```
-
-Después de arrancar abre `http://127.0.0.1:8000/` (dashboard) y verifica `GET /health`. Detalle de la operación
-diaria, los reinicios y los respaldos: [`docs/MANUAL_OPERACION.md`](docs/MANUAL_OPERACION.md).
-
-## Qué verás
-
-- **Dashboard** (`/`, con login): *Resumen* (salud, costo del LLM, avance de la medición, noticias),
-  *Cuenta paper* (posiciones con niveles y horas, sin resultados mientras la puerta esté cerrada),
-  *Brazo ejecutado* (abiertas y omitidas con su motivo), *Riesgo y controles* (breaker, kill switch,
-  pausa; botones con confirmación explícita) y *Universo y backtest* (con "Data provided by CoinGecko").
-- **Telegram**: `/status`, `/positions`, `/balance`, `/metrics`, `/pause`, `/resume`, `/kill`. Los tres
-  últimos piden confirmación (`/pause` y luego `/pause SI` dentro de 60 s) y `/pause` y `/kill`
-  **detienen la medición**. Además, avisos de posiciones abiertas y cerradas, cambios de universo y
-  alertas de riesgo, y un resumen diario a las 09:15 (hora de Chile) por una tarea aparte.
-- **API** (`/api/...`, con sesión) de solo lectura, más `POST /api/control/{pause|resume|kill}`; `/health`
-  sin sesión para vigilancia.
-
-## Pruebas
+## Inicio rápido con Docker
 
 ```bash
-pytest                              # 1.956 pruebas: unitarias, de integración y de punta a punta (~11 min)
-ruff check .
-npm --prefix frontend run test      # Vitest
-npm --prefix frontend run build
+git clone https://github.com/ProyectoJaviera/MinervaV2.git
+cd MinervaV2
+cp .env.example .env                          # Windows (PowerShell): Copy-Item .env.example .env
+docker compose build                          # construye la imagen (~1 min la primera vez)
+docker run --rm -it minerva:local python scripts/hash_password.py    # imprime AUTH_PASSWORD_HASH='…'
 ```
 
-Los tests de integración contra la red real de Bitunix están marcados `@pytest.mark.slow` y se omiten
-por defecto; para correrlos: `MINERVA_RUN_LIVE_TESTS=1 pytest tests/integration -m slow`.
+1. **Edita el `.env`**: pega el hash que imprimió el último comando (con sus comillas simples), elige `AUTH_USERNAME`, pon
+   un `JWT_SECRET` de al menos 32 caracteres y tu `ANTHROPIC_API_KEY`. Telegram y CoinGecko son opcionales. Paso a paso, con
+   cómo conseguir cada credencial: [Guía de instalación](docs/GUIA_INSTALACION.md).
+2. **Arranca** y comprueba que esté sano:
 
-Las **pruebas de punta a punta** (`tests/e2e/`) arman el sistema *real* sobre una base temporal y simulan
-solo el exterior (Anthropic, Bitunix, WebSocket, Telegram): ciclo de vela 4 h LONG y SHORT, TP, SL,
-trailing, liquidación, circuit breaker con post-mortem, pausa y kill desde Telegram y dashboard,
-reinicio con reconciliación y el barrido de que ningún canal muestra resultados con la puerta cerrada.
-Cero red y cero gasto: un candado bloquea cualquier conexión a un nombre que no sea local.
+   ```bash
+   docker compose up -d
+   docker compose ps                          # STATUS pasa a "healthy" en ~1 minuto
+   ```
+
+3. Abre el dashboard en <http://127.0.0.1:8000/> (con el `AUTH_USERNAME` de tu `.env` y la contraseña que elegiste al
+   generar el hash) y el estado en <http://127.0.0.1:8000/health>.
+
+> Sin clave de Anthropic, o para explorar sin gastar, añade `MINERVA_REAL_BOT=false` al `.env`: el bot genera señales y
+> sombras pero no llama a ninguna API de pago. No verás resultados de la IA en ningún caso hasta el veredicto: **la
+> medición es ciega** y toma meses.
+
+## Documentación
+
+Índice completo: [`docs/README.md`](docs/README.md).
+
+| Documento | Para qué |
+|---|---|
+| [Guía de instalación](docs/GUIA_INSTALACION.md) | Instalar desde cero, conseguir cada credencial, primer arranque y verificación |
+| [Configuración](docs/CONFIGURACION.md) | Todas las variables y los interruptores |
+| [Uso diario](docs/USO.md) | Dashboard, Telegram, respaldos, reinicios seguros, actualizar y mudar |
+| [Arquitectura](docs/ARQUITECTURA.md) | Componentes, flujo de datos, base de datos y decisiones de diseño |
+| [Metodología](docs/METODOLOGIA.md) | Qué se mide, cómo y por qué los resultados están ocultos |
+| [Solución de problemas](docs/SOLUCION_PROBLEMAS.md) | Preguntas frecuentes y errores comunes |
+| [Seguridad](docs/SEGURIDAD.md) | Secretos, puertos, autenticación y cómo reportar un problema |
+| [Costos y límites](docs/COSTOS_Y_LIMITES.md) | Costo medido, fuentes gratuitas y lo no verificado |
+| [Glosario](docs/GLOSARIO.md) | Los términos del proyecto |
+| [Informe final](docs/INFORME_FINAL.md) | Qué se construyó, qué está verificado y qué no |
+| [Historial de desarrollo](docs/historial/README.md) | Cómo se construyó, fase por fase, con ayuda de IA |
 
 ## Estructura del repositorio
 
 ```text
-app/            Backend (FastAPI + asyncio)
-  api/          Rutas HTTP y serializadores con lista blanca de campos
-  core/         Scheduler, latido, registro (logging) no bloqueante, cliente HTTP
-  execution/    ExecutionBackend: PaperBackend (activo) y BitunixBackend (SOLO documentado, no se usa)
-  indicators/   EMA, RSI, ATR, Bollinger, Donchian con pandas puro
-  llm/          Prompt congelado, cliente, servicio de decisión, presupuesto
-  market/       Bitunix REST/WS, CoinGecko, velas y funding en caché, universo
-  memory/       Memoria de lecciones y post-mortem (apagada durante la medición)
-  news/         Recolección de noticias gratuitas (texto no confiable)
-  persistence/  aiosqlite, esquema y repositorios
-  strategies/   Las 6 estrategias por reglas
-  telegram/     Comandos, avisos push, cliente
-  trading/      Generador de señales, sombras, brazo ejecutado, monitor, motor de riesgo, informes
-  backtesting/  Motor de backtest de la Fase 2
-frontend/       React + Vite + Tailwind (dashboard) con Vitest
-scripts/        Arranque/parada, respaldos, informes de la medición y del veredicto, mudanza a Docker
-                (migrate_to_docker.ps1, rollback_from_docker.ps1, docker_db.py), herramientas
-tests/          unit/, integration/, e2e/ y support/ (docker, schtasks y bot nativo falsos para probar la mudanza)
-docker/         Healthcheck, versiones exactas de dependencias, variables de Compose y certificados raíz opcionales
-docs/           Especificación, planes por fase, manual de operación, informe final, esquema de la base
+app/            Backend (FastAPI + asyncio): API, mercado, estrategias, riesgo, LLM, Telegram, persistencia
+frontend/       Dashboard (React + Vite + Tailwind) con pruebas de Vitest
+scripts/        Arranque y parada, respaldos, informes de la medición y del veredicto, mudanza a Docker
+tests/          unit/, integration/, e2e/ y support/ (pruebas unitarias, de integración y de punta a punta)
+docker/         Healthcheck, versiones exactas de dependencias y certificados opcionales
+docs/           Documentación; docs/historial/ es el registro del desarrollo
+.github/        Plantillas de issues y de pull requests
 ```
 
-## Documentación
+## Pruebas y contribuciones
 
-| Documento | Para qué |
-|---|---|
-| [`docs/MANUAL_OPERACION.md`](docs/MANUAL_OPERACION.md) | **Empieza aquí para operar**: rutina diaria, reinicios, respaldos, migración, claves, cuando se abra el gate |
-| [`docs/MUDANZA_DOCKER.md`](docs/MUDANZA_DOCKER.md) | Pasar el bot real a Docker con un script (y volver atrás), qué se probó y qué falló, Docker Desktop con Windows |
-| [`docs/INFORME_FINAL.md`](docs/INFORME_FINAL.md) | Qué se construyó, decisiones, qué está verificado y qué no, riesgos y próximos pasos |
-| [`docs/ESQUEMA_BD.md`](docs/ESQUEMA_BD.md) | Esquema de la base de datos (generado del código) |
-| [`docs/SPEC.md`](docs/SPEC.md) | Especificación vigente |
-| [`docs/VEREDICTO_3_6.md`](docs/VEREDICTO_3_6.md) | Procedimiento del veredicto de valor de la IA (una sola mirada) |
-| [`docs/PASO_DINERO_REAL.md`](docs/PASO_DINERO_REAL.md) | Criterios y riesgos de un eventual paso a dinero real (solo recomienda) |
-| [`docs/MIGRACION_PC.md`](docs/MIGRACION_PC.md) | Tareas programadas de Windows y mudanza nativa |
-| `docs/FASE*_PLAN.md`, `PROGRESS.md` | Plan, decisiones y avance de cada fase |
+```bash
+pytest                               # unitarias, de integración y de punta a punta (~11 min)
+ruff check .
+npm --prefix frontend run test       # Vitest
+npm --prefix frontend run build
+```
 
-## Notas
+Las pruebas no necesitan red ni credenciales (un candado bloquea cualquier conexión a un nombre que no sea local). Cómo
+contribuir, las convenciones y la regla de no tocar el prompt congelado durante una medición:
+[`CONTRIBUTING.md`](CONTRIBUTING.md). Cambios por fase: [`CHANGELOG.md`](CHANGELOG.md).
 
-- **Python 3.14 en Windows:** algunos builds (p. ej. el de `uv python install`) fallan con
-  `OPENSSL_Uplink(...): no OPENSSL_Applink` al usar `ssl`; es del build, no de este proyecto. Usa 3.11 o 3.12.
-- **Redes con inspección TLS:** el cliente HTTP usa `truststore` (el almacén de certificados del sistema).
-  En Docker, el certificado raíz de esa red se instala dejando un `.crt` en `docker/certs/`.
-- **Seguridad:** la API escucha solo en `127.0.0.1`; los controles exigen sesión, mismo origen, JSON y
-  una palabra de confirmación exacta, y quedan auditados. Nunca pegues el `.env`, claves ni tokens en
-  chats, commits ni logs.
+El proyecto se construyó con ayuda de un asistente de IA (Claude Code), fase por fase y con aprobación del autor en cada
+una; las instrucciones que se le dieron están en [`CLAUDE.md`](CLAUDE.md).
+
+## Licencia
+
+[MIT](LICENSE).
+
+---
+
+## English summary
+
+### About
+
+**Minerva** is an experimental research bot that asks one question: *does an LLM filter improve the average result of
+rule-based technical trading signals?* On every candle close it evaluates a dynamic universe of the largest crypto
+perpetuals (Bitunix, ranked by CoinGecko) with six rule-based strategies. Each signal becomes a simulated *shadow trade*;
+Claude (Anthropic) labels it `APROBADA` (approved) or `RECHAZADA` (rejected) with a **frozen** prompt; and a paper account
+trades only the approved ones through a risk engine. The measurement is **blind**: no channel shows results until a single,
+pre-registered analysis point (300 effective clusters per side) and an official verdict record exist. Status: the rule-based
+strategies showed no demonstrable edge in backtest; the LLM measurement is running and the verdict is pending (months away);
+no results are published. Documentation is in Spanish; code identifiers are in English.
+
+### Quick start
+
+```bash
+git clone https://github.com/ProyectoJaviera/MinervaV2.git && cd MinervaV2
+cp .env.example .env
+docker compose build
+docker run --rm -it minerva:local python scripts/hash_password.py   # paste the printed line into .env
+# edit .env: AUTH_USERNAME, AUTH_PASSWORD_HASH, JWT_SECRET (>= 32 chars), ANTHROPIC_API_KEY
+docker compose up -d
+```
+
+Open <http://127.0.0.1:8000/> (dashboard) and <http://127.0.0.1:8000/health>. Requirements: Git, Docker with Compose v2,
+Python 3.11/3.12 for helper scripts, and an Anthropic API key (the only paid component; about 0.005 USD per labeled
+signal, with a hard daily cap). Full guide (in Spanish): [`docs/GUIA_INSTALACION.md`](docs/GUIA_INSTALACION.md).
+
+### Disclaimer
+
+**Paper trading only. Experimental. Not financial advice.** Minerva never sends real orders and has no exchange
+credentials. Trading leveraged futures, real or simulated, can lose money, and nothing here guarantees profit. Simulated
+results do not predict real-account results (latency, fees, slippage and exchange limits are only approximated). Provided
+"as is" under the [MIT license](LICENSE), without warranty of any kind.
