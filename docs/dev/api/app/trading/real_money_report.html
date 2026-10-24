@@ -1,0 +1,1838 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="generator" content="pdoc 16.0.0"/>
+    <title>app.trading.real_money_report API documentation</title>
+
+    <style>/*! * Bootstrap Reboot v5.0.0 (https://getbootstrap.com/) * Copyright 2011-2021 The Bootstrap Authors * Copyright 2011-2021 Twitter, Inc. * Licensed under MIT (https://github.com/twbs/bootstrap/blob/main/LICENSE) * Forked from Normalize.css, licensed MIT (https://github.com/necolas/normalize.css/blob/master/LICENSE.md) */*,::after,::before{box-sizing:border-box}@media (prefers-reduced-motion:no-preference){:root{scroll-behavior:smooth}}body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans","Liberation Sans",sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji";font-size:1rem;font-weight:400;line-height:1.5;color:#212529;background-color:#fff;-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}hr{margin:1rem 0;color:inherit;background-color:currentColor;border:0;opacity:.25}hr:not([size]){height:1px}h1,h2,h3,h4,h5,h6{margin-top:0;margin-bottom:.5rem;font-weight:500;line-height:1.2}h1{font-size:calc(1.375rem + 1.5vw)}@media (min-width:1200px){h1{font-size:2.5rem}}h2{font-size:calc(1.325rem + .9vw)}@media (min-width:1200px){h2{font-size:2rem}}h3{font-size:calc(1.3rem + .6vw)}@media (min-width:1200px){h3{font-size:1.75rem}}h4{font-size:calc(1.275rem + .3vw)}@media (min-width:1200px){h4{font-size:1.5rem}}h5{font-size:1.25rem}h6{font-size:1rem}p{margin-top:0;margin-bottom:1rem}abbr[data-bs-original-title],abbr[title]{-webkit-text-decoration:underline dotted;text-decoration:underline dotted;cursor:help;-webkit-text-decoration-skip-ink:none;text-decoration-skip-ink:none}address{margin-bottom:1rem;font-style:normal;line-height:inherit}ol,ul{padding-left:2rem}dl,ol,ul{margin-top:0;margin-bottom:1rem}ol ol,ol ul,ul ol,ul ul{margin-bottom:0}dt{font-weight:700}dd{margin-bottom:.5rem;margin-left:0}blockquote{margin:0 0 1rem}b,strong{font-weight:bolder}small{font-size:.875em}mark{padding:.2em;background-color:#fcf8e3}sub,sup{position:relative;font-size:.75em;line-height:0;vertical-align:baseline}sub{bottom:-.25em}sup{top:-.5em}a{color:#0d6efd;text-decoration:underline}a:hover{color:#0a58ca}a:not([href]):not([class]),a:not([href]):not([class]):hover{color:inherit;text-decoration:none}code,kbd,pre,samp{font-family:SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;font-size:1em;direction:ltr;unicode-bidi:bidi-override}pre{display:block;margin-top:0;margin-bottom:1rem;overflow:auto;font-size:.875em}pre code{font-size:inherit;color:inherit;word-break:normal}code{font-size:.875em;color:#d63384;word-wrap:break-word}a>code{color:inherit}kbd{padding:.2rem .4rem;font-size:.875em;color:#fff;background-color:#212529;border-radius:.2rem}kbd kbd{padding:0;font-size:1em;font-weight:700}figure{margin:0 0 1rem}img,svg{vertical-align:middle}table{caption-side:bottom;border-collapse:collapse}caption{padding-top:.5rem;padding-bottom:.5rem;color:#6c757d;text-align:left}th{text-align:inherit;text-align:-webkit-match-parent}tbody,td,tfoot,th,thead,tr{border-color:inherit;border-style:solid;border-width:0}label{display:inline-block}button{border-radius:0}button:focus:not(:focus-visible){outline:0}button,input,optgroup,select,textarea{margin:0;font-family:inherit;font-size:inherit;line-height:inherit}button,select{text-transform:none}[role=button]{cursor:pointer}select{word-wrap:normal}select:disabled{opacity:1}[list]::-webkit-calendar-picker-indicator{display:none}[type=button],[type=reset],[type=submit],button{-webkit-appearance:button}[type=button]:not(:disabled),[type=reset]:not(:disabled),[type=submit]:not(:disabled),button:not(:disabled){cursor:pointer}::-moz-focus-inner{padding:0;border-style:none}textarea{resize:vertical}fieldset{min-width:0;padding:0;margin:0;border:0}legend{float:left;width:100%;padding:0;margin-bottom:.5rem;font-size:calc(1.275rem + .3vw);line-height:inherit}@media (min-width:1200px){legend{font-size:1.5rem}}legend+*{clear:left}::-webkit-datetime-edit-day-field,::-webkit-datetime-edit-fields-wrapper,::-webkit-datetime-edit-hour-field,::-webkit-datetime-edit-minute,::-webkit-datetime-edit-month-field,::-webkit-datetime-edit-text,::-webkit-datetime-edit-year-field{padding:0}::-webkit-inner-spin-button{height:auto}[type=search]{outline-offset:-2px;-webkit-appearance:textfield}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-color-swatch-wrapper{padding:0}::file-selector-button{font:inherit}::-webkit-file-upload-button{font:inherit;-webkit-appearance:button}output{display:inline-block}iframe{border:0}summary{display:list-item;cursor:pointer}progress{vertical-align:baseline}[hidden]{display:none!important}</style>
+    <style>/*! syntax-highlighting.css */pre{line-height:125%;}span.linenos{color:inherit; background-color:transparent; padding-left:5px; padding-right:20px;}.pdoc-code .hll{background-color:#ffffcc}.pdoc-code{background:#f8f8f8;}.pdoc-code .c{color:#3D7B7B; font-style:italic}.pdoc-code .err{border:1px solid #FF0000}.pdoc-code .k{color:#008000; font-weight:bold}.pdoc-code .o{color:#666666}.pdoc-code .ch{color:#3D7B7B; font-style:italic}.pdoc-code .cm{color:#3D7B7B; font-style:italic}.pdoc-code .cp{color:#9C6500}.pdoc-code .cpf{color:#3D7B7B; font-style:italic}.pdoc-code .c1{color:#3D7B7B; font-style:italic}.pdoc-code .cs{color:#3D7B7B; font-style:italic}.pdoc-code .gd{color:#A00000}.pdoc-code .ge{font-style:italic}.pdoc-code .gr{color:#E40000}.pdoc-code .gh{color:#000080; font-weight:bold}.pdoc-code .gi{color:#008400}.pdoc-code .go{color:#717171}.pdoc-code .gp{color:#000080; font-weight:bold}.pdoc-code .gs{font-weight:bold}.pdoc-code .gu{color:#800080; font-weight:bold}.pdoc-code .gt{color:#0044DD}.pdoc-code .kc{color:#008000; font-weight:bold}.pdoc-code .kd{color:#008000; font-weight:bold}.pdoc-code .kn{color:#008000; font-weight:bold}.pdoc-code .kp{color:#008000}.pdoc-code .kr{color:#008000; font-weight:bold}.pdoc-code .kt{color:#B00040}.pdoc-code .m{color:#666666}.pdoc-code .s{color:#BA2121}.pdoc-code .na{color:#687822}.pdoc-code .nb{color:#008000}.pdoc-code .nc{color:#0000FF; font-weight:bold}.pdoc-code .no{color:#880000}.pdoc-code .nd{color:#AA22FF}.pdoc-code .ni{color:#717171; font-weight:bold}.pdoc-code .ne{color:#CB3F38; font-weight:bold}.pdoc-code .nf{color:#0000FF}.pdoc-code .nl{color:#767600}.pdoc-code .nn{color:#0000FF; font-weight:bold}.pdoc-code .nt{color:#008000; font-weight:bold}.pdoc-code .nv{color:#19177C}.pdoc-code .ow{color:#AA22FF; font-weight:bold}.pdoc-code .w{color:#bbbbbb}.pdoc-code .mb{color:#666666}.pdoc-code .mf{color:#666666}.pdoc-code .mh{color:#666666}.pdoc-code .mi{color:#666666}.pdoc-code .mo{color:#666666}.pdoc-code .sa{color:#BA2121}.pdoc-code .sb{color:#BA2121}.pdoc-code .sc{color:#BA2121}.pdoc-code .dl{color:#BA2121}.pdoc-code .sd{color:#BA2121; font-style:italic}.pdoc-code .s2{color:#BA2121}.pdoc-code .se{color:#AA5D1F; font-weight:bold}.pdoc-code .sh{color:#BA2121}.pdoc-code .si{color:#A45A77; font-weight:bold}.pdoc-code .sx{color:#008000}.pdoc-code .sr{color:#A45A77}.pdoc-code .s1{color:#BA2121}.pdoc-code .ss{color:#19177C}.pdoc-code .bp{color:#008000}.pdoc-code .fm{color:#0000FF}.pdoc-code .vc{color:#19177C}.pdoc-code .vg{color:#19177C}.pdoc-code .vi{color:#19177C}.pdoc-code .vm{color:#19177C}.pdoc-code .il{color:#666666}</style>
+    <style>/*! theme.css */:root{--pdoc-background:#fff;}.pdoc{--text:#212529;--muted:#6c757d;--link:#3660a5;--link-hover:#1659c5;--code:#f8f8f8;--active:#fff598;--accent:#eee;--accent2:#c1c1c1;--nav-hover:rgba(255, 255, 255, 0.5);--name:#0066BB;--def:#008800;--annotation:#007020;}</style>
+    <style>/*! layout.css */html, body{width:100%;height:100%;}html, main{scroll-behavior:smooth;}body{background-color:var(--pdoc-background);}@media (max-width:769px){#navtoggle{cursor:pointer;position:absolute;width:50px;height:40px;top:1rem;right:1rem;border-color:var(--text);color:var(--text);display:flex;opacity:0.8;z-index:999;}#navtoggle:hover{opacity:1;}#togglestate + div{display:none;}#togglestate:checked + div{display:inherit;}main, header{padding:2rem 3vw;}header + main{margin-top:-3rem;}.git-button{display:none !important;}nav input[type="search"]{max-width:77%;}nav input[type="search"]:first-child{margin-top:-6px;}nav input[type="search"]:valid ~ *{display:none !important;}}@media (min-width:770px){:root{--sidebar-width:clamp(12.5rem, 28vw, 22rem);}nav{position:fixed;overflow:auto;height:100vh;width:var(--sidebar-width);}main, header{padding:3rem 2rem 3rem calc(var(--sidebar-width) + 3rem);width:calc(54rem + var(--sidebar-width));max-width:100%;}header + main{margin-top:-4rem;}#navtoggle{display:none;}}#togglestate{position:absolute;height:0;opacity:0;}nav.pdoc{--pad:clamp(0.5rem, 2vw, 1.75rem);--indent:1.5rem;background-color:var(--accent);border-right:1px solid var(--accent2);box-shadow:0 0 20px rgba(50, 50, 50, .2) inset;padding:0 0 0 var(--pad);overflow-wrap:anywhere;scrollbar-width:thin; scrollbar-color:var(--accent2) transparent; z-index:1}nav.pdoc::-webkit-scrollbar{width:.4rem; }nav.pdoc::-webkit-scrollbar-thumb{background-color:var(--accent2); }nav.pdoc > div{padding:var(--pad) 0;}nav.pdoc .module-list-button{display:inline-flex;align-items:center;color:var(--text);border-color:var(--muted);margin-bottom:1rem;}nav.pdoc .module-list-button:hover{border-color:var(--text);}nav.pdoc input[type=search]{display:block;outline-offset:0;width:calc(100% - var(--pad));}nav.pdoc .logo{max-width:calc(100% - var(--pad));max-height:35vh;display:block;margin:0 auto 1rem;transform:translate(calc(-.5 * var(--pad)), 0);}nav.pdoc ul{list-style:none;padding-left:0;}nav.pdoc > div > ul{margin-left:calc(0px - var(--pad));}nav.pdoc li a{padding:.2rem 0 .2rem calc(var(--pad) + var(--indent));}nav.pdoc > div > ul > li > a{padding-left:var(--pad);}nav.pdoc li{transition:all 100ms;}nav.pdoc li:hover{background-color:var(--nav-hover);}nav.pdoc a, nav.pdoc a:hover{color:var(--text);}nav.pdoc a{display:block;}nav.pdoc > h2:first-of-type{margin-top:1.5rem;}nav.pdoc .class:before{content:"class ";color:var(--muted);}nav.pdoc .function:after{content:"()";color:var(--muted);}nav.pdoc footer:before{content:"";display:block;width:calc(100% - var(--pad));border-top:solid var(--accent2) 1px;margin-top:1.5rem;padding-top:.5rem;}nav.pdoc footer{font-size:small;}</style>
+    <style>/*! content.css */.pdoc{color:var(--text);box-sizing:border-box;line-height:1.5;background:none;}.pdoc .pdoc-button{cursor:pointer;display:inline-block;border:solid black 1px;border-radius:2px;font-size:.75rem;padding:calc(0.5em - 1px) 1em;transition:100ms all;}.pdoc .alert{padding:1rem 1rem 1rem calc(1.5rem + 24px);border:1px solid transparent;border-radius:.25rem;background-repeat:no-repeat;background-position:.75rem center;margin-bottom:1rem;}.pdoc .alert > em{display:none;}.pdoc .alert > *:last-child{margin-bottom:0;}.pdoc .alert.note{color:#084298;background-color:#cfe2ff;border-color:#b6d4fe;background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2224%22%20height%3D%2224%22%20fill%3D%22%23084298%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M8%2016A8%208%200%201%200%208%200a8%208%200%200%200%200%2016zm.93-9.412-1%204.705c-.07.34.029.533.304.533.194%200%20.487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703%200-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.47l-.451-.081.082-.381%202.29-.287zM8%205.5a1%201%200%201%201%200-2%201%201%200%200%201%200%202z%22/%3E%3C/svg%3E");}.pdoc .alert.tip{color:#0a3622;background-color:#d1e7dd;border-color:#a3cfbb;background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2224%22%20height%3D%2224%22%20fill%3D%22%230a3622%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M2%206a6%206%200%201%201%2010.174%204.31c-.203.196-.359.4-.453.619l-.762%201.769A.5.5%200%200%201%2010.5%2013a.5.5%200%200%201%200%201%20.5.5%200%200%201%200%201l-.224.447a1%201%200%200%201-.894.553H6.618a1%201%200%200%201-.894-.553L5.5%2015a.5.5%200%200%201%200-1%20.5.5%200%200%201%200-1%20.5.5%200%200%201-.46-.302l-.761-1.77a2%202%200%200%200-.453-.618A5.98%205.98%200%200%201%202%206m6-5a5%205%200%200%200-3.479%208.592c.263.254.514.564.676.941L5.83%2012h4.342l.632-1.467c.162-.377.413-.687.676-.941A5%205%200%200%200%208%201%22/%3E%3C/svg%3E");}.pdoc .alert.important{color:#055160;background-color:#cff4fc;border-color:#9eeaf9;background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2224%22%20height%3D%2224%22%20fill%3D%22%23055160%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M2%200a2%202%200%200%200-2%202v12a2%202%200%200%200%202%202h12a2%202%200%200%200%202-2V2a2%202%200%200%200-2-2zm6%204c.535%200%20.954.462.9.995l-.35%203.507a.552.552%200%200%201-1.1%200L7.1%204.995A.905.905%200%200%201%208%204m.002%206a1%201%200%201%201%200%202%201%201%200%200%201%200-2%22/%3E%3C/svg%3E");}.pdoc .alert.warning{color:#664d03;background-color:#fff3cd;border-color:#ffecb5;background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2224%22%20height%3D%2224%22%20fill%3D%22%23664d03%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M8.982%201.566a1.13%201.13%200%200%200-1.96%200L.165%2013.233c-.457.778.091%201.767.98%201.767h13.713c.889%200%201.438-.99.98-1.767L8.982%201.566zM8%205c.535%200%20.954.462.9.995l-.35%203.507a.552.552%200%200%201-1.1%200L7.1%205.995A.905.905%200%200%201%208%205zm.002%206a1%201%200%201%201%200%202%201%201%200%200%201%200-2z%22/%3E%3C/svg%3E");}.pdoc .alert.caution{color:#842029;background-color:#f8d7da;border-color:#f5c2c7;background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2224%22%20height%3D%2224%22%20fill%3D%22%23842029%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M11.46.146A.5.5%200%200%200%2011.107%200H4.893a.5.5%200%200%200-.353.146L.146%204.54A.5.5%200%200%200%200%204.893v6.214a.5.5%200%200%200%20.146.353l4.394%204.394a.5.5%200%200%200%20.353.146h6.214a.5.5%200%200%200%20.353-.146l4.394-4.394a.5.5%200%200%200%20.146-.353V4.893a.5.5%200%200%200-.146-.353zM8%204c.535%200%20.954.462.9.995l-.35%203.507a.552.552%200%200%201-1.1%200L7.1%204.995A.905.905%200%200%201%208%204m.002%206a1%201%200%201%201%200%202%201%201%200%200%201%200-2%22/%3E%3C/svg%3E");}.pdoc .alert.danger{color:#842029;background-color:#f8d7da;border-color:#f5c2c7;background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2224%22%20height%3D%2224%22%20fill%3D%22%23842029%22%20viewBox%3D%220%200%2016%2016%22%3E%3Cpath%20d%3D%22M5.52.359A.5.5%200%200%201%206%200h4a.5.5%200%200%201%20.474.658L8.694%206H12.5a.5.5%200%200%201%20.395.807l-7%209a.5.5%200%200%201-.873-.454L6.823%209.5H3.5a.5.5%200%200%201-.48-.641l2.5-8.5z%22/%3E%3C/svg%3E");}.pdoc .visually-hidden{position:absolute !important;width:1px !important;height:1px !important;padding:0 !important;margin:-1px !important;overflow:hidden !important;clip:rect(0, 0, 0, 0) !important;white-space:nowrap !important;border:0 !important;}.pdoc h1, .pdoc h2, .pdoc h3{font-weight:300;margin:.3em 0;padding:.2em 0;}.pdoc > section:not(.module-info) h1{font-size:1.5rem;font-weight:500;}.pdoc > section:not(.module-info) h2{font-size:1.4rem;font-weight:500;}.pdoc > section:not(.module-info) h3{font-size:1.3rem;font-weight:500;}.pdoc > section:not(.module-info) h4{font-size:1.2rem;}.pdoc > section:not(.module-info) h5{font-size:1.1rem;}.pdoc a{text-decoration:none;color:var(--link);}.pdoc a:hover{color:var(--link-hover);}.pdoc blockquote{margin-left:2rem;}.pdoc pre{border-top:1px solid var(--accent2);border-bottom:1px solid var(--accent2);margin-top:0;margin-bottom:1em;padding:.5rem 0 .5rem .5rem;overflow-x:auto;background-color:var(--code);}.pdoc code{color:var(--text);padding:.2em .4em;margin:0;font-size:85%;background-color:var(--accent);border-radius:6px;}.pdoc a > code{color:inherit;}.pdoc pre > code{display:inline-block;font-size:inherit;background:none;border:none;padding:0;}.pdoc > section:not(.module-info){margin-bottom:1.5rem;}.pdoc .modulename{margin-top:0;font-weight:bold;}.pdoc .modulename a{color:var(--link);transition:100ms all;}.pdoc .git-button{float:right;border:solid var(--link) 1px;}.pdoc .git-button:hover{background-color:var(--link);color:var(--pdoc-background);}.view-source-toggle-state,.view-source-toggle-state ~ .pdoc-code{display:none;}.view-source-toggle-state:checked ~ .pdoc-code{display:block;}.view-source-button{display:inline-block;float:right;font-size:.75rem;line-height:1.5rem;color:var(--muted);padding:0 .4rem 0 1.3rem;cursor:pointer;text-indent:-2px;}.view-source-button > span{visibility:hidden;}.module-info .view-source-button{float:none;display:flex;justify-content:flex-end;margin:-1.2rem .4rem -.2rem 0;}.view-source-button::before{position:absolute;content:"View Source";display:list-item;list-style-type:disclosure-closed;}.view-source-toggle-state:checked ~ .attr .view-source-button::before,.view-source-toggle-state:checked ~ .view-source-button::before{list-style-type:disclosure-open;}.pdoc .docstring{margin-bottom:1.5rem;}.pdoc section:not(.module-info) .docstring{margin-left:clamp(0rem, 5vw - 2rem, 1rem);}.pdoc .docstring .pdoc-code{margin-left:1em;margin-right:1em;}.pdoc h1:target,.pdoc h2:target,.pdoc h3:target,.pdoc h4:target,.pdoc h5:target,.pdoc h6:target,.pdoc .pdoc-code > pre > span:target{background-color:var(--active);box-shadow:-1rem 0 0 0 var(--active);}.pdoc .pdoc-code > pre > span:target{display:block;}.pdoc div:target > .attr,.pdoc section:target > .attr,.pdoc dd:target > a{background-color:var(--active);}.pdoc *{scroll-margin:2rem;}.pdoc .pdoc-code .linenos{user-select:none;}.pdoc .attr:hover{filter:contrast(0.95);}.pdoc section, .pdoc .classattr{position:relative;}.pdoc .headerlink{--width:clamp(1rem, 3vw, 2rem);position:absolute;top:0;left:calc(0rem - var(--width));transition:all 100ms ease-in-out;opacity:0;}.pdoc .headerlink::before{content:"#";display:block;text-align:center;width:var(--width);height:2.3rem;line-height:2.3rem;font-size:1.5rem;}.pdoc .attr:hover ~ .headerlink,.pdoc *:target > .headerlink,.pdoc .headerlink:hover{opacity:1;}.pdoc .attr{display:block;margin:.5rem 0 .5rem;padding:.4rem .4rem .4rem 1rem;background-color:var(--accent);overflow-x:auto;}.pdoc .classattr{margin-left:2rem;}.pdoc .decorator-deprecated{color:#842029;}.pdoc .decorator-deprecated ~ span{filter:grayscale(1) opacity(0.8);}.pdoc .name{color:var(--name);font-weight:bold;}.pdoc .def{color:var(--def);font-weight:bold;}.pdoc .signature{background-color:transparent;}.pdoc .param, .pdoc .return-annotation{white-space:pre;}.pdoc .signature.multiline .param{display:block;}.pdoc .signature.condensed .param{display:inline-block;}.pdoc .annotation{color:var(--annotation);}.pdoc .view-value-toggle-state,.pdoc .view-value-toggle-state ~ .default_value{display:none;}.pdoc .view-value-toggle-state:checked ~ .default_value{display:inherit;}.pdoc .view-value-button{font-size:.5rem;vertical-align:middle;border-style:dashed;margin-top:-0.1rem;}.pdoc .view-value-button:hover{background:white;}.pdoc .view-value-button::before{content:"show";text-align:center;width:2.2em;display:inline-block;}.pdoc .view-value-toggle-state:checked ~ .view-value-button::before{content:"hide";}.pdoc .inherited{margin-left:2rem;}.pdoc .inherited dt{font-weight:700;}.pdoc .inherited dt, .pdoc .inherited dd{display:inline;margin-left:0;margin-bottom:.5rem;}.pdoc .inherited dd:not(:last-child):after{content:", ";}.pdoc .inherited .class:before{content:"class ";}.pdoc .inherited .function a:after{content:"()";}.pdoc .search-result .docstring{overflow:auto;max-height:25vh;}.pdoc .search-result.focused > .attr{background-color:var(--active);}.pdoc .attribution{margin-top:2rem;display:block;opacity:0.5;transition:all 200ms;filter:grayscale(100%);}.pdoc .attribution:hover{opacity:1;filter:grayscale(0%);}.pdoc .attribution img{margin-left:5px;height:27px;vertical-align:bottom;width:50px;transition:all 200ms;}.pdoc table{display:block;width:max-content;max-width:100%;overflow:auto;margin-bottom:1rem;}.pdoc table th{font-weight:600;}.pdoc table th, .pdoc table td{padding:6px 13px;border:1px solid var(--accent2);}</style>
+    <style>/*! custom.css */</style></head>
+<body>
+    <nav class="pdoc">
+        <label id="navtoggle" for="togglestate" class="pdoc-button"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'><path stroke-linecap='round' stroke="currentColor" stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/></svg></label>
+        <input id="togglestate" type="checkbox" aria-hidden="true" tabindex="-1">
+        <div>            <a class="pdoc-button module-list-button" href="../trading.html">
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-box-arrow-in-left" viewBox="0 0 16 16">
+  <path fill-rule="evenodd" d="M10 3.5a.5.5 0 0 0-.5-.5h-8a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 1 1 0v2A1.5 1.5 0 0 1 9.5 14h-8A1.5 1.5 0 0 1 0 12.5v-9A1.5 1.5 0 0 1 1.5 2h8A1.5 1.5 0 0 1 11 3.5v2a.5.5 0 0 1-1 0v-2z"/>
+  <path fill-rule="evenodd" d="M4.146 8.354a.5.5 0 0 1 0-.708l3-3a.5.5 0 1 1 .708.708L5.707 7.5H14.5a.5.5 0 0 1 0 1H5.707l2.147 2.146a.5.5 0 0 1-.708.708l-3-3z"/>
+</svg>                &nbsp;app.trading</a>
+
+
+
+
+
+            <h2>API Documentation</h2>
+                <ul class="memberlist">
+            <li>
+                    <a class="variable" href="#STATE_NOT_ALLOWED">STATE_NOT_ALLOWED</a>
+            </li>
+            <li>
+                    <a class="variable" href="#STATE_NO_GO">STATE_NO_GO</a>
+            </li>
+            <li>
+                    <a class="variable" href="#STATE_EVALUATED">STATE_EVALUATED</a>
+            </li>
+            <li>
+                    <a class="variable" href="#PASA">PASA</a>
+            </li>
+            <li>
+                    <a class="variable" href="#NO_PASA">NO_PASA</a>
+            </li>
+            <li>
+                    <a class="variable" href="#SIN_DATOS">SIN_DATOS</a>
+            </li>
+            <li>
+                    <a class="variable" href="#RECOMMEND_MANUAL">RECOMMEND_MANUAL</a>
+            </li>
+            <li>
+                    <a class="variable" href="#RECOMMEND_NO">RECOMMEND_NO</a>
+            </li>
+            <li>
+                    <a class="variable" href="#EXECUTED_ARM_DECISION_SOURCE">EXECUTED_ARM_DECISION_SOURCE</a>
+            </li>
+            <li>
+                    <a class="variable" href="#KEY_REAL_ARM_STARTED_AT">KEY_REAL_ARM_STARTED_AT</a>
+            </li>
+            <li>
+                    <a class="variable" href="#KEY_REAL_ARM_DRAWDOWN_BASELINE">KEY_REAL_ARM_DRAWDOWN_BASELINE</a>
+            </li>
+            <li>
+                    <a class="variable" href="#KEY_DRAWDOWN_TRIGGER_COUNT">KEY_DRAWDOWN_TRIGGER_COUNT</a>
+            </li>
+            <li>
+                    <a class="variable" href="#PF_CI_FLOOR">PF_CI_FLOOR</a>
+            </li>
+            <li>
+                    <a class="variable" href="#MAX_DRAWDOWN_TRIGGERS">MAX_DRAWDOWN_TRIGGERS</a>
+            </li>
+            <li>
+                    <a class="variable" href="#GAP_HOURS_THRESHOLD">GAP_HOURS_THRESHOLD</a>
+            </li>
+            <li>
+                    <a class="variable" href="#RECONCILE_LOG_MARKER">RECONCILE_LOG_MARKER</a>
+            </li>
+            <li>
+                    <a class="class" href="#Criterion">Criterion</a>
+                            <ul class="memberlist">
+                        <li>
+                                <a class="function" href="#Criterion.__init__">Criterion</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#Criterion.key">key</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#Criterion.label">label</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#Criterion.status">status</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#Criterion.detail">detail</a>
+                        </li>
+                </ul>
+
+            </li>
+            <li>
+                    <a class="class" href="#SymbolExecutability">SymbolExecutability</a>
+                            <ul class="memberlist">
+                        <li>
+                                <a class="function" href="#SymbolExecutability.__init__">SymbolExecutability</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#SymbolExecutability.symbol">symbol</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#SymbolExecutability.min_trade_volume">min_trade_volume</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#SymbolExecutability.base_precision">base_precision</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#SymbolExecutability.price">price</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#SymbolExecutability.qty">qty</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#SymbolExecutability.status">status</a>
+                        </li>
+                </ul>
+
+            </li>
+            <li>
+                    <a class="class" href="#DelayStats">DelayStats</a>
+                            <ul class="memberlist">
+                        <li>
+                                <a class="function" href="#DelayStats.__init__">DelayStats</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#DelayStats.n">n</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#DelayStats.p50">p50</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#DelayStats.p95">p95</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#DelayStats.max">max</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#DelayStats.over_limit">over_limit</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#DelayStats.limit_s">limit_s</a>
+                        </li>
+                </ul>
+
+            </li>
+            <li>
+                    <a class="class" href="#AvailabilityStats">AvailabilityStats</a>
+                            <ul class="memberlist">
+                        <li>
+                                <a class="function" href="#AvailabilityStats.__init__">AvailabilityStats</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#AvailabilityStats.hours_with_evaluations">hours_with_evaluations</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#AvailabilityStats.gaps_over_threshold">gaps_over_threshold</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#AvailabilityStats.longest_gap_hours">longest_gap_hours</a>
+                        </li>
+                </ul>
+
+            </li>
+            <li>
+                    <a class="class" href="#StressedPf">StressedPf</a>
+                            <ul class="memberlist">
+                        <li>
+                                <a class="function" href="#StressedPf.__init__">StressedPf</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#StressedPf.label">label</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#StressedPf.pf">pf</a>
+                        </li>
+                </ul>
+
+            </li>
+            <li>
+                    <a class="class" href="#DistStats">DistStats</a>
+                            <ul class="memberlist">
+                        <li>
+                                <a class="function" href="#DistStats.__init__">DistStats</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#DistStats.n">n</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#DistStats.median">median</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#DistStats.p95">p95</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#DistStats.max">max</a>
+                        </li>
+                </ul>
+
+            </li>
+            <li>
+                    <a class="class" href="#ArmLogSummary">ArmLogSummary</a>
+                            <ul class="memberlist">
+                        <li>
+                                <a class="function" href="#ArmLogSummary.__init__">ArmLogSummary</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#ArmLogSummary.considered">considered</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#ArmLogSummary.opened">opened</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#ArmLogSummary.pending">pending</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#ArmLogSummary.skipped_by_reason">skipped_by_reason</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#ArmLogSummary.entry_delay_s">entry_delay_s</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#ArmLogSummary.adverse_gap_bps">adverse_gap_bps</a>
+                        </li>
+                </ul>
+
+            </li>
+            <li>
+                    <a class="class" href="#OperationalMetrics">OperationalMetrics</a>
+                            <ul class="memberlist">
+                        <li>
+                                <a class="function" href="#OperationalMetrics.__init__">OperationalMetrics</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#OperationalMetrics.arm_log">arm_log</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#OperationalMetrics.delays">delays</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#OperationalMetrics.executability">executability</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#OperationalMetrics.groups_in_non_executable_symbols">groups_in_non_executable_symbols</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#OperationalMetrics.measured_groups">measured_groups</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#OperationalMetrics.availability">availability</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#OperationalMetrics.stressed">stressed</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#OperationalMetrics.fees_total_usdt">fees_total_usdt</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#OperationalMetrics.funding_total_usdt">funding_total_usdt</a>
+                        </li>
+                </ul>
+
+            </li>
+            <li>
+                    <a class="class" href="#RealMoneyReport">RealMoneyReport</a>
+                            <ul class="memberlist">
+                        <li>
+                                <a class="function" href="#RealMoneyReport.__init__">RealMoneyReport</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#RealMoneyReport.state">state</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#RealMoneyReport.frozen_hash">frozen_hash</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#RealMoneyReport.status">status</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#RealMoneyReport.missing">missing</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#RealMoneyReport.record">record</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#RealMoneyReport.criteria">criteria</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#RealMoneyReport.recommendation">recommendation</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#RealMoneyReport.operational">operational</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#RealMoneyReport.transfer">transfer</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#RealMoneyReport.notes">notes</a>
+                        </li>
+                </ul>
+
+            </li>
+            <li>
+                    <a class="function" href="#closed_with_pnl">closed_with_pnl</a>
+            </li>
+            <li>
+                    <a class="function" href="#compute_arm_log_summary">compute_arm_log_summary</a>
+            </li>
+            <li>
+                    <a class="function" href="#profit_factor">profit_factor</a>
+            </li>
+            <li>
+                    <a class="function" href="#pf_cluster_bootstrap">pf_cluster_bootstrap</a>
+            </li>
+            <li>
+                    <a class="function" href="#count_reconcile_log_lines">count_reconcile_log_lines</a>
+            </li>
+            <li>
+                    <a class="function" href="#evaluate_criteria">evaluate_criteria</a>
+            </li>
+            <li>
+                    <a class="function" href="#recommend">recommend</a>
+            </li>
+            <li>
+                    <a class="function" href="#compute_delay_stats">compute_delay_stats</a>
+            </li>
+            <li>
+                    <a class="function" href="#classify_executability">classify_executability</a>
+            </li>
+            <li>
+                    <a class="function" href="#compute_availability">compute_availability</a>
+            </li>
+            <li>
+                    <a class="function" href="#compute_stressed">compute_stressed</a>
+            </li>
+            <li>
+                    <a class="function" href="#build_report">build_report</a>
+            </li>
+            <li>
+                    <a class="variable" href="#DISCLAIMER">DISCLAIMER</a>
+            </li>
+            <li>
+                    <a class="function" href="#render_report">render_report</a>
+            </li>
+    </ul>
+
+
+            <footer>Referencia generada por scripts/build_dev_docs.py desde los docstrings; no se edita.</footer>
+
+        <a class="attribution" title="pdoc: Python API documentation generator" href="https://pdoc.dev" target="_blank">
+            built with <span class="visually-hidden">pdoc</span><img
+                alt="pdoc logo"
+                src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20role%3D%22img%22%20aria-label%3D%22pdoc%20logo%22%20width%3D%22300%22%20height%3D%22160%22%20viewBox%3D%220%200%20150%2080%22%3E%3Ctitle%3Epdoc%3C/title%3E%3Cpath%20d%3D%22M132.316%2048.886c.276-4.679%202.342-6.698%204.409-7.982s4.27-1.165%206.751-1.055c1.586.07%203.044.156%204.222-.482%201.142-.619%202.026-1.932%202.162-3.739.268-3.576-1.929-5.368-5.006-5.551s-7.599.524-10.517%201.606c-4.455%201.652-8.588%206.606-9.552%208.992s-2.342%206.193-1.745%2010.873%202.664%209.221%205.878%2011.79%205.878%203.808%2010.103%204.312%203.444.229%206.062.229%205.006-2.202%204.914-4.909-2.296-5.001-4.501-4.863-3.077.505-5.281.229-7.715-2.064-7.899-9.451z%22%20fill%3D%22%23198754%22/%3E%3Ccircle%20cx%3D%22101.504%22%20cy%3D%2248.943%22%20r%3D%2214.208%22%20fill%3D%22none%22%20stroke%3D%22%23198754%22%20stroke-width%3D%229.354%22/%3E%3Cpath%20d%3D%22M87.81.002c-3.637.065-5.001.454-7.014%201.232s-3.443%201.363-6.3%204.282c-1.723%201.76-3.148%205.019-3.776%207.329-.413%201.521-.316%202.63-.316%202.63l-.195%2034.612c.065%205.774-6.755%208.305-9.612%208.37s-9.678-1.038-9.743-9.408%207.128-9.521%208.362-9.521c1.413-.13%202.526-.021%203.718-.016%202.071.009%204.157-.778%204.092-4.671s-4.157-4.736-4.157-4.736c-6.3-.843-11.43%202.206-11.43%202.206S40.917%2038.15%2041.372%2049.634%2051.568%2068.19%2061.311%2068.125s18.316-7.007%2018.445-17.193l.13-22.772c.046-2.291%202.683-3.644%204.476-4.203.745-.232%201.694-.274%201.694-.274l10.457-.13s4.871-.324%207.729-3.114%204.352-6.294%204.352-6.294.974-3.049.13-4.606-.195-1.233-2.792-3.309-8.573-4.477-8.573-4.477S91.447-.063%2087.81.002zM0%2047.169l.065%2028.417S0%2080.127%204.481%2079.997s5.072-3.866%205.049-4.152l-.113-28.482s1.624-7.656%209.937-7.721%2010.002%206.942%2010.002%208.499-.909%2010.51-9.093%2010.51c-.948%200-2.99-.567-4.145-.272-3.919%201-3.194%204.554-3.194%204.554s.065%205.061%207.404%204.996%2018.575-6.034%2018.575-19.074S26.953%2030.04%2019.549%2029.91%201.234%2035.296%200%2047.169z%22%20fill%3D%22%23198754%22/%3E%3Cg%20transform%3D%22matrix%28.325601%200%200%20.325256%20-10.32669%20-45.802786%29%22%3E%3Ccircle%20cx%3D%22297.554%22%20cy%3D%22172.286%22%20r%3D%2216.5%22%20fill%3D%22%23fff%22/%3E%3Cellipse%20cx%3D%22297.709%22%20cy%3D%22172.642%22%20rx%3D%2211.071%22%20ry%3D%2210.871%22%20fill%3D%22%23105a48%22/%3E%3Ccircle%20cx%3D%22304.104%22%20cy%3D%22167.667%22%20r%3D%224.5%22%20fill%3D%22%23fff%22/%3E%3C/g%3E%3Cpath%20d%3D%22M94.661%2017.032l.893-1.476s.99.714%201.916.925%201.575.114%202.955.114l14.565-.162c1.283-.032%203.085-.762%203.02-3.293s-.373-3.503-.373-3.503l1.283-.487s.52.503.877%201.573.309%201.995.292%202.66-.227%201.541-.227%201.541%201.564-.308%202.359-1.038.823-.779%201.489-1.508.812-.86.812-.86.552-.13.877.26.341.957.065%201.46-1.672%202.206-3.247%203.066-2.76%201.427-3.929%201.768-3.848.73-7.063.714l-10.944-.114s-2.143-.081-3.02-.373-2.241-.973-2.598-1.265z%22%20fill%3D%22%23d36d49%22/%3E%3Cg%20fill%3D%22%23105a48%22%3E%3Cellipse%20cx%3D%2293.052%22%20cy%3D%2243.567%22%20rx%3D%22.869%22%20ry%3D%221.014%22%20transform%3D%22rotate%28341.022%29%22/%3E%3Cellipse%20cx%3D%22104.3%22%20cy%3D%22-16.184%22%20rx%3D%22.865%22%20ry%3D%221.009%22%20transform%3D%22rotate%2814.786%29%22/%3E%3C/g%3E%3C/svg%3E"/>
+        </a>
+</div>
+    </nav>
+    <main class="pdoc">
+            <section class="module-info">
+                    <h1 class="modulename">
+<a href="./../../app.html">app</a><wbr>.<a href="./../trading.html">trading</a><wbr>.real_money_report    </h1>
+
+                        <div class="docstring"><p>Reporte de paso a dinero real (subfase 3.8, docs/FASE3_PLAN.md punto 8).</p>
+
+<p><strong>Solo RECOMIENDA. v1 es 100 % paper</strong>: este modulo no importa ningun backend de
+ejecucion ni cliente de red, nunca habilita nada, y su salida termina siempre
+diciendo que la decision es manual y requeriria una fase nueva.</p>
+
+<p><strong>Orden estricto (estructural, con test de que no se lee nada antes):</strong></p>
+
+<ol>
+<li><code>compute_status</code> + <code>is_outcome_reveal_allowed</code> (gate abierto Y registro oficial
+del veredicto). Si es falso: solo "que falta"; no se consulta <code>trades</code> ni ningun
+resultado.</li>
+<li>Se lee el registro oficial (<code>verdict_record</code>); si NO dice APORTA_VALOR la
+conclusion es "no pasar a dinero real" y no se evalua nada mas.</li>
+<li>Solo entonces se evaluan los criterios del brazo ejecutado (las operaciones
+REALES simuladas abiertas por el LLM, <code>decision_source = LLM_APROBADA</code>), mas los
+riesgos operativos medidos y la transferencia a las estrategias elegibles.</li>
+</ol>
+
+<p>Los regimenes &lt;30 / 30-100 / &gt;=100 por lado de la fila 3.8 original se RETIRARON:
+la medicion 3.6 fija un unico punto de analisis (300 conglomerados efectivos por
+lado) y mostrar cifras antes contradice la regla de una sola mirada; el reporte
+usa solo el veredicto del registro oficial, que CITA (nunca recalcula).</p>
+
+<p>Cada criterio devuelve PASA / NO PASA / SIN DATOS; la falta de datos nunca cuenta
+como "pasa". Criterio de rentabilidad (decidido el 2026-10-17): PF &gt; 1,3 Y limite
+inferior del IC 95 % del PF &gt; 1,0 (bootstrap por conglomerados).</p>
+</div>
+
+                
+                
+                
+            </section>
+                <section id="STATE_NOT_ALLOWED">
+                    <div class="attr variable">
+            <span class="name">STATE_NOT_ALLOWED</span>        =
+<span class="default_value">&#39;REVEAL_NO_PERMITIDO&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#STATE_NOT_ALLOWED"></a>
+    
+    
+
+                </section>
+                <section id="STATE_NO_GO">
+                    <div class="attr variable">
+            <span class="name">STATE_NO_GO</span>        =
+<span class="default_value">&#39;NO_PASAR_VEREDICTO&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#STATE_NO_GO"></a>
+    
+    
+
+                </section>
+                <section id="STATE_EVALUATED">
+                    <div class="attr variable">
+            <span class="name">STATE_EVALUATED</span>        =
+<span class="default_value">&#39;EVALUADO&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#STATE_EVALUATED"></a>
+    
+    
+
+                </section>
+                <section id="PASA">
+                    <div class="attr variable">
+            <span class="name">PASA</span>        =
+<span class="default_value">&#39;PASA&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#PASA"></a>
+    
+    
+
+                </section>
+                <section id="NO_PASA">
+                    <div class="attr variable">
+            <span class="name">NO_PASA</span>        =
+<span class="default_value">&#39;NO PASA&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#NO_PASA"></a>
+    
+    
+
+                </section>
+                <section id="SIN_DATOS">
+                    <div class="attr variable">
+            <span class="name">SIN_DATOS</span>        =
+<span class="default_value">&#39;SIN DATOS&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#SIN_DATOS"></a>
+    
+    
+
+                </section>
+                <section id="RECOMMEND_MANUAL">
+                    <div class="attr variable">
+            <span class="name">RECOMMEND_MANUAL</span>        =
+<span class="default_value">&#39;EVALUACION_MANUAL&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#RECOMMEND_MANUAL"></a>
+    
+    
+
+                </section>
+                <section id="RECOMMEND_NO">
+                    <div class="attr variable">
+            <span class="name">RECOMMEND_NO</span>        =
+<span class="default_value">&#39;NO_PASAR&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#RECOMMEND_NO"></a>
+    
+    
+
+                </section>
+                <section id="EXECUTED_ARM_DECISION_SOURCE">
+                    <div class="attr variable">
+            <span class="name">EXECUTED_ARM_DECISION_SOURCE</span>        =
+<span class="default_value">&#39;LLM_APROBADA&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#EXECUTED_ARM_DECISION_SOURCE"></a>
+    
+    
+
+                </section>
+                <section id="KEY_REAL_ARM_STARTED_AT">
+                    <div class="attr variable">
+            <span class="name">KEY_REAL_ARM_STARTED_AT</span>        =
+<span class="default_value">&#39;real_arm_started_at&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#KEY_REAL_ARM_STARTED_AT"></a>
+    
+    
+
+                </section>
+                <section id="KEY_REAL_ARM_DRAWDOWN_BASELINE">
+                    <div class="attr variable">
+            <span class="name">KEY_REAL_ARM_DRAWDOWN_BASELINE</span>        =
+<span class="default_value">&#39;real_arm_drawdown_baseline&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#KEY_REAL_ARM_DRAWDOWN_BASELINE"></a>
+    
+    
+
+                </section>
+                <section id="KEY_DRAWDOWN_TRIGGER_COUNT">
+                    <div class="attr variable">
+            <span class="name">KEY_DRAWDOWN_TRIGGER_COUNT</span>        =
+<span class="default_value">&#39;drawdown_stop_would_have_triggered_count&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#KEY_DRAWDOWN_TRIGGER_COUNT"></a>
+    
+    
+
+                </section>
+                <section id="PF_CI_FLOOR">
+                    <div class="attr variable">
+            <span class="name">PF_CI_FLOOR</span>        =
+<span class="default_value">1.0</span>
+
+        
+    </div>
+    <a class="headerlink" href="#PF_CI_FLOOR"></a>
+    
+    
+
+                </section>
+                <section id="MAX_DRAWDOWN_TRIGGERS">
+                    <div class="attr variable">
+            <span class="name">MAX_DRAWDOWN_TRIGGERS</span>        =
+<span class="default_value">1</span>
+
+        
+    </div>
+    <a class="headerlink" href="#MAX_DRAWDOWN_TRIGGERS"></a>
+    
+    
+
+                </section>
+                <section id="GAP_HOURS_THRESHOLD">
+                    <div class="attr variable">
+            <span class="name">GAP_HOURS_THRESHOLD</span>        =
+<span class="default_value">2.0</span>
+
+        
+    </div>
+    <a class="headerlink" href="#GAP_HOURS_THRESHOLD"></a>
+    
+    
+
+                </section>
+                <section id="RECONCILE_LOG_MARKER">
+                    <div class="attr variable">
+            <span class="name">RECONCILE_LOG_MARKER</span>        =
+<span class="default_value">&#39;Reconciliacion fallida&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#RECONCILE_LOG_MARKER"></a>
+    
+    
+
+                </section>
+                <section id="Criterion">
+                    <div class="attr class">
+                    <div class="decorator decorator-dataclass">@dataclass(frozen=True)</div>
+
+    <span class="def">class</span>
+    <span class="name">Criterion</span>:
+
+        
+    </div>
+    <a class="headerlink" href="#Criterion"></a>
+    
+            <div class="docstring"><p>Un criterio del reporte de paso a dinero real.</p>
+
+<p>Lleva clave, etiqueta, estado (<code><a href="#PASA">PASA</a></code>, <code>NO PASA</code> o <code>SIN DATOS</code>) y detalle.</p>
+</div>
+
+
+                            <div id="Criterion.__init__" class="classattr">
+                                <div class="attr function">
+            
+        <span class="name">Criterion</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">key</span><span class="p">:</span> <span class="nb">str</span>, </span><span class="param"><span class="n">label</span><span class="p">:</span> <span class="nb">str</span>, </span><span class="param"><span class="n">status</span><span class="p">:</span> <span class="nb">str</span>, </span><span class="param"><span class="n">detail</span><span class="p">:</span> <span class="nb">str</span></span>)</span>
+
+        
+    </div>
+    <a class="headerlink" href="#Criterion.__init__"></a>
+    
+    
+
+                            </div>
+                            <div id="Criterion.key" class="classattr">
+                                <div class="attr variable">
+            <span class="name">key</span><span class="annotation">: str</span>
+
+        
+    </div>
+    <a class="headerlink" href="#Criterion.key"></a>
+    
+    
+
+                            </div>
+                            <div id="Criterion.label" class="classattr">
+                                <div class="attr variable">
+            <span class="name">label</span><span class="annotation">: str</span>
+
+        
+    </div>
+    <a class="headerlink" href="#Criterion.label"></a>
+    
+    
+
+                            </div>
+                            <div id="Criterion.status" class="classattr">
+                                <div class="attr variable">
+            <span class="name">status</span><span class="annotation">: str</span>
+
+        
+    </div>
+    <a class="headerlink" href="#Criterion.status"></a>
+    
+    
+
+                            </div>
+                            <div id="Criterion.detail" class="classattr">
+                                <div class="attr variable">
+            <span class="name">detail</span><span class="annotation">: str</span>
+
+        
+    </div>
+    <a class="headerlink" href="#Criterion.detail"></a>
+    
+    
+
+                            </div>
+                </section>
+                <section id="SymbolExecutability">
+                    <div class="attr class">
+                    <div class="decorator decorator-dataclass">@dataclass(frozen=True)</div>
+
+    <span class="def">class</span>
+    <span class="name">SymbolExecutability</span>:
+
+        
+    </div>
+    <a class="headerlink" href="#SymbolExecutability"></a>
+    
+            <div class="docstring"><p>Si un simbolo del universo es ejecutable con el margen y apalancamiento configurados.</p>
+</div>
+
+
+                            <div id="SymbolExecutability.__init__" class="classattr">
+                                <div class="attr function">
+            
+        <span class="name">SymbolExecutability</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">symbol</span><span class="p">:</span> <span class="nb">str</span>,</span><span class="param">	<span class="n">min_trade_volume</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">base_precision</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">price</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">qty</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">status</span><span class="p">:</span> <span class="nb">str</span></span>)</span>
+
+        
+    </div>
+    <a class="headerlink" href="#SymbolExecutability.__init__"></a>
+    
+    
+
+                            </div>
+                            <div id="SymbolExecutability.symbol" class="classattr">
+                                <div class="attr variable">
+            <span class="name">symbol</span><span class="annotation">: str</span>
+
+        
+    </div>
+    <a class="headerlink" href="#SymbolExecutability.symbol"></a>
+    
+    
+
+                            </div>
+                            <div id="SymbolExecutability.min_trade_volume" class="classattr">
+                                <div class="attr variable">
+            <span class="name">min_trade_volume</span><span class="annotation">: float | None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#SymbolExecutability.min_trade_volume"></a>
+    
+    
+
+                            </div>
+                            <div id="SymbolExecutability.base_precision" class="classattr">
+                                <div class="attr variable">
+            <span class="name">base_precision</span><span class="annotation">: int | None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#SymbolExecutability.base_precision"></a>
+    
+    
+
+                            </div>
+                            <div id="SymbolExecutability.price" class="classattr">
+                                <div class="attr variable">
+            <span class="name">price</span><span class="annotation">: float | None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#SymbolExecutability.price"></a>
+    
+    
+
+                            </div>
+                            <div id="SymbolExecutability.qty" class="classattr">
+                                <div class="attr variable">
+            <span class="name">qty</span><span class="annotation">: float | None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#SymbolExecutability.qty"></a>
+    
+    
+
+                            </div>
+                            <div id="SymbolExecutability.status" class="classattr">
+                                <div class="attr variable">
+            <span class="name">status</span><span class="annotation">: str</span>
+
+        
+    </div>
+    <a class="headerlink" href="#SymbolExecutability.status"></a>
+    
+    
+
+                            </div>
+                </section>
+                <section id="DelayStats">
+                    <div class="attr class">
+                    <div class="decorator decorator-dataclass">@dataclass(frozen=True)</div>
+
+    <span class="def">class</span>
+    <span class="name">DelayStats</span>:
+
+        
+    </div>
+    <a class="headerlink" href="#DelayStats"></a>
+    
+            <div class="docstring"><p>Estadisticos del retraso de decision del LLM y cuantas decisiones superan el limite.</p>
+</div>
+
+
+                            <div id="DelayStats.__init__" class="classattr">
+                                <div class="attr function">
+            
+        <span class="name">DelayStats</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">n</span><span class="p">:</span> <span class="nb">int</span>,</span><span class="param">	<span class="n">p50</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">p95</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span>,</span><span class="param">	<span class="nb">max</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">over_limit</span><span class="p">:</span> <span class="nb">int</span>,</span><span class="param">	<span class="n">limit_s</span><span class="p">:</span> <span class="nb">float</span></span>)</span>
+
+        
+    </div>
+    <a class="headerlink" href="#DelayStats.__init__"></a>
+    
+    
+
+                            </div>
+                            <div id="DelayStats.n" class="classattr">
+                                <div class="attr variable">
+            <span class="name">n</span><span class="annotation">: int</span>
+
+        
+    </div>
+    <a class="headerlink" href="#DelayStats.n"></a>
+    
+    
+
+                            </div>
+                            <div id="DelayStats.p50" class="classattr">
+                                <div class="attr variable">
+            <span class="name">p50</span><span class="annotation">: float | None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#DelayStats.p50"></a>
+    
+    
+
+                            </div>
+                            <div id="DelayStats.p95" class="classattr">
+                                <div class="attr variable">
+            <span class="name">p95</span><span class="annotation">: float | None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#DelayStats.p95"></a>
+    
+    
+
+                            </div>
+                            <div id="DelayStats.max" class="classattr">
+                                <div class="attr variable">
+            <span class="name">max</span><span class="annotation">: float | None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#DelayStats.max"></a>
+    
+    
+
+                            </div>
+                            <div id="DelayStats.over_limit" class="classattr">
+                                <div class="attr variable">
+            <span class="name">over_limit</span><span class="annotation">: int</span>
+
+        
+    </div>
+    <a class="headerlink" href="#DelayStats.over_limit"></a>
+    
+    
+
+                            </div>
+                            <div id="DelayStats.limit_s" class="classattr">
+                                <div class="attr variable">
+            <span class="name">limit_s</span><span class="annotation">: float</span>
+
+        
+    </div>
+    <a class="headerlink" href="#DelayStats.limit_s"></a>
+    
+    
+
+                            </div>
+                </section>
+                <section id="AvailabilityStats">
+                    <div class="attr class">
+                    <div class="decorator decorator-dataclass">@dataclass(frozen=True)</div>
+
+    <span class="def">class</span>
+    <span class="name">AvailabilityStats</span>:
+
+        
+    </div>
+    <a class="headerlink" href="#AvailabilityStats"></a>
+    
+            <div class="docstring"><p>Disponibilidad del equipo durante la medicion: horas con evaluaciones y huecos.</p>
+</div>
+
+
+                            <div id="AvailabilityStats.__init__" class="classattr">
+                                <div class="attr function">
+            
+        <span class="name">AvailabilityStats</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">hours_with_evaluations</span><span class="p">:</span> <span class="nb">int</span>,</span><span class="param">	<span class="n">gaps_over_threshold</span><span class="p">:</span> <span class="nb">int</span>,</span><span class="param">	<span class="n">longest_gap_hours</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span></span>)</span>
+
+        
+    </div>
+    <a class="headerlink" href="#AvailabilityStats.__init__"></a>
+    
+    
+
+                            </div>
+                            <div id="AvailabilityStats.hours_with_evaluations" class="classattr">
+                                <div class="attr variable">
+            <span class="name">hours_with_evaluations</span><span class="annotation">: int</span>
+
+        
+    </div>
+    <a class="headerlink" href="#AvailabilityStats.hours_with_evaluations"></a>
+    
+    
+
+                            </div>
+                            <div id="AvailabilityStats.gaps_over_threshold" class="classattr">
+                                <div class="attr variable">
+            <span class="name">gaps_over_threshold</span><span class="annotation">: int</span>
+
+        
+    </div>
+    <a class="headerlink" href="#AvailabilityStats.gaps_over_threshold"></a>
+    
+    
+
+                            </div>
+                            <div id="AvailabilityStats.longest_gap_hours" class="classattr">
+                                <div class="attr variable">
+            <span class="name">longest_gap_hours</span><span class="annotation">: float | None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#AvailabilityStats.longest_gap_hours"></a>
+    
+    
+
+                            </div>
+                </section>
+                <section id="StressedPf">
+                    <div class="attr class">
+                    <div class="decorator decorator-dataclass">@dataclass(frozen=True)</div>
+
+    <span class="def">class</span>
+    <span class="name">StressedPf</span>:
+
+        
+    </div>
+    <a class="headerlink" href="#StressedPf"></a>
+    
+            <div class="docstring"><p>Profit factor del brazo ejecutado bajo un escenario de costos.</p>
+</div>
+
+
+                            <div id="StressedPf.__init__" class="classattr">
+                                <div class="attr function">
+            
+        <span class="name">StressedPf</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">label</span><span class="p">:</span> <span class="nb">str</span>, </span><span class="param"><span class="n">pf</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span></span>)</span>
+
+        
+    </div>
+    <a class="headerlink" href="#StressedPf.__init__"></a>
+    
+    
+
+                            </div>
+                            <div id="StressedPf.label" class="classattr">
+                                <div class="attr variable">
+            <span class="name">label</span><span class="annotation">: str</span>
+
+        
+    </div>
+    <a class="headerlink" href="#StressedPf.label"></a>
+    
+    
+
+                            </div>
+                            <div id="StressedPf.pf" class="classattr">
+                                <div class="attr variable">
+            <span class="name">pf</span><span class="annotation">: float | None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#StressedPf.pf"></a>
+    
+    
+
+                            </div>
+                </section>
+                <section id="DistStats">
+                    <div class="attr class">
+                    <div class="decorator decorator-dataclass">@dataclass(frozen=True)</div>
+
+    <span class="def">class</span>
+    <span class="name">DistStats</span>:
+
+        
+    </div>
+    <a class="headerlink" href="#DistStats"></a>
+    
+            <div class="docstring"><p>Mediana, percentil 95 y maximo de una distribucion.</p>
+</div>
+
+
+                            <div id="DistStats.__init__" class="classattr">
+                                <div class="attr function">
+            
+        <span class="name">DistStats</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">n</span><span class="p">:</span> <span class="nb">int</span>, </span><span class="param"><span class="n">median</span><span class="p">:</span> <span class="nb">float</span>, </span><span class="param"><span class="n">p95</span><span class="p">:</span> <span class="nb">float</span>, </span><span class="param"><span class="nb">max</span><span class="p">:</span> <span class="nb">float</span></span>)</span>
+
+        
+    </div>
+    <a class="headerlink" href="#DistStats.__init__"></a>
+    
+    
+
+                            </div>
+                            <div id="DistStats.n" class="classattr">
+                                <div class="attr variable">
+            <span class="name">n</span><span class="annotation">: int</span>
+
+        
+    </div>
+    <a class="headerlink" href="#DistStats.n"></a>
+    
+    
+
+                            </div>
+                            <div id="DistStats.median" class="classattr">
+                                <div class="attr variable">
+            <span class="name">median</span><span class="annotation">: float</span>
+
+        
+    </div>
+    <a class="headerlink" href="#DistStats.median"></a>
+    
+    
+
+                            </div>
+                            <div id="DistStats.p95" class="classattr">
+                                <div class="attr variable">
+            <span class="name">p95</span><span class="annotation">: float</span>
+
+        
+    </div>
+    <a class="headerlink" href="#DistStats.p95"></a>
+    
+    
+
+                            </div>
+                            <div id="DistStats.max" class="classattr">
+                                <div class="attr variable">
+            <span class="name">max</span><span class="annotation">: float</span>
+
+        
+    </div>
+    <a class="headerlink" href="#DistStats.max"></a>
+    
+    
+
+                            </div>
+                </section>
+                <section id="ArmLogSummary">
+                    <div class="attr class">
+                    <div class="decorator decorator-dataclass">@dataclass(frozen=True)</div>
+
+    <span class="def">class</span>
+    <span class="name">ArmLogSummary</span>:
+
+        
+    </div>
+    <a class="headerlink" href="#ArmLogSummary"></a>
+    
+            <div class="docstring"><p>Resumen de <code>paper_execution_log</code> (subfase 3.9): solo decisiones de ejecucion y calidad
+de la entrada, nunca el resultado de las operaciones.</p>
+</div>
+
+
+                            <div id="ArmLogSummary.__init__" class="classattr">
+                                <div class="attr function">
+            
+        <span class="name">ArmLogSummary</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">considered</span><span class="p">:</span> <span class="nb">int</span>,</span><span class="param">	<span class="n">opened</span><span class="p">:</span> <span class="nb">int</span>,</span><span class="param">	<span class="n">pending</span><span class="p">:</span> <span class="nb">int</span>,</span><span class="param">	<span class="n">skipped_by_reason</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span>,</span><span class="param">	<span class="n">entry_delay_s</span><span class="p">:</span> <span class="n"><a href="#DistStats">DistStats</a></span> <span class="o">|</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">adverse_gap_bps</span><span class="p">:</span> <span class="n"><a href="#DistStats">DistStats</a></span> <span class="o">|</span> <span class="kc">None</span></span>)</span>
+
+        
+    </div>
+    <a class="headerlink" href="#ArmLogSummary.__init__"></a>
+    
+    
+
+                            </div>
+                            <div id="ArmLogSummary.considered" class="classattr">
+                                <div class="attr variable">
+            <span class="name">considered</span><span class="annotation">: int</span>
+
+        
+    </div>
+    <a class="headerlink" href="#ArmLogSummary.considered"></a>
+    
+    
+
+                            </div>
+                            <div id="ArmLogSummary.opened" class="classattr">
+                                <div class="attr variable">
+            <span class="name">opened</span><span class="annotation">: int</span>
+
+        
+    </div>
+    <a class="headerlink" href="#ArmLogSummary.opened"></a>
+    
+    
+
+                            </div>
+                            <div id="ArmLogSummary.pending" class="classattr">
+                                <div class="attr variable">
+            <span class="name">pending</span><span class="annotation">: int</span>
+
+        
+    </div>
+    <a class="headerlink" href="#ArmLogSummary.pending"></a>
+    
+    
+
+                            </div>
+                            <div id="ArmLogSummary.skipped_by_reason" class="classattr">
+                                <div class="attr variable">
+            <span class="name">skipped_by_reason</span><span class="annotation">: dict[str, int]</span>
+
+        
+    </div>
+    <a class="headerlink" href="#ArmLogSummary.skipped_by_reason"></a>
+    
+    
+
+                            </div>
+                            <div id="ArmLogSummary.entry_delay_s" class="classattr">
+                                <div class="attr variable">
+            <span class="name">entry_delay_s</span><span class="annotation">: <a href="#DistStats">DistStats</a> | None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#ArmLogSummary.entry_delay_s"></a>
+    
+    
+
+                            </div>
+                            <div id="ArmLogSummary.adverse_gap_bps" class="classattr">
+                                <div class="attr variable">
+            <span class="name">adverse_gap_bps</span><span class="annotation">: <a href="#DistStats">DistStats</a> | None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#ArmLogSummary.adverse_gap_bps"></a>
+    
+    
+
+                            </div>
+                </section>
+                <section id="OperationalMetrics">
+                    <div class="attr class">
+                    <div class="decorator decorator-dataclass">@dataclass</div>
+
+    <span class="def">class</span>
+    <span class="name">OperationalMetrics</span>:
+
+        
+    </div>
+    <a class="headerlink" href="#OperationalMetrics"></a>
+    
+            <div class="docstring"><p>Riesgos operativos medidos del reporte de paso a dinero real.</p>
+
+<p>Retrasos, ejecutabilidad, disponibilidad, estres de costos y resumen del brazo.</p>
+</div>
+
+
+                            <div id="OperationalMetrics.__init__" class="classattr">
+                                <div class="attr function">
+            
+        <span class="name">OperationalMetrics</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">arm_log</span><span class="p">:</span> <span class="n"><a href="#ArmLogSummary">ArmLogSummary</a></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">delays</span><span class="p">:</span> <span class="n"><a href="#DelayStats">DelayStats</a></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">executability</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n"><a href="#SymbolExecutability">SymbolExecutability</a></span><span class="p">]</span> <span class="o">=</span> <span class="o">&lt;</span><span class="n">factory</span><span class="o">&gt;</span>,</span><span class="param">	<span class="n">groups_in_non_executable_symbols</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>,</span><span class="param">	<span class="n">measured_groups</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>,</span><span class="param">	<span class="n">availability</span><span class="p">:</span> <span class="n"><a href="#AvailabilityStats">AvailabilityStats</a></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">stressed</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n"><a href="#StressedPf">StressedPf</a></span><span class="p">]</span> <span class="o">=</span> <span class="o">&lt;</span><span class="n">factory</span><span class="o">&gt;</span>,</span><span class="param">	<span class="n">fees_total_usdt</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">funding_total_usdt</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span></span>)</span>
+
+        
+    </div>
+    <a class="headerlink" href="#OperationalMetrics.__init__"></a>
+    
+    
+
+                            </div>
+                            <div id="OperationalMetrics.arm_log" class="classattr">
+                                <div class="attr variable">
+            <span class="name">arm_log</span><span class="annotation">: <a href="#ArmLogSummary">ArmLogSummary</a> | None</span>        =
+<span class="default_value">None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#OperationalMetrics.arm_log"></a>
+    
+    
+
+                            </div>
+                            <div id="OperationalMetrics.delays" class="classattr">
+                                <div class="attr variable">
+            <span class="name">delays</span><span class="annotation">: <a href="#DelayStats">DelayStats</a> | None</span>        =
+<span class="default_value">None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#OperationalMetrics.delays"></a>
+    
+    
+
+                            </div>
+                            <div id="OperationalMetrics.executability" class="classattr">
+                                <div class="attr variable">
+            <span class="name">executability</span><span class="annotation">: list[<a href="#SymbolExecutability">SymbolExecutability</a>]</span>
+
+        
+    </div>
+    <a class="headerlink" href="#OperationalMetrics.executability"></a>
+    
+    
+
+                            </div>
+                            <div id="OperationalMetrics.groups_in_non_executable_symbols" class="classattr">
+                                <div class="attr variable">
+            <span class="name">groups_in_non_executable_symbols</span><span class="annotation">: int</span>        =
+<span class="default_value">0</span>
+
+        
+    </div>
+    <a class="headerlink" href="#OperationalMetrics.groups_in_non_executable_symbols"></a>
+    
+    
+
+                            </div>
+                            <div id="OperationalMetrics.measured_groups" class="classattr">
+                                <div class="attr variable">
+            <span class="name">measured_groups</span><span class="annotation">: int</span>        =
+<span class="default_value">0</span>
+
+        
+    </div>
+    <a class="headerlink" href="#OperationalMetrics.measured_groups"></a>
+    
+    
+
+                            </div>
+                            <div id="OperationalMetrics.availability" class="classattr">
+                                <div class="attr variable">
+            <span class="name">availability</span><span class="annotation">: <a href="#AvailabilityStats">AvailabilityStats</a> | None</span>        =
+<span class="default_value">None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#OperationalMetrics.availability"></a>
+    
+    
+
+                            </div>
+                            <div id="OperationalMetrics.stressed" class="classattr">
+                                <div class="attr variable">
+            <span class="name">stressed</span><span class="annotation">: list[<a href="#StressedPf">StressedPf</a>]</span>
+
+        
+    </div>
+    <a class="headerlink" href="#OperationalMetrics.stressed"></a>
+    
+    
+
+                            </div>
+                            <div id="OperationalMetrics.fees_total_usdt" class="classattr">
+                                <div class="attr variable">
+            <span class="name">fees_total_usdt</span><span class="annotation">: float | None</span>        =
+<span class="default_value">None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#OperationalMetrics.fees_total_usdt"></a>
+    
+    
+
+                            </div>
+                            <div id="OperationalMetrics.funding_total_usdt" class="classattr">
+                                <div class="attr variable">
+            <span class="name">funding_total_usdt</span><span class="annotation">: float | None</span>        =
+<span class="default_value">None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#OperationalMetrics.funding_total_usdt"></a>
+    
+    
+
+                            </div>
+                </section>
+                <section id="RealMoneyReport">
+                    <div class="attr class">
+                    <div class="decorator decorator-dataclass">@dataclass</div>
+
+    <span class="def">class</span>
+    <span class="name">RealMoneyReport</span>:
+
+        
+    </div>
+    <a class="headerlink" href="#RealMoneyReport"></a>
+    
+            <div class="docstring"><p>Salida estructurada del reporte de paso a dinero real.</p>
+
+<p><code><a href="#RealMoneyReport.state">state</a></code> es <code>REVEAL_NO_PERMITIDO</code>, <code>NO_PASAR_VEREDICTO</code> o <code>EVALUADO</code>. Solo RECOMIENDA.</p>
+</div>
+
+
+                            <div id="RealMoneyReport.__init__" class="classattr">
+                                <div class="attr function">
+            
+        <span class="name">RealMoneyReport</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">state</span><span class="p">:</span> <span class="nb">str</span>,</span><span class="param">	<span class="n">frozen_hash</span><span class="p">:</span> <span class="nb">str</span>,</span><span class="param">	<span class="n">status</span><span class="p">:</span> <span class="n"><a href="measurement_status.html#MeasurementStatus">app.trading.measurement_status.MeasurementStatus</a></span>,</span><span class="param">	<span class="n">missing</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="o">&lt;</span><span class="n">factory</span><span class="o">&gt;</span>,</span><span class="param">	<span class="n">record</span><span class="p">:</span> <span class="n"><a href="verdict_record.html#VerdictRecordInfo">app.trading.verdict_record.VerdictRecordInfo</a></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">criteria</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n"><a href="#Criterion">Criterion</a></span><span class="p">]</span> <span class="o">=</span> <span class="o">&lt;</span><span class="n">factory</span><span class="o">&gt;</span>,</span><span class="param">	<span class="n">recommendation</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">operational</span><span class="p">:</span> <span class="n"><a href="#OperationalMetrics">OperationalMetrics</a></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">transfer</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n"><a href="ai_value_report.html#BucketResult">app.trading.ai_value_report.BucketResult</a></span><span class="p">]</span> <span class="o">=</span> <span class="o">&lt;</span><span class="n">factory</span><span class="o">&gt;</span>,</span><span class="param">	<span class="n">notes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="o">&lt;</span><span class="n">factory</span><span class="o">&gt;</span></span>)</span>
+
+        
+    </div>
+    <a class="headerlink" href="#RealMoneyReport.__init__"></a>
+    
+    
+
+                            </div>
+                            <div id="RealMoneyReport.state" class="classattr">
+                                <div class="attr variable">
+            <span class="name">state</span><span class="annotation">: str</span>
+
+        
+    </div>
+    <a class="headerlink" href="#RealMoneyReport.state"></a>
+    
+    
+
+                            </div>
+                            <div id="RealMoneyReport.frozen_hash" class="classattr">
+                                <div class="attr variable">
+            <span class="name">frozen_hash</span><span class="annotation">: str</span>
+
+        
+    </div>
+    <a class="headerlink" href="#RealMoneyReport.frozen_hash"></a>
+    
+    
+
+                            </div>
+                            <div id="RealMoneyReport.status" class="classattr">
+                                <div class="attr variable">
+            <span class="name">status</span><span class="annotation">: <a href="measurement_status.html#MeasurementStatus">app.trading.measurement_status.MeasurementStatus</a></span>
+
+        
+    </div>
+    <a class="headerlink" href="#RealMoneyReport.status"></a>
+    
+    
+
+                            </div>
+                            <div id="RealMoneyReport.missing" class="classattr">
+                                <div class="attr variable">
+            <span class="name">missing</span><span class="annotation">: list[str]</span>
+
+        
+    </div>
+    <a class="headerlink" href="#RealMoneyReport.missing"></a>
+    
+    
+
+                            </div>
+                            <div id="RealMoneyReport.record" class="classattr">
+                                <div class="attr variable">
+            <span class="name">record</span><span class="annotation">: <a href="verdict_record.html#VerdictRecordInfo">app.trading.verdict_record.VerdictRecordInfo</a> | None</span>        =
+<span class="default_value">None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#RealMoneyReport.record"></a>
+    
+    
+
+                            </div>
+                            <div id="RealMoneyReport.criteria" class="classattr">
+                                <div class="attr variable">
+            <span class="name">criteria</span><span class="annotation">: list[<a href="#Criterion">Criterion</a>]</span>
+
+        
+    </div>
+    <a class="headerlink" href="#RealMoneyReport.criteria"></a>
+    
+    
+
+                            </div>
+                            <div id="RealMoneyReport.recommendation" class="classattr">
+                                <div class="attr variable">
+            <span class="name">recommendation</span><span class="annotation">: str | None</span>        =
+<span class="default_value">None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#RealMoneyReport.recommendation"></a>
+    
+    
+
+                            </div>
+                            <div id="RealMoneyReport.operational" class="classattr">
+                                <div class="attr variable">
+            <span class="name">operational</span><span class="annotation">: <a href="#OperationalMetrics">OperationalMetrics</a> | None</span>        =
+<span class="default_value">None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#RealMoneyReport.operational"></a>
+    
+    
+
+                            </div>
+                            <div id="RealMoneyReport.transfer" class="classattr">
+                                <div class="attr variable">
+            <span class="name">transfer</span><span class="annotation">: list[<a href="ai_value_report.html#BucketResult">app.trading.ai_value_report.BucketResult</a>]</span>
+
+        
+    </div>
+    <a class="headerlink" href="#RealMoneyReport.transfer"></a>
+    
+    
+
+                            </div>
+                            <div id="RealMoneyReport.notes" class="classattr">
+                                <div class="attr variable">
+            <span class="name">notes</span><span class="annotation">: list[str]</span>
+
+        
+    </div>
+    <a class="headerlink" href="#RealMoneyReport.notes"></a>
+    
+    
+
+                            </div>
+                </section>
+                <section id="closed_with_pnl">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">closed_with_pnl</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">trades</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n"><a href="../persistence/models.html#Trade">app.persistence.models.Trade</a></span><span class="p">]</span></span><span class="return-annotation">) -> <span class="nb">list</span><span class="p">[</span><span class="n"><a href="../persistence/models.html#Trade">app.persistence.models.Trade</a></span><span class="p">]</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#closed_with_pnl"></a>
+    
+            <div class="docstring"><p>Las operaciones cerradas que tienen PnL.</p>
+
+<p>Una cerrada sin PnL (p. ej. <code>RECONCILE_FAILED</code>) no entra a ninguna metrica de
+rentabilidad: la marca el criterio de reconciliacion.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>trades:</strong>  operaciones de la cuenta paper.</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>Las cerradas con <code>pnl_net_usdt</code>.</p>
+</blockquote>
+</div>
+
+
+                </section>
+                <section id="compute_arm_log_summary">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">compute_arm_log_summary</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span></span><span class="return-annotation">) -> <span class="n"><a href="#ArmLogSummary">ArmLogSummary</a></span> <span class="o">|</span> <span class="kc">None</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#compute_arm_log_summary"></a>
+    
+            <div class="docstring"><p>Resume <code>paper_execution_log</code>: decisiones, aperturas, omisiones por motivo y entrada.</p>
+
+<p>Solo decisiones de ejecucion, nunca el resultado de las operaciones.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>rows:</strong>  filas con <code>outcome</code>, <code>reason</code> y <code>details</code>.</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>El <code><a href="#ArmLogSummary">ArmLogSummary</a></code>, o <code>None</code> si no hay filas.</p>
+</blockquote>
+</div>
+
+
+                </section>
+                <section id="profit_factor">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">profit_factor</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">pnls</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span></span><span class="return-annotation">) -> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#profit_factor"></a>
+    
+            <div class="docstring"><p>Profit factor de una lista de PnL (ganancia bruta sobre perdida bruta).</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>pnls:</strong>  PnL netos por operacion.</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>El profit factor; <code>inf</code> si no hay perdidas pero si ganancias; <code>None</code> si todo vale 0.</p>
+</blockquote>
+</div>
+
+
+                </section>
+                <section id="pf_cluster_bootstrap">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">pf_cluster_bootstrap</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">trades</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n"><a href="../persistence/models.html#Trade">app.persistence.models.Trade</a></span><span class="p">]</span>,</span><span class="param">	<span class="o">*</span>,</span><span class="param">	<span class="n">n_resamples</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2000</span>,</span><span class="param">	<span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">20261004</span></span><span class="return-annotation">) -> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#pf_cluster_bootstrap"></a>
+    
+            <div class="docstring"><p>Profit factor observado y su IC 95 % por bootstrap de CONGLOMERADOS.</p>
+
+<p>Operaciones solapadas del mismo simbolo y direccion se mueven juntas, asi que se
+remuestrean conglomerados y no operaciones sueltas.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>trades:</strong>  operaciones de la cuenta paper.</li>
+<li><strong>n_resamples:</strong>  remuestreos.</li>
+<li><strong>seed:</strong>  semilla del generador.</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>La tupla <code>(PF observado, limite inferior, limite superior, conglomerados)</code>.</p>
+</blockquote>
+</div>
+
+
+                </section>
+                <section id="count_reconcile_log_lines">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">count_reconcile_log_lines</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">path</span><span class="p">:</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span>, </span><span class="param"><span class="n">since</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span> <span class="o">|</span> <span class="kc">None</span></span><span class="return-annotation">) -> <span class="nb">int</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#count_reconcile_log_lines"></a>
+    
+            <div class="docstring"><p>Cuenta las lineas <code>Reconciliacion fallida</code> (CRITICAL) del log. Best-effort.</p>
+
+<p>El log esta en hora local, asi que con <code>since</code> se filtra por fecha con un dia de margen.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>path:</strong>  archivo de log.</li>
+<li><strong>since:</strong>  inicio de la ventana, o <code>None</code> para contar todo.</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>El numero de lineas.</p>
+</blockquote>
+
+<h6 id="efectos">Efectos:</h6>
+
+<blockquote>
+  <p>Lee el archivo de log.</p>
+</blockquote>
+</div>
+
+
+                </section>
+                <section id="evaluate_criteria">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">evaluate_criteria</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="o">*</span>,</span><span class="param">	<span class="n">record</span><span class="p">:</span> <span class="n"><a href="verdict_record.html#VerdictRecordInfo">app.trading.verdict_record.VerdictRecordInfo</a></span>,</span><span class="param">	<span class="n">trades</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n"><a href="../persistence/models.html#Trade">app.persistence.models.Trade</a></span><span class="p">]</span>,</span><span class="param">	<span class="n">arm_state</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]</span>,</span><span class="param">	<span class="n">settings</span><span class="p">:</span> <span class="n"><a href="../config.html#Settings">app.config.Settings</a></span>,</span><span class="param">	<span class="n">log_reconcile_count</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span></span><span class="return-annotation">) -> <span class="nb">list</span><span class="p">[</span><span class="n"><a href="#Criterion">Criterion</a></span><span class="p">]</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#evaluate_criteria"></a>
+    
+            <div class="docstring"><p>Evalua los criterios del brazo ejecutado.</p>
+
+<p>Son dias, operaciones, rentabilidad, drawdown, concentracion y reconciliacion. La
+falta de datos nunca cuenta como "pasa" (<code>SIN DATOS</code>). Rentabilidad: PF mayor que
+<code>MIN_PROFIT_FACTOR</code> Y limite inferior del IC 95 % mayor que 1,0.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>record:</strong>  el registro oficial del veredicto.</li>
+<li><strong>trades:</strong>  operaciones del brazo (<code>decision_source = LLM_APROBADA</code>).</li>
+<li><strong>arm_state:</strong>  claves <code>real_arm_*</code> y el contador de drawdown de <code>system_state</code>.</li>
+<li><strong>settings:</strong>  configuracion (umbrales).</li>
+<li><strong>log_reconcile_count:</strong>  lineas CRITICAL de reconciliacion del log, o <code>None</code>.</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>La lista de <code><a href="#Criterion">Criterion</a></code>.</p>
+</blockquote>
+</div>
+
+
+                </section>
+                <section id="recommend">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">recommend</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">criteria</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n"><a href="#Criterion">Criterion</a></span><span class="p">]</span></span><span class="return-annotation">) -> <span class="nb">str</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#recommend"></a>
+    
+            <div class="docstring"><p>La recomendacion del reporte: evaluacion manual solo si TODOS los criterios pasan.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>criteria:</strong>  los criterios evaluados.</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p><code>EVALUACION_MANUAL</code> o <code>NO_PASAR</code>. Nunca habilita nada.</p>
+</blockquote>
+</div>
+
+
+                </section>
+                <section id="compute_delay_stats">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">compute_delay_stats</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">delays</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span>,</span><span class="param">	<span class="n">limit_s</span><span class="p">:</span> <span class="nb">float</span></span><span class="return-annotation">) -> <span class="n"><a href="#DelayStats">DelayStats</a></span> <span class="o">|</span> <span class="kc">None</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#compute_delay_stats"></a>
+    
+            <div class="docstring"><p>Mediana, p95 y maximo del retraso de decision, y cuantas superan el limite.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>delays:</strong>  retrasos en segundos.</li>
+<li><strong>limit_s:</strong>  limite (<code>LLM_REAL_MAX_DELAY_SECONDS</code>).</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>Los <code><a href="#DelayStats">DelayStats</a></code>, o <code>None</code> si no hay datos.</p>
+</blockquote>
+</div>
+
+
+                </section>
+                <section id="classify_executability">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">classify_executability</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">specs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span>,</span><span class="param">	<span class="o">*</span>,</span><span class="param">	<span class="n">margin_usdt</span><span class="p">:</span> <span class="nb">float</span>,</span><span class="param">	<span class="n">leverage</span><span class="p">:</span> <span class="nb">int</span></span><span class="return-annotation">) -> <span class="nb">list</span><span class="p">[</span><span class="n"><a href="#SymbolExecutability">SymbolExecutability</a></span><span class="p">]</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#classify_executability"></a>
+    
+            <div class="docstring"><p>Clasifica cada simbolo del universo como ejecutable o no con el margen configurado.</p>
+
+<p>Redondea la cantidad hacia abajo a la precision del contrato, como lo haria la bolsa.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>specs:</strong>  simbolos con su especificacion y ultimo precio.</li>
+<li><strong>margin_usdt:</strong>  margen por operacion.</li>
+<li><strong>leverage:</strong>  apalancamiento.</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>Un <code><a href="#SymbolExecutability">SymbolExecutability</a></code> por simbolo (<code>EJECUTABLE</code>, <code>NO EJECUTABLE</code>, <code>SIN PRECIO</code> o
+  <code>SIN SPEC</code>).</p>
+</blockquote>
+</div>
+
+
+                </section>
+                <section id="compute_availability">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">compute_availability</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">hours</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="p">]</span></span><span class="return-annotation">) -> <span class="n"><a href="#AvailabilityStats">AvailabilityStats</a></span> <span class="o">|</span> <span class="kc">None</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#compute_availability"></a>
+    
+            <div class="docstring"><p>Disponibilidad del equipo: horas con evaluaciones y huecos mayores que 2 horas.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>hours:</strong>  horas (UTC) con al menos una evaluacion, en orden.</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>Los <code><a href="#AvailabilityStats">AvailabilityStats</a></code>, o <code>None</code> si no hay horas.</p>
+</blockquote>
+</div>
+
+
+                </section>
+                <section id="compute_stressed">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">compute_stressed</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">trades</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n"><a href="../persistence/models.html#Trade">app.persistence.models.Trade</a></span><span class="p">]</span></span><span class="return-annotation">) -> <span class="nb">list</span><span class="p">[</span><span class="n"><a href="#StressedPf">StressedPf</a></span><span class="p">]</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#compute_stressed"></a>
+    
+            <div class="docstring"><p>Profit factor del brazo bajo cinco escenarios de comisiones y slippage.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>trades:</strong>  operaciones del brazo.</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>Un <code><a href="#StressedPf">StressedPf</a></code> por escenario (base, comisiones x2, slippage x2 y x3, y ambos).</p>
+</blockquote>
+</div>
+
+
+                </section>
+                <section id="build_report">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">build_report</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">conn</span><span class="p">:</span> <span class="n">sqlite3</span><span class="o">.</span><span class="n">Connection</span>,</span><span class="param">	<span class="o">*</span>,</span><span class="param">	<span class="n">settings</span><span class="p">:</span> <span class="n"><a href="../config.html#Settings">app.config.Settings</a></span>,</span><span class="param">	<span class="n">frozen_hash</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">'0fa0dd75a3fecdae36f3b77c8b7ec5d97d58a2238349283c61bfa7632188c777'</span>,</span><span class="param">	<span class="n">allow_synthetic_for_tests</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>,</span><span class="param">	<span class="n">docs_dir</span><span class="p">:</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">log_file</span><span class="p">:</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span></span><span class="return-annotation">) -> <span class="n"><a href="#RealMoneyReport">RealMoneyReport</a></span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#build_report"></a>
+    
+            <div class="docstring"><p>Construye el reporte con un orden ESTRUCTURAL: nada lee resultados antes del registro.</p>
+
+<p>1) Gate abierto Y registro oficial: si no, solo "que falta". 2) El veredicto oficial
+debe ser <code>APORTA_VALOR</code>: si no, "no pasar" y nada mas. 3) Solo entonces se evaluan los
+criterios del brazo ejecutado y los riesgos operativos medidos. SOLO RECOMIENDA: v1 es
+100 % paper.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>conn:</strong>  conexion de solo lectura a una COPIA de la base.</li>
+<li><strong>settings:</strong>  configuracion (umbrales).</li>
+<li><strong>frozen_hash:</strong>  hash del prompt de la medicion; por defecto, el congelado.</li>
+<li><strong>allow_synthetic_for_tests:</strong>  acepta otro hash solo con una base positivamente sintetica.</li>
+<li><strong>docs_dir:</strong>  carpeta del registro oficial; por defecto, <code>docs/</code> del repositorio.</li>
+<li><strong>log_file:</strong>  log del bot para contar errores de reconciliacion, o <code>None</code>.</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>El <code><a href="#RealMoneyReport">RealMoneyReport</a></code>.</p>
+</blockquote>
+
+<h6 id="raises">Raises:</h6>
+
+<ul>
+<li><strong>ValueError:</strong>  si el hash no es el congelado y no se pidio el modo sintetico.</li>
+<li><strong>SyntheticGuardError:</strong>  si se pidio el modo sintetico y la base no lo es.</li>
+</ul>
+
+<h6 id="efectos">Efectos:</h6>
+
+<blockquote>
+  <p>Lee <code>llm_logs</code>, <code>shadow_trades</code>, <code>signals</code>, <code>system_state</code>, <code>asset_universe</code>,
+  <code>contract_specs_cache</code>, <code>ohlcv_cache</code>, <code>paper_execution_log</code> y <code>docs/</code>. Solo con el
+  registro oficial en <code>APORTA_VALOR</code> lee <code>trades</code>.</p>
+</blockquote>
+</div>
+
+
+                </section>
+                <section id="DISCLAIMER">
+                    <div class="attr variable">
+            <span class="name">DISCLAIMER</span>        =
+<input id="DISCLAIMER-view-value" class="view-value-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
+            <label class="view-value-button pdoc-button" for="DISCLAIMER-view-value"></label><span class="default_value">&#39;Este reporte solo RECOMIENDA. v1 es 100 % paper trading: nunca habilita ejecucion real (BitunixBackend sigue desactivado). Pasar a dinero real es una decision manual tuya y requeriria una fase nueva.&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#DISCLAIMER"></a>
+    
+    
+
+                </section>
+                <section id="render_report">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">render_report</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">report</span><span class="p">:</span> <span class="n"><a href="#RealMoneyReport">RealMoneyReport</a></span>,</span><span class="param">	<span class="n">settings</span><span class="p">:</span> <span class="n"><a href="../config.html#Settings">app.config.Settings</a></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span></span><span class="return-annotation">) -> <span class="nb">str</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#render_report"></a>
+    
+            <div class="docstring"><p>El reporte de paso a dinero real en texto; termina siempre con el aviso de que es manual.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>report:</strong>  el <code><a href="#RealMoneyReport">RealMoneyReport</a></code>.</li>
+<li><strong>settings:</strong>  configuracion; obligatoria cuando el estado es <code>EVALUADO</code>.</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>El texto del reporte.</p>
+</blockquote>
+</div>
+
+
+                </section>
+    </main>
+</body>
+</html>

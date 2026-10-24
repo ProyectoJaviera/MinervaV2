@@ -577,6 +577,7 @@ reconoce el registro oficial al instante. Los informes **nunca** abren la base v
 | `llm_smoke.py`, `llm_pilot.py` | Prueba mínima y piloto del LLM (**gastan API** con `--real --confirm-real`) | No son de la rutina |
 | `download_history.py`, `run_backtest.py`, `analyze_risk.py`, `compare_fase2_runs.py`, `repair_ohlcv_gaps.py` | Herramientas de la Fase 2 (backtest histórico); no son de la rutina | — |
 | `export_schema_doc.py`, `export_docker_requirements.py` | Regeneran `docs/ESQUEMA_BD.md` y `docker/requirements.lock` (`--check` verifica que estén al día) | — |
+| `build_dev_docs.py`, `dev_docs_facts.py` | Para quien modifica el código: regeneran la documentación técnica de `docs/dev/` (referencia pdoc de `app/` y `scripts/`, hechos derivados de cada archivo y grafo de paquetes); `--check` verifica que esté al día. `dev_docs_facts.py` es una pieza compartida, no se ejecuta sola | — |
 
 ## Archivos y carpetas
 

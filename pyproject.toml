@@ -36,6 +36,9 @@ dev = [
     # Pruebas de la configuracion Docker (Fase 6) y scripts/export_docker_requirements.py.
     "pyyaml>=6.0",
     "packaging>=23",
+    # Referencia de la API interna (scripts/build_dev_docs.py). Version EXACTA: el HTML que
+    # genera cambia entre versiones y docs/dev/api/manifest.json registra con cual se hizo.
+    "pdoc==16.0.0",
 ]
 
 [tool.setuptools.packages.find]
