@@ -167,6 +167,11 @@ class TradeLike(Protocol):
 
 @dataclass
 class RiskScenario:
+    """Una fila de la grilla de riesgo de ruina: margen x posiciones x tope de SL.
+
+    `prob_ruin_pct` y `prob_drawdown_gt_30_pct` son `None` cuando 0 operaciones sobreviven
+    el tope de SL de la fila (escenario informativo, no un error).
+    """
     margin_usdt: float
     max_simultaneous_positions: int
     sl_cap_pct: float
@@ -183,6 +188,7 @@ class RiskScenario:
 
 @dataclass
 class SensitivityScenario:
+    """Una fila de la grilla de sensibilidad: el pool reescalado a un profit factor objetivo."""
     target_pf: float
     margin_usdt: float
     max_simultaneous_positions: int
@@ -202,11 +208,18 @@ def pct_returns_from_trades(trades: list[TradeLike]) -> list[float]:
 def filter_trades_by_sl_cap(
     trades: list[TradeLike], sl_cap_pct: float
 ) -> tuple[list[TradeLike], int]:
-    """Excluye ENTERAS (sin truncar) las operaciones cuyo riesgo planeado al
-    abrir (`sl_margin_loss_pct`, en unidades de porcentaje, p.ej. 35.0 =
-    35%) supera `sl_cap_pct` (fraccion, p.ej. 0.30 = 30%) -- el bot en vivo
-    nunca las habria tomado. Devuelve `(operaciones_incluidas,
-    cantidad_excluida)`, preservando el orden original."""
+    """Excluye ENTERAS las operaciones cuyo riesgo planeado supera el tope de SL.
+
+    El bot en vivo nunca las habria tomado. No se trunca ninguna perdida.
+
+    Args:
+        trades: operaciones del pool.
+        sl_cap_pct: tope como fraccion (0.30 = 30 %); se compara con `sl_margin_loss_pct`,
+            que esta en porcentaje.
+
+    Returns:
+        La tupla `(incluidas, cantidad excluida)`, conservando el orden original.
+    """
     threshold_pct = sl_cap_pct * 100
     kept: list[TradeLike] = []
     excluded = 0
@@ -219,12 +232,21 @@ def filter_trades_by_sl_cap(
 
 
 def rescale_returns_to_target_pf(pct_returns: list[float], target_pf: float) -> list[float]:
-    """Reescala SOLO las perdidas (multiplicador constante) para que el pool
-    alcance exactamente `target_pf`, preservando la distribucion de
-    ganancias y la proporcion relativa entre perdidas -- aisla el efecto de
-    la deriva (profit factor) del efecto de margen/posiciones simultaneas
-    en los escenarios de sensibilidad, sin inventar una distribucion
-    sintetica nueva."""
+    """Reescala SOLO las perdidas para que el pool alcance un profit factor objetivo.
+
+    Preserva la distribucion de las ganancias y la proporcion entre perdidas. Aisla el efecto
+    de la deriva del efecto estructural de margen y posiciones simultaneas.
+
+    Args:
+        pct_returns: retornos por operacion como fraccion del margen.
+        target_pf: profit factor que debe tener el pool reescalado.
+
+    Returns:
+        Los retornos con las perdidas multiplicadas por una constante.
+
+    Raises:
+        ValueError: si el pool no tiene perdidas.
+    """
     gains = sum(r for r in pct_returns if r > 0)
     losses_abs = sum(-r for r in pct_returns if r < 0)
     if losses_abs == 0:
@@ -307,6 +329,28 @@ def run_bootstrap_scenario(
     trial_length: int = DEFAULT_TRIAL_LENGTH,
     block_size: int = 1,
 ) -> RiskScenario:
+    """Estima la probabilidad de ruina y de drawdown > 30 % para un escenario, por bootstrap.
+
+    Filtra el pool por el tope de SL, remuestrea `trial_length` resultados por ensayo (en
+    lotes de `max_simultaneous_positions`) y cuenta ensayos arruinados (el capital cae bajo
+    el margen). Con 0 operaciones elegibles devuelve probabilidades `None`, no una excepcion.
+    Ver el docstring del modulo para las simplificaciones y por que la columna de posiciones
+    simultaneas NO sirve para decidir el limite en vivo.
+
+    Args:
+        trades: operaciones OOS de una estrategia (o varias combinadas).
+        initial_capital: capital inicial, en USDT.
+        margin_usdt: margen por operacion de la fila.
+        max_simultaneous_positions: tamano del lote de la fila.
+        sl_cap_pct: tope de SL como fraccion (`inf` = sin tope).
+        rng: generador aleatorio (compartido, para que la grilla sea reproducible).
+        trials: ensayos por escenario.
+        trial_length: operaciones por ensayo.
+        block_size: 1 = remuestreo i.i.d.; mayor = bloques de operaciones consecutivas.
+
+    Returns:
+        El `RiskScenario` de la fila.
+    """
     kept, excluded = filter_trades_by_sl_cap(trades, sl_cap_pct)
     pct_returns = pct_returns_from_trades(kept)
 
@@ -356,10 +400,24 @@ def run_full_grid(
     seed: int = 42,
     block_size: int = 1,
 ) -> list[RiskScenario]:
-    """Corre `run_bootstrap_scenario` para toda la grilla
-    margen x posiciones x tope-SL, con UN solo `random.Random(seed)`
-    compartido (avanza secuencialmente por toda la grilla en un orden
-    fijo) -- reproducible de punta a punta con un solo seed."""
+    """Corre la grilla margen x posiciones x tope de SL con un solo generador aleatorio.
+
+    Reproducible de punta a punta con una sola semilla (el generador avanza en orden fijo).
+
+    Args:
+        trades: operaciones OOS del pool.
+        initial_capital: capital inicial, en USDT.
+        margins: margenes a probar.
+        position_caps: topes de posiciones simultaneas a probar.
+        sl_caps: topes de SL a probar (fracciones; `inf` = sin tope).
+        trials: ensayos por escenario.
+        trial_length: operaciones por ensayo.
+        seed: semilla del generador.
+        block_size: tamano de bloque del remuestreo.
+
+    Returns:
+        Un `RiskScenario` por combinacion, en el orden margen, posiciones, tope.
+    """
     rng = random.Random(seed)
     return [
         run_bootstrap_scenario(
@@ -382,11 +440,27 @@ def run_sensitivity_grid(
     trial_length: int = DEFAULT_TRIAL_LENGTH,
     seed: int = 42,
 ) -> list[SensitivityScenario]:
-    """Reescala `pct_returns` a cada `target_pf` (ver
-    `rescale_returns_to_target_pf`) y corre la grilla margen x posiciones
-    (sin tope de SL -- ya aplicado, si corresponde, por el llamador antes
-    de pasar `pct_returns`) -- aisla el efecto de la deriva del efecto
-    estructural de margen/posiciones simultaneas."""
+    """Reescala el pool a cada profit factor objetivo y corre la grilla margen x posiciones.
+
+    Aisla el efecto de la deriva del efecto estructural. No aplica tope de SL: el llamador
+    ya lo aplico, si corresponde, al armar `pct_returns`.
+
+    Args:
+        pct_returns: retornos por operacion como fraccion del margen.
+        initial_capital: capital inicial, en USDT.
+        margins: margenes a probar.
+        position_caps: topes de posiciones simultaneas a probar.
+        target_pfs: profit factors objetivo.
+        trials: ensayos por escenario.
+        trial_length: operaciones por ensayo.
+        seed: semilla del generador.
+
+    Returns:
+        Un `SensitivityScenario` por combinacion.
+
+    Raises:
+        ValueError: si el pool no tiene perdidas (ver `rescale_returns_to_target_pf`).
+    """
     rng = random.Random(seed)
     results = []
     for target_pf in target_pfs:
@@ -407,6 +481,14 @@ def run_sensitivity_grid(
 
 
 def format_markdown_table(results: list[RiskScenario]) -> str:
+    """Tabla Markdown de los escenarios de riesgo.
+
+    Args:
+        results: escenarios de `run_full_grid`.
+
+    Returns:
+        El texto Markdown; los escenarios sin operaciones elegibles salen como `n/a`.
+    """
     lines = [
         "| Margen (USDT) | Máx. posiciones simultáneas | Tope SL (% margen) "
         "| Bloque | Excluidas por tope | Incluidas | P(ruina) | P(drawdown > 30%) |",
@@ -430,6 +512,14 @@ def format_markdown_table(results: list[RiskScenario]) -> str:
 
 
 def format_sensitivity_table(results: list[SensitivityScenario]) -> str:
+    """Tabla Markdown de los escenarios de sensibilidad.
+
+    Args:
+        results: escenarios de `run_sensitivity_grid`.
+
+    Returns:
+        El texto Markdown.
+    """
     lines = [
         "| PF objetivo | Margen (USDT) | Máx. posiciones simultáneas "
         "| P(ruina) | P(drawdown > 30%) |",

@@ -22,6 +22,7 @@ from app.persistence.models import Side
 
 @dataclass(frozen=True)
 class OpenFill:
+    """Resultado de abrir una posicion: cantidad, nocional y comision de entrada."""
     qty: float
     notional_usdt: float
     fee_entry_usdt: float
@@ -29,6 +30,7 @@ class OpenFill:
 
 @dataclass(frozen=True)
 class CloseResult:
+    """Resultado de cerrar una posicion: comision de salida, PnL bruto y PnL neto."""
     fee_exit_usdt: float
     pnl_gross_usdt: float
     pnl_net_usdt: float
@@ -37,6 +39,21 @@ class CloseResult:
 def compute_open_fill(
     margin_usdt: float, leverage: int, entry_price: float, taker_fee_pct: float
 ) -> OpenFill:
+    """Cantidad, nocional y comision de entrada de una apertura.
+
+    Se usa tanto en la cuenta paper en vivo como en el backtest, para que una estrategia se
+    comporte igual en ambos. `nocional = margen * leverage`, `qty = nocional / precio` y
+    `comision = nocional * taker_fee_pct`.
+
+    Args:
+        margin_usdt: margen, en USDT.
+        leverage: apalancamiento.
+        entry_price: precio de entrada.
+        taker_fee_pct: comision taker como fraccion (0.0006 = 0.06 %).
+
+    Returns:
+        El `OpenFill`.
+    """
     notional = margin_usdt * leverage
     qty = notional / entry_price
     fee_entry = notional * taker_fee_pct
@@ -52,10 +69,23 @@ def compute_close_result(
     taker_fee_pct: float,
     extra_costs_usdt: float = 0.0,
 ) -> CloseResult:
-    """`extra_costs_usdt` permite sumar costos adicionales ya calculados en
-    USDT (slippage, funding) sin acoplar este modulo a como se calculan --
-    el llamador los computa y los pasa aqui, se restan del PnL neto igual
-    que las comisiones."""
+    """Comision de salida y PnL bruto y neto de un cierre.
+
+    `pnl_neto = pnl_bruto - comision de entrada - comision de salida - costos extra`.
+
+    Args:
+        side: direccion de la posicion.
+        qty: cantidad.
+        entry_price: precio de entrada.
+        exit_price: precio de salida.
+        fee_entry_usdt: comision de entrada ya pagada.
+        taker_fee_pct: comision taker como fraccion.
+        extra_costs_usdt: costos adicionales ya calculados (slippage, funding), que se
+            restan igual que las comisiones sin acoplar este modulo a como se calculan.
+
+    Returns:
+        El `CloseResult`.
+    """
     exit_notional = qty * exit_price
     fee_exit = exit_notional * taker_fee_pct
 

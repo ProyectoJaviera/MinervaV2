@@ -27,6 +27,17 @@ DEFAULT_MMR_FALLBACK = 0.005  # 0.5%, conservador si no hay tiers cacheados
 
 
 def maintenance_margin_rate_for_notional(margin_tiers_json: str | None, notional: float) -> float:
+    """Tasa de margen de mantenimiento del tramo que corresponde a un nocional.
+
+    Args:
+        margin_tiers_json: `contract_specs_cache.margin_tiers_json` (tramos de Bitunix), o
+            `None`.
+        notional: nocional de la posicion, en USDT.
+
+    Returns:
+        La tasa del tramo, o `DEFAULT_MMR_FALLBACK` (0.5 %, conservador) si no hay tramos,
+        el JSON es invalido o ningun tramo contiene el nocional.
+    """
     if not margin_tiers_json:
         return DEFAULT_MMR_FALLBACK
     try:
@@ -46,6 +57,22 @@ def maintenance_margin_rate_for_notional(margin_tiers_json: str | None, notional
 def compute_liquidation_price(
     side: Side, entry_price: float, leverage: int, notional: float, margin_tiers_json: str | None
 ) -> float:
+    """Precio de liquidacion en margen aislado.
+
+    Aproxima el margen de mantenimiento sobre el nocional de ENTRADA (simplificacion
+    estandar). LONG: `entrada * (1 - 1/leverage + MMR)`; SHORT: `entrada * (1 + 1/leverage -
+    MMR)`.
+
+    Args:
+        side: direccion de la posicion.
+        entry_price: precio de entrada.
+        leverage: apalancamiento.
+        notional: nocional de la posicion, en USDT (elige el tramo de MMR).
+        margin_tiers_json: tramos de margen del contrato, o `None`.
+
+    Returns:
+        El precio al que se liquida la posicion.
+    """
     mmr = maintenance_margin_rate_for_notional(margin_tiers_json, notional)
     inv_leverage = 1.0 / leverage
     if side == Side.LONG:

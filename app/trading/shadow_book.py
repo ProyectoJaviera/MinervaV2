@@ -41,19 +41,50 @@ logger = get_logger(__name__)
 
 
 def signal_group_key(symbol: str, side_value: str, candle_close_time: datetime) -> str:
+    """La clave unica de una senal agrupada: `simbolo|direccion|cierre de la vela`.
+
+    Es la clave de `shadow_trades.signal_group_key`, de `llm_logs` y de
+    `paper_execution_log`: el hilo que une una senal con su sombra, su etiqueta y su
+    ejecucion.
+
+    Args:
+        symbol: simbolo.
+        side_value: `LONG` o `SHORT`.
+        candle_close_time: cierre de la vela evaluada.
+
+    Returns:
+        El texto de la clave.
+    """
     return f"{symbol}|{side_value}|{candle_close_time.isoformat()}"
 
 
 class ShadowBook:
+    """El libro de operaciones sombra: una por senal agrupada, con margen ilimitado.
+
+    Usa las mismas funciones que `PaperBackend` para llenado, niveles, slippage, funding y
+    cierre, de modo que una senal tenga el mismo PnL en ambas cuentas. Dos diferencias
+    deliberadas: permite solapes (una sombra nueva se abre aunque otra del mismo simbolo
+    y direccion siga abierta, para que una RECHAZADA no bloquee a la siguiente) y entra al
+    precio de cierre de la vela evaluada, sin demora ni slippage de llenado.
+    """
     def __init__(self, db: Database, settings: Settings) -> None:
         self.db = db
         self.settings = settings
         self._lock = asyncio.Lock()
 
     async def open_candidate(self, candidate: SignalCandidate) -> ShadowTrade | None:
-        """Abre la operacion sombra de una senal agrupada, una sola vez por
-        (simbolo, direccion, vela). Devuelve None si ya existia o si los niveles de la
-        estrategia representante no son validos para ese precio."""
+        """Abre la sombra de una senal agrupada, una sola vez por simbolo, direccion y vela.
+
+        Args:
+            candidate: la senal agrupada.
+
+        Returns:
+            La sombra abierta, o `None` si ya existia o si los niveles de la estrategia
+            representante no son validos para ese precio.
+
+        Efectos:
+            Lee `contract_specs_cache`; escribe `shadow_trades` (INSERT OR IGNORE).
+        """
         representative = pick_representative_strategy(
             candidate.contributing_strategies, self.settings
         )
@@ -118,9 +149,29 @@ class ShadowBook:
         return trade
 
     async def load_open(self) -> list[ShadowTrade]:
+        """Las sombras abiertas.
+
+        Returns:
+            Lista de `ShadowTrade` con `status = 'OPEN'`.
+
+        Efectos:
+            Lee `shadow_trades`.
+        """
         return await shadow_repo.get_open(self.db)
 
     async def accrue_funding(self, trade: ShadowTrade, until_ms: int) -> ShadowTrade:
+        """Aplica y guarda el funding pendiente de una sombra.
+
+        Args:
+            trade: la sombra.
+            until_ms: tope de la ventana, en ms Unix.
+
+        Returns:
+            La sombra con el funding actualizado.
+
+        Efectos:
+            Lee `funding_cache`; escribe `shadow_trades` (funding acumulado).
+        """
         accrual = await compute_funding_accrual(self.db, trade, until_ms)
         if accrual is None:
             return trade
@@ -131,6 +182,14 @@ class ShadowBook:
         )
 
     async def update_risk(self, trade: ShadowTrade) -> None:
+        """Guarda el mejor precio y el stop efectivo del trailing de una sombra.
+
+        Args:
+            trade: la sombra con el estado de trailing ya actualizado en memoria.
+
+        Efectos:
+            Escribe `shadow_trades` (`effective_stop` y `best_price`).
+        """
         await shadow_repo.update_risk_state(
             self.db, trade.id, trade.effective_stop, trade.best_price
         )
@@ -143,6 +202,24 @@ class ShadowBook:
         closed_at: datetime | None = None,
         fill_source: str = "TICK",
     ) -> ShadowTrade | None:
+        """Cierra una sombra a un precio explicito liquidando su PnL real; idempotente.
+
+        No hace nada si la sombra ya estaba cerrada. Aplica antes el funding pendiente y
+        liquida con `settle_close`, bajo el candado del libro.
+
+        Args:
+            trade: la sombra.
+            exit_price: precio de salida.
+            reason: motivo del cierre (`SL`, `TP`, `TRAILING`, `LIQUIDATION`).
+            closed_at: hora de cierre; por defecto, ahora (UTC).
+            fill_source: como se lleno (`TICK`, `CANDLE_RECON`, ...).
+
+        Returns:
+            La sombra cerrada, o `None` si ya estaba cerrada o no existe.
+
+        Efectos:
+            Lee `funding_cache`; escribe `shadow_trades` (funding y cierre).
+        """
         closed_at = closed_at or datetime.now(UTC)
         async with self._lock:
             current = await shadow_repo.get(self.db, trade.id)
@@ -164,13 +241,24 @@ class ShadowBook:
     async def close_unreliable(
         self, trade: ShadowTrade, closed_at: datetime | None = None
     ) -> ShadowTrade | None:
-        """Cierre administrativo SIN PnL (incidente de estabilidad 2026-10-10, Etapa
-        2c): la reconciliacion de esta sombra fallo `MAX_SHADOW_RECONCILE_ATTEMPTS`
-        veces seguidas (`app/trading/position_monitor.py`) -- no hubo velas 1m
-        suficientes para reconstruir el periodo caido, asi que no se le atribuye
-        ganancia ni perdida. Se marca `close_reason='RECONCILE_FAILED'` y queda
-        excluida de `ai_value_verdict` (`shadow_repo.get_unreliable_signal_group_keys`),
-        a diferencia de `close()` que SIEMPRE liquida PnL real via `settle_close`."""
+        """Cierre administrativo SIN PnL de una sombra cuya reconciliacion fallo demasiadas veces.
+
+        Incidente de estabilidad 2026-10-10, Etapa 2c: no hubo velas de 1 minuto suficientes
+        para reconstruir el periodo caido, asi que no se le atribuye ganancia ni perdida. Se
+        marca `close_reason = 'RECONCILE_FAILED'` y queda excluida de `ai_value_verdict`
+        (`shadow_repo.get_unreliable_signal_group_keys`), a diferencia de `close`, que SIEMPRE
+        liquida PnL real.
+
+        Args:
+            trade: la sombra.
+            closed_at: hora de cierre; por defecto, ahora (UTC).
+
+        Returns:
+            La sombra cerrada, o `None` si ya estaba cerrada o no existe.
+
+        Efectos:
+            Escribe `shadow_trades` (cierre con comisiones y PnL en cero).
+        """
         closed_at = closed_at or datetime.now(UTC)
         async with self._lock:
             current = await shadow_repo.get(self.db, trade.id)

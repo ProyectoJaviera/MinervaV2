@@ -11,8 +11,27 @@ from __future__ import annotations
 
 
 def entry_slippage_usdt(notional_usdt: float, slippage_bps: float) -> float:
+    """Slippage de entrada como costo plano: `nocional * bps / 10000`.
+
+    Args:
+        notional_usdt: nocional, en USDT.
+        slippage_bps: puntos basicos (`BACKTEST_SLIPPAGE_BPS`).
+
+    Returns:
+        El costo en USDT.
+    """
     return notional_usdt * (slippage_bps / 10_000)
 
 
 def exit_slippage_usdt(qty: float, exit_price: float, slippage_bps: float) -> float:
+    """Slippage de salida como costo plano: `qty * precio de salida * bps / 10000`.
+
+    Args:
+        qty: cantidad.
+        exit_price: precio de salida.
+        slippage_bps: puntos basicos (`BACKTEST_SLIPPAGE_BPS`).
+
+    Returns:
+        El costo en USDT.
+    """
     return (qty * exit_price) * (slippage_bps / 10_000)

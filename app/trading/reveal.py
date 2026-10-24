@@ -16,6 +16,22 @@ HIDDEN_RESULTS = "ocultos hasta el registro oficial del veredicto (regla del 202
 
 
 async def reveal_allowed(db: Database) -> bool:
+    """La puerta de los resultados de la cuenta paper para la API, el dashboard y Telegram.
+
+    Es `is_outcome_reveal_allowed` pero FALLA CERRADO: ante cualquier error al evaluarla,
+    los resultados siguen ocultos.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        True solo si el gate de la medicion esta abierto Y existe el registro oficial del
+        veredicto.
+
+    Efectos:
+        Lee `llm_logs`, `shadow_trades`, `signals` y el directorio `docs/` (busca el
+        registro oficial). No lee PnL.
+    """
     try:
         return is_outcome_reveal_allowed(await compute_status_async(db))
     except Exception as exc:  # noqa: BLE001 - ante la duda, no se muestra ningun resultado

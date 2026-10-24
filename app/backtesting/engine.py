@@ -75,6 +75,11 @@ MAX_LOOKBACK_BARS = 300
 
 @dataclass
 class RawTrade:
+    """Una operacion simulada por el motor de backtest, antes de persistirse como `BacktestTrade`.
+
+    `close_reason` es `SL`, `TRAILING`, `LIQUIDATION`, `TP` o `END_OF_DATA`;
+    `slippage_cost_usdt` suma el slippage de entrada y de salida.
+    """
     strategy: str
     symbol: str
     timeframe: str
@@ -99,6 +104,11 @@ class RawTrade:
 
 @dataclass
 class RawSkip:
+    """Una entrada que el motor omitio porque su SL perderia mas del tope sobre el margen.
+
+    Se persiste como `BacktestSkippedEntry`; `intended_sl_margin_loss_pct` es el riesgo que
+    habria tenido.
+    """
     strategy: str
     symbol: str
     timeframe: str
@@ -141,6 +151,40 @@ async def run_backtest(
     settings: Settings,
     now_ms: int | None = None,
 ) -> tuple[list[RawTrade], list[RawSkip]]:
+    """Simula una estrategia sobre un simbolo y timeframe: una posicion a la vez, sin red.
+
+    La senal evaluada con la vela `i` cerrada se llena en el OPEN de la vela `i + 1` (sin
+    sesgo de anticipacion). La liquidacion se evalua con MARK_PRICE y el SL/TP con
+    LAST_PRICE; la propia vela de entrada tambien se evalua contra SL, TP, liquidacion y
+    funding. El trailing actualizado en una vela solo puede disparar en una posterior. La
+    entrada se omite si su SL perderia mas de `MAX_SL_MARGIN_LOSS_PCT` del margen. Los
+    indicadores se precalculan una vez y la estrategia ve ventanas de `MAX_LOOKBACK_BARS`.
+    Si hay menos de 60 velas alineadas devuelve listas vacias.
+
+    Args:
+        db: conexion a la base (solo lectura de caches).
+        strategy: instancia de la estrategia.
+        strategy_name: nombre con el que se etiquetan las operaciones.
+        symbol: simbolo, p. ej. `BTCUSDT`.
+        timeframe: intervalo de las velas.
+        start_time_ms: inicio del rango, en ms Unix.
+        end_time_ms: fin del rango, en ms Unix.
+        settings: configuracion (margen, apalancamiento, comision, slippage, topes).
+        now_ms: instante actual en ms (para descartar la vela en formacion); por defecto,
+            el reloj real. Existe para que las pruebas sean deterministas.
+
+    Returns:
+        La tupla `(operaciones, entradas omitidas)`.
+
+    Raises:
+        ValueError: si el timeframe es desconocido.
+        MissingHistoricalDataError: si faltan velas en `ohlcv_cache` (hay que correr antes
+            `scripts/download_history.py`).
+
+    Efectos:
+        Lee `ohlcv_cache` (LAST_PRICE y MARK_PRICE), `ohlcv_floor`, `ohlcv_series_complete`,
+        `funding_cache` y `contract_specs_cache`. No escribe en la base ni usa la red.
+    """
     step_ms = interval_to_ms(timeframe)
     if step_ms is None:
         raise ValueError(f"Intervalo desconocido para backtest: {timeframe}")

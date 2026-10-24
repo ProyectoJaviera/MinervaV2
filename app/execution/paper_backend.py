@@ -39,12 +39,24 @@ logger = get_logger(__name__)
 
 
 class InsufficientRiskBudgetError(RuntimeError):
-    """La operacion no cumple el minimo operable del contrato de Bitunix
-    (`spec.min_trade_volume`) una vez aplicado el margen que aprobo el
-    motor de riesgo."""
+    """La operacion no llega al minimo operable del contrato tras el margen que aprobo el riesgo.
+
+    Se lanza cuando la cantidad es menor que `min_trade_volume` del contrato de Bitunix.
+    El brazo ejecutado la registra como `BELOW_MIN_ORDER`.
+    """
 
 
 class PaperBackend(ExecutionBackend):
+    """La cuenta paper: unica implementacion ACTIVA de `ExecutionBackend` en v1.
+
+    Usa el precio de mercado real de Bitunix (`markPrice` del ticker, o el ultimo precio si
+    falta) para abrir y cerrar cuando el monitor no aporta uno, y aplica la comision taker
+    configurada. Nunca envia ordenes reales: lee datos publicos y escribe en la base local.
+    `open_position` pasa por el motor de riesgo (que puede bloquear o reducir el margen);
+    los cierres nunca pasan por el. Un candado serializa aperturas y cierres, para que el
+    conteo de posiciones del riesgo no cambie entre la aprobacion y el INSERT, y para que
+    dos cierres concurrentes de la misma posicion no la liquiden dos veces.
+    """
     def __init__(self, db: Database, rest_client: BitunixRestClient, settings: Settings) -> None:
         self.db = db
         self.rest_client = rest_client
@@ -64,9 +76,23 @@ class PaperBackend(ExecutionBackend):
         return float(ticker.get("markPrice") or ticker["lastPrice"])
 
     async def get_equity(self, marks: dict[str, float] | None = None) -> float:
-        """Capital realizado MAS PnL flotante neto de las posiciones abiertas
-        (menos el funding ya acumulado). `marks` (precio por simbolo) evita pedir
-        cada precio por REST cuando el llamador ya lo tiene."""
+        """Capital realizado MAS el PnL flotante neto de las posiciones abiertas.
+
+        El PnL flotante descuenta el funding ya acumulado y el slippage.
+
+        Args:
+            marks: precio por simbolo que el llamador ya tiene; evita un pedido REST por cada
+                posicion abierta. Los simbolos que falten se consultan por REST.
+
+        Returns:
+            El equity en USDT.
+
+        Raises:
+            ValueError: si Bitunix no devuelve ticker de un simbolo con posicion abierta.
+
+        Efectos:
+            Lee `trades`. Red: GET `tickers` a Bitunix por cada simbolo abierto sin precio dado.
+        """
         balance = await self.get_balance()
         positions = await trades_repo.get_open_positions(self.db)
         if not positions:
@@ -80,9 +106,18 @@ class PaperBackend(ExecutionBackend):
         return balance + unrealized
 
     def unrealized_pnl_usdt(self, position: Trade, mark: float) -> float:
-        """PnL flotante neto de UNA posicion abierta al precio `mark`: cierre
-        hipotetico con comisiones, menos el funding ya acumulado, el slippage de
-        entrada y el de salida estimado. Sin red: el llamador aporta el mark."""
+        """PnL flotante neto de UNA posicion abierta al precio `mark`.
+
+        Es el de un cierre hipotetico con comisiones, menos el funding acumulado, el slippage de
+        entrada y el de salida estimado. No usa la red: el llamador aporta el precio.
+
+        Args:
+            position: la posicion abierta.
+            mark: precio de valoracion.
+
+        Returns:
+            El PnL flotante neto en USDT.
+        """
         result = compute_close_result(
             position.side, position.qty, position.entry_price, mark,
             position.fee_entry_usdt, self.settings.taker_fee_pct,
@@ -106,6 +141,39 @@ class PaperBackend(ExecutionBackend):
         decision_source: str | None = None,
         levels: StrategyLevels | None = None,
     ) -> Trade:
+        """Abre una posicion en la cuenta paper, si el motor de riesgo lo permite.
+
+        Bajo el candado de la cuenta: calcula el equity, pide permiso a
+        `risk_engine.check_new_entry` (que registra el rechazo y puede reducir el margen),
+        comprueba el volumen minimo del contrato, resuelve los niveles de SL, TP, trailing y
+        liquidacion al precio de llenado y guarda la operacion. El precio de llenado es el
+        `markPrice` del ticker en ese instante. Sin `decision_source`, queda `MANUAL` si
+        `is_manual` y `SIN_LLM` si no.
+
+        Args:
+            symbol: simbolo, p. ej. `BTCUSDT`.
+            side: direccion.
+            margin_usdt: margen solicitado, en USDT (el riesgo puede reducirlo).
+            leverage: apalancamiento.
+            strategy: estrategia que origina la entrada.
+            sl_margin_loss_pct: riesgo planeado al abrir (porcentaje del margen).
+            is_manual: True para una entrada manual.
+            decision_source: origen de la decision (p. ej. `LLM_APROBADA` desde el brazo).
+            levels: niveles crudos de la estrategia (`StrategyLevels`), o `None` para usar el
+                respaldo porcentual.
+
+        Returns:
+            La operacion abierta, con `id`.
+
+        Raises:
+            RiskRejectedError: si el motor de riesgo bloquea la entrada.
+            InsufficientRiskBudgetError: si la cantidad queda bajo el minimo operable.
+            ValueError: si Bitunix no devuelve ticker del simbolo.
+
+        Efectos:
+            Lee `trades`, `system_state`, `contract_specs_cache`; escribe `trades` (INSERT) y,
+            en el motor de riesgo, `risk_rejections` y `system_state`. Red: GET `tickers`.
+        """
         async with self._state_lock:
             equity = await self.get_equity()
             decision = await risk_engine.check_new_entry(
@@ -175,6 +243,21 @@ class PaperBackend(ExecutionBackend):
             return trade
 
     async def close_position(self, trade_id: int, reason: str = "MANUAL") -> Trade:
+        """Cierra una posicion al precio de mercado actual (cierre manual).
+
+        Args:
+            trade_id: `trades.id` de la posicion.
+            reason: motivo del cierre.
+
+        Returns:
+            La operacion cerrada.
+
+        Raises:
+            ValueError: si la operacion no existe o ya estaba cerrada.
+
+        Efectos:
+            Ver `close_if_open`. Red: GET `tickers` a Bitunix.
+        """
         trade = await trades_repo.get_trade(self.db, trade_id)
         if trade is None:
             raise ValueError(f"Trade {trade_id} no existe")
@@ -195,11 +278,29 @@ class PaperBackend(ExecutionBackend):
         closed_at: datetime | None = None,
         fill_source: str = "TICK",
     ) -> Trade | None:
-        """Cierra la posicion a `exit_price` (precio explicito: nominal del SL/TP o
-        el observado por el monitor). Devuelve `None` si ya estaba cerrada -- dos
-        disparadores concurrentes no pueden liquidar la misma posicion dos veces.
-        Aplica antes el funding pendiente hasta el instante del cierre. Nunca
-        pasa por el motor de riesgo: los cierres no se bloquean."""
+        """Cierra la posicion a un precio explicito, o no hace nada si ya estaba cerrada.
+
+        Lo usa el monitor (SL, TP, trailing, liquidacion) con el precio nominal o el observado.
+        Bajo el candado de la cuenta: aplica antes el funding pendiente hasta el instante del
+        cierre, liquida comisiones y slippage, guarda el cierre y despues actualiza la racha de
+        perdidas y los trackers de equity del motor de riesgo. Nunca pasa por el motor de
+        riesgo: los cierres no se bloquean.
+
+        Args:
+            trade_id: `trades.id` de la posicion.
+            exit_price: precio de salida.
+            reason: motivo del cierre.
+            closed_at: hora del cierre; por defecto, ahora (UTC).
+            fill_source: como se lleno (`TICK`, `CANDLE_RECON` o `REST_MARK`).
+
+        Returns:
+            La operacion cerrada, o `None` si ya estaba cerrada o no existe.
+
+        Efectos:
+            Lee `trades` y `funding_cache`; escribe `trades` (UPDATE de cierre y de funding) y
+            `system_state` (racha de perdidas, circuit breaker, equity pico). Puede hacer GET
+            `tickers` para el equity posterior.
+        """
         async with self._state_lock:
             trade = await trades_repo.get_trade(self.db, trade_id)
             if trade is None or trade.status != TradeStatus.OPEN:
@@ -238,10 +339,28 @@ class PaperBackend(ExecutionBackend):
             return await trades_repo.get_trade(self.db, trade_id)
 
     async def get_balance(self) -> float:
+        """Capital inicial mas el PnL neto realizado de las operaciones cerradas.
+
+        Lee hasta las 100.000 operaciones mas recientes: el costo crece con la historia.
+
+        Returns:
+            El saldo realizado en USDT (sin PnL flotante).
+
+        Efectos:
+            Lee `trades`.
+        """
         closed_trades = [t for t in await trades_repo.get_trades(self.db, limit=100000)
                           if t.status == TradeStatus.CLOSED]
         realized_pnl = sum(t.pnl_net_usdt or 0.0 for t in closed_trades)
         return self.settings.initial_capital_usdt + realized_pnl
 
     async def get_positions(self) -> list[Trade]:
+        """Las posiciones abiertas de la cuenta paper.
+
+        Returns:
+            Lista de operaciones abiertas, la mas reciente primero.
+
+        Efectos:
+            Lee `trades`.
+        """
         return await trades_repo.get_open_positions(self.db)

@@ -48,7 +48,20 @@ def _verdict_in(path: Path) -> str | None:
 
 
 def find_verdict_record(docs_dir: Path | None = None) -> Path | None:
-    """El primer registro con un veredicto valido, o `None`."""
+    """El primer registro oficial con un veredicto valido.
+
+    Busca `VEREDICTO_3_6_REGISTRO*.txt` en `docs/`. FALLA CERRADO: un archivo ausente, vacio,
+    ilegible, de mas de 1 MB, sin la linea `Veredicto: <X>` o con otro texto no cuenta.
+
+    Args:
+        docs_dir: carpeta donde buscar; por defecto, `docs/` del repositorio.
+
+    Returns:
+        La ruta del registro, o `None`.
+
+    Efectos:
+        Lee el directorio `docs/` y los archivos candidatos.
+    """
     directory = docs_dir if docs_dir is not None else DOCS_DIR
     try:
         candidates = sorted(directory.glob(RECORD_GLOB))
@@ -73,8 +86,18 @@ class VerdictRecordInfo:
 
 
 def parse_verdict_record(path: Path) -> VerdictRecordInfo | None:
-    """`None` si el archivo no es un registro valido (mismas reglas que
-    `find_verdict_record`: falla cerrado)."""
+    """Lee un registro oficial y extrae el veredicto, `MAGNITUD_BAJA` y el bloque citado.
+
+    Args:
+        path: archivo del registro.
+
+    Returns:
+        El `VerdictRecordInfo`, o `None` si el archivo no es un registro valido (mismas
+        reglas que `find_verdict_record`).
+
+    Efectos:
+        Lee el archivo.
+    """
     text = _read_record_text(path)
     if text is None:
         return None
@@ -102,6 +125,16 @@ def parse_verdict_record(path: Path) -> VerdictRecordInfo | None:
 
 
 def load_official_record(docs_dir: Path | None = None) -> VerdictRecordInfo | None:
-    """El registro oficial vigente (el primero con un veredicto valido), ya parseado."""
+    """El registro oficial vigente, ya parseado.
+
+    Args:
+        docs_dir: carpeta donde buscar; por defecto, `docs/` del repositorio.
+
+    Returns:
+        El `VerdictRecordInfo` del primer registro valido, o `None`.
+
+    Efectos:
+        Lee el directorio `docs/` y el registro.
+    """
     path = find_verdict_record(docs_dir)
     return parse_verdict_record(path) if path is not None else None

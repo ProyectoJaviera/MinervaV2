@@ -19,8 +19,23 @@ from app.persistence.repositories import funding_repo, trades_repo
 async def compute_funding_accrual(
     db: Database, trade: Trade, until_ms: int
 ) -> tuple[float, int] | None:
-    """(funding_pagado_nuevo, ultimo_evento_aplicado_ms) o None si no hay eventos
-    nuevos en (ultimo_aplicado, until_ms]. No escribe nada."""
+    """Funding nuevo que corresponde aplicar a una posicion hasta `until_ms`. No escribe nada.
+
+    Suma `nocional * tasa` (signo +1 LONG, -1 SHORT) de los eventos de `funding_cache`
+    posteriores al ultimo ya aplicado (`funding_last_applied_ms`) o a la apertura.
+
+    Args:
+        db: conexion a la base.
+        trade: la posicion (real o sombra).
+        until_ms: tope de la ventana, en ms Unix.
+
+    Returns:
+        La tupla `(funding pagado total nuevo, ultimo evento aplicado en ms)`, o `None` si
+        no hay eventos nuevos.
+
+    Efectos:
+        Lee `funding_cache`.
+    """
     opened_ms = int(trade.opened_at.timestamp() * 1000)
     after_ms = max(opened_ms, trade.funding_last_applied_ms or 0)
     events = await funding_repo.get_funding(db, trade.symbol, after_ms + 1, until_ms)
@@ -34,6 +49,19 @@ async def compute_funding_accrual(
 
 
 async def accrue_funding(db: Database, trade: Trade, until_ms: int) -> Trade:
+    """Aplica y guarda el funding pendiente de una posicion de la cuenta paper.
+
+    Args:
+        db: conexion a la base.
+        trade: la posicion.
+        until_ms: tope de la ventana, en ms Unix.
+
+    Returns:
+        La posicion con el funding actualizado (la misma si no habia eventos nuevos).
+
+    Efectos:
+        Lee `funding_cache`; escribe `trades` (funding acumulado y marca del ultimo evento).
+    """
     accrual = await compute_funding_accrual(db, trade, until_ms)
     if accrual is None:
         return trade

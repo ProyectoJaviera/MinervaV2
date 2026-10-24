@@ -13,6 +13,11 @@ from app.backtesting.engine import RawTrade
 
 @dataclass
 class AggregateMetrics:
+    """Metricas agregadas de un conjunto de operaciones (una celda del backtest).
+
+    `profit_factor` es `inf` si hay ganancias y ninguna perdida, y `None` si no hay
+    operaciones. `max_drawdown_pct` se mide sobre el capital al cierre de cada operacion.
+    """
     winrate: float | None
     profit_factor: float | None
     pnl_gross_total_usdt: float
@@ -27,6 +32,19 @@ class AggregateMetrics:
 
 
 def compute_metrics(trades: list[RawTrade], initial_capital: float) -> AggregateMetrics:
+    """Calcula winrate, profit factor, PnL, drawdown y esperanza de un conjunto de operaciones.
+
+    Una operacion gana si su PnL neto es mayor que 0; el resto cuenta como perdida. El
+    drawdown se mide sobre el capital que resulta de aplicar las operaciones en orden de
+    salida a partir de `initial_capital`.
+
+    Args:
+        trades: operaciones simuladas.
+        initial_capital: capital inicial de la cuenta simulada, en USDT.
+
+    Returns:
+        Las metricas; con 0 operaciones, ceros y `None` en las razones.
+    """
     n = len(trades)
     if n == 0:
         return AggregateMetrics(
@@ -72,6 +90,15 @@ def compute_metrics(trades: list[RawTrade], initial_capital: float) -> Aggregate
 
 
 def profit_factor_only(trades: list[RawTrade]) -> float | None:
+    """Profit factor de un conjunto de operaciones (ganancia bruta neta sobre perdida bruta neta).
+
+    Args:
+        trades: operaciones simuladas.
+
+    Returns:
+        El profit factor; `inf` si no hay perdidas pero si ganancias; `None` si no hay
+        operaciones o todas valen 0.
+    """
     if not trades:
         return None
     gross_profit = sum(t.pnl_net_usdt for t in trades if t.pnl_net_usdt > 0)
@@ -84,6 +111,15 @@ def profit_factor_only(trades: list[RawTrade]) -> float | None:
 def split_is_oos(
     trades: list[RawTrade], oos_boundary: datetime
 ) -> tuple[list[RawTrade], list[RawTrade]]:
+    """Parte las operaciones en in-sample y out-of-sample segun su fecha de entrada.
+
+    Args:
+        trades: operaciones simuladas.
+        oos_boundary: instante donde empieza el periodo OOS.
+
+    Returns:
+        La tupla `(IS, OOS)`: entradas antes del limite y desde el limite.
+    """
     is_trades = [t for t in trades if t.entry_time < oos_boundary]
     oos_trades = [t for t in trades if t.entry_time >= oos_boundary]
     return is_trades, oos_trades
@@ -93,10 +129,21 @@ def walk_forward_folds(
     trades: list[RawTrade], range_start: datetime, range_end: datetime,
     fold_months: int, step_months: int,
 ) -> list[list[RawTrade]]:
-    """Folds superpuestos de `fold_months` de ancho, con paso de
-    `step_months` -- puramente diagnostico (docs/FASE2_PLAN.md: "el OOS es
-    un unico periodo", los folds NO deciden el veredicto, solo informan
-    `pct_folds_positive`)."""
+    """Folds superpuestos de `fold_months` de ancho con paso de `step_months`.
+
+    Es puramente diagnostico: el OOS es un unico periodo y los folds NO deciden el veredicto,
+    solo informan `pct_folds_positive`.
+
+    Args:
+        trades: operaciones simuladas.
+        range_start: inicio del rango total.
+        range_end: fin del rango total.
+        fold_months: ancho de cada fold, en meses.
+        step_months: avance entre folds, en meses.
+
+    Returns:
+        Una lista de operaciones por fold (por fecha de entrada).
+    """
     folds: list[list[RawTrade]] = []
     cursor = range_start
     while cursor < range_end:
@@ -116,8 +163,15 @@ def _add_months(dt: datetime, months: int) -> datetime:
 
 
 def concentration_pct(trades: list[RawTrade]) -> float | None:
-    """Mayor porcentaje del PnL neto total que proviene de UNA sola
-    operacion o de UN solo simbolo (docs/FASE2_PLAN.md seccion C)."""
+    """Mayor porcentaje del PnL neto total que proviene de UNA operacion o de UN simbolo.
+
+    Args:
+        trades: operaciones simuladas.
+
+    Returns:
+        El porcentaje (0-100+), o `None` si no hay operaciones o el PnL neto total no es
+        positivo.
+    """
     total_net = sum(t.pnl_net_usdt for t in trades)
     if total_net <= 0 or not trades:
         return None
@@ -132,10 +186,20 @@ def concentration_pct(trades: list[RawTrade]) -> float | None:
 def stressed_profit_factor(
     trades: list[RawTrade], fee_multiplier: float, slippage_multiplier: float
 ) -> float | None:
-    """Recomputa el PnL neto de cada trade con fees y slippage multiplicados
-    (prueba de estrategia, docs/FASE2_PLAN.md punto 2) -- sin re-simular: el
-    PnL bruto y el funding no cambian, solo los costos de fee/slippage ya
-    registrados por operacion."""
+    """Profit factor tras multiplicar comisiones y slippage, sin volver a simular.
+
+    El PnL bruto y el funding no cambian; solo se rescalan los costos de comision y slippage
+    ya registrados por operacion.
+
+    Args:
+        trades: operaciones simuladas.
+        fee_multiplier: factor sobre las comisiones (p. ej. 2.0).
+        slippage_multiplier: factor sobre el slippage (p. ej. 2.0).
+
+    Returns:
+        El profit factor estresado; `inf` si no hay perdidas pero si ganancias; `None` si no
+        hay operaciones.
+    """
     stressed_pnls = [
         t.pnl_gross_usdt
         - fee_multiplier * (t.fee_entry_usdt + t.fee_exit_usdt)
@@ -153,8 +217,14 @@ def stressed_profit_factor(
 
 
 def benchmark_buy_and_hold(closes: list[float]) -> tuple[float, float]:
-    """Retorno total (%) y drawdown maximo (%) de comprar y mantener desde
-    la primera hasta la ultima vela del rango (sin apalancamiento)."""
+    """Retorno total y drawdown maximo de comprar y mantener durante el rango, sin apalancar.
+
+    Args:
+        closes: precios de cierre del rango, en orden.
+
+    Returns:
+        La tupla `(retorno total %, drawdown maximo %)`; `(0.0, 0.0)` con menos de 2 precios.
+    """
     if len(closes) < 2:
         return 0.0, 0.0
     start = closes[0]
@@ -170,6 +240,14 @@ def benchmark_buy_and_hold(closes: list[float]) -> tuple[float, float]:
 
 
 def pct_symbols_with_pf_gt1(trades: list[RawTrade]) -> float | None:
+    """Porcentaje de simbolos cuyo profit factor supera 1.
+
+    Args:
+        trades: operaciones simuladas (de varios simbolos).
+
+    Returns:
+        El porcentaje (0-100), o `None` si no hay operaciones.
+    """
     by_symbol: dict[str, list[RawTrade]] = defaultdict(list)
     for t in trades:
         by_symbol[t.symbol].append(t)
@@ -182,6 +260,15 @@ def pct_symbols_with_pf_gt1(trades: list[RawTrade]) -> float | None:
 
 
 def pct_folds_positive(folds: list[list[RawTrade]], min_trades_per_cell: int) -> float | None:
+    """Porcentaje de folds con PnL neto positivo, entre los que tienen suficientes operaciones.
+
+    Args:
+        folds: operaciones por fold (ver `walk_forward_folds`).
+        min_trades_per_cell: minimo de operaciones para que un fold cuente.
+
+    Returns:
+        El porcentaje (0-100), o `None` si ningun fold alcanza el minimo.
+    """
     eligible = [f for f in folds if len(f) >= min_trades_per_cell]
     if not eligible:
         return None
@@ -190,8 +277,14 @@ def pct_folds_positive(folds: list[list[RawTrade]], min_trades_per_cell: int) ->
 
 
 def margin_loss_distribution(trades: list[RawTrade]) -> dict[str, float]:
-    """Distribucion del % de margen perdido al tocar el SL (punto 1 de los
-    ajustes de Fase 2) -- solo sobre operaciones cerradas por SL/TRAILING."""
+    """Distribucion del porcentaje de margen perdido al tocar el SL, para operaciones SL o TRAILING.
+
+    Args:
+        trades: operaciones simuladas.
+
+    Returns:
+        Diccionario con `count`, `mean`, `median` y `max`; ceros si no hay datos.
+    """
     sl_trades = [t for t in trades if t.close_reason in ("SL", "TRAILING") and t.sl_margin_loss_pct]
     values = sorted(t.sl_margin_loss_pct for t in sl_trades)  # type: ignore[misc]
     if not values:
@@ -205,6 +298,10 @@ def margin_loss_distribution(trades: list[RawTrade]) -> dict[str, float]:
 
 @dataclass
 class PortfolioSimResult:
+    """Resultado de una simulacion de cartera de una sola corrida.
+
+    `mtm_max_drawdown_pct` incluye el PnL flotante interpolado de las posiciones abiertas.
+    """
     final_capital_usdt: float
     max_drawdown_pct: float
     mtm_max_drawdown_pct: float
@@ -287,32 +384,26 @@ def simulate_portfolio(
     max_simultaneous_positions: int,
     margin_per_trade: float,
 ) -> PortfolioSimResult:
-    """Simula UNA sola cuenta compartida entre todos los simbolos/timeframes
-    de una estrategia (en vez del supuesto, irreal, de capital y margen
-    ilimitados por celda que usa `run_backtest`) -- metrica INFORMATIVA
-    agregada posterior, no participa en los criterios de descarte
-    congelados (docs/FASE2_CRITERIOS.md).
+    """Simula UNA cuenta compartida por todos los simbolos y timeframes de una estrategia.
 
-    Reglas: capital inicial `initial_capital`; cada operacion usa un margen
-    fijo (`t.margin_usdt`, igual para todas en la practica); como maximo
-    `max_simultaneous_positions` operaciones abiertas a la vez; una
-    operacion que no tenga margen disponible o exceda el tope de
-    posiciones simultaneas en su `entry_time` se OMITE de la cuenta (no se
-    fuerza un tamano distinto -- simplemente no hay espacio). El capital
-    nunca queda negativo (una perdida que superaria el capital restante
-    se trunca en el cierre, caso extremo de "cuenta liquidada").
+    Reemplaza el supuesto irreal de capital ilimitado por celda de `run_backtest`. Es una
+    metrica INFORMATIVA posterior: no participa en los criterios de descarte congelados.
+    Cada operacion usa un margen fijo; se admiten como maximo `max_simultaneous_positions`
+    abiertas a la vez; una operacion sin margen disponible o sin cupo en su `entry_time` se
+    OMITE (no se fuerza otro tamano). El capital nunca queda negativo. En empates de
+    `entry_time` manda el orden de `trades` (el Monte Carlo lo baraja). Limitacion: las
+    operaciones se generaron de forma independiente, asi que omitir una no cambia las demas.
 
-    Desempate en `entry_time`: `sorted()` es estable, asi que dos
-    operaciones con el mismo `entry_time` se procesan en el orden en que
-    aparezcan en `trades` -- el llamador decide ese orden (ver
-    `simulate_portfolio_monte_carlo`, que lo baraja para no sesgar
-    sistematicamente la admision hacia el mismo simbolo).
+    Args:
+        trades: operaciones simuladas de la estrategia.
+        initial_capital: capital inicial, en USDT.
+        max_simultaneous_positions: tope de posiciones abiertas a la vez.
+        margin_per_trade: margen exigido por operacion, en USDT.
 
-    Limitacion documentada: los trades de entrada se generaron de forma
-    INDEPENDIENTE por simbolo/timeframe (sin conocimiento de esta cuenta
-    compartida) -- omitir una operacion aqui no cambia las demas (no hay
-    retroalimentacion). Es una aproximacion razonable para una cifra
-    informativa, no una re-simulacion completa consciente de cartera."""
+    Returns:
+        El capital final, el drawdown al cierre y mark-to-market, la concentracion y cuantas
+        operaciones se admitieron y se omitieron.
+    """
     ordered = sorted(trades, key=lambda t: t.entry_time)
     open_positions: list[RawTrade] = []
     capital = initial_capital
@@ -404,16 +495,23 @@ def simulate_portfolio_monte_carlo(
     runs: int = 200,
     seed: int = 42,
 ) -> PortfolioSimSummary:
-    """Corre `simulate_portfolio` `runs` veces; en cada corrida se baraja
-    una COPIA de `trades` con una semilla fija derivada de `seed` antes de
-    pasarla -- como `simulate_portfolio` ordena con `sorted()` (estable),
-    barajar la lista completa de antemano solo cambia el orden relativo de
-    las operaciones EMPATADAS en `entry_time` (las demas quedan igual,
-    `sorted()` las reordena correctamente por tiempo sin importar el orden
-    de entrada). Reporta mediana y rango p10-p90 de capital final y de
-    ambos drawdowns (realizado y mark-to-market) sobre las `runs`
-    corridas -- sigue siendo informativo, no participa en los criterios
-    de descarte congelados."""
+    """Corre `simulate_portfolio` `runs` veces barajando el desempate de `entry_time`.
+
+    Evita que el orden alfabetico por simbolo sesgue que operaciones se admiten cuando hay
+    mas senales que cupos. Usa una semilla fija: es reproducible. Reporta mediana y rango
+    p10-p90 de capital final y de ambos drawdowns. Sigue siendo informativo.
+
+    Args:
+        trades: operaciones simuladas de la estrategia.
+        initial_capital: capital inicial, en USDT.
+        max_simultaneous_positions: tope de posiciones abiertas a la vez.
+        margin_per_trade: margen exigido por operacion, en USDT.
+        runs: numero de corridas.
+        seed: semilla del generador aleatorio.
+
+    Returns:
+        El `PortfolioSimSummary` con medianas y percentiles.
+    """
     rng = random.Random(seed)
     final_capitals: list[float] = []
     drawdowns: list[float] = []

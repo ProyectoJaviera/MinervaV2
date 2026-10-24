@@ -13,6 +13,7 @@ from app.trading.slippage import exit_slippage_usdt
 
 @dataclass(frozen=True)
 class Settlement:
+    """Liquidacion de un cierre: comision y slippage de salida y PnL bruto y neto."""
     fee_exit_usdt: float
     slippage_exit_usdt: float
     pnl_gross_usdt: float
@@ -30,6 +31,25 @@ def settle_close(
     taker_fee_pct: float,
     slippage_bps: float,
 ) -> Settlement:
+    """Liquida un cierre con la MISMA formula para la cuenta paper y las sombras.
+
+    El PnL neto resta comision de entrada y salida, slippage de entrada y salida y el
+    funding acumulado, de modo que una senal tiene el mismo PnL en ambas cuentas.
+
+    Args:
+        side: direccion.
+        qty: cantidad.
+        entry_price: precio de entrada.
+        exit_price: precio de salida.
+        fee_entry_usdt: comision de entrada ya pagada.
+        slippage_entry_usdt: slippage de entrada ya cargado.
+        funding_paid_usdt: funding acumulado (positivo = la posicion paga).
+        taker_fee_pct: comision taker como fraccion.
+        slippage_bps: puntos basicos de slippage.
+
+    Returns:
+        El `Settlement`.
+    """
     result = compute_close_result(
         side, qty, entry_price, exit_price, fee_entry_usdt, taker_fee_pct,
         extra_costs_usdt=funding_paid_usdt + slippage_entry_usdt,

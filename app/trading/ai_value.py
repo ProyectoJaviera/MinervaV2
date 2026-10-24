@@ -80,8 +80,17 @@ PLACEBO_CALIBRATION_THRESHOLD = 0.05
 
 
 def assign_clusters(trades: list[ShadowTrade]) -> dict[int, int]:
-    """trade.id -> indice de conglomerado. Solo operaciones cerradas. Dentro de cada
-    (simbolo, direccion), se fusionan los intervalos que se solapan."""
+    """Asigna un conglomerado a cada operacion CERRADA.
+
+    Dentro de cada simbolo y direccion se fusionan los intervalos `[apertura, cierre]` que
+    se solapan: dos operaciones asi se mueven juntas y cuentan como una unidad.
+
+    Args:
+        trades: sombras (solo las cerradas con `id` entran).
+
+    Returns:
+        Diccionario `trade.id -> indice de conglomerado`.
+    """
     closed = [t for t in trades if t.closed_at is not None and t.id is not None]
     groups: dict[tuple[str, str], list[ShadowTrade]] = {}
     for t in closed:
@@ -104,14 +113,24 @@ def assign_clusters(trades: list[ShadowTrade]) -> dict[int, int]:
 
 @dataclass
 class LabeledUnit:
+    """Una unidad (conglomerado) con los retornos de sus operaciones aprobadas y rechazadas.
+
+    Los retornos son `pnl_net_usdt / margin_usdt`: fraccion del margen, no USDT.
+    """
     cluster_id: int
     approved_returns: list[float] = field(default_factory=list)
     rejected_returns: list[float] = field(default_factory=list)
 
 
 def build_units(trades: list[ShadowTrade]) -> list[LabeledUnit]:
-    """Una unidad por conglomerado, con el retorno (`pnl_net_usdt / margin_usdt`)
-    de cada operacion cerrada y etiquetada (APROBADA/RECHAZADA), por lado."""
+    """Una unidad por conglomerado, con el retorno de cada operacion cerrada y etiquetada.
+
+    Args:
+        trades: sombras candidatas.
+
+    Returns:
+        Lista de `LabeledUnit`.
+    """
     assignment = assign_clusters(trades)
     units: dict[int, LabeledUnit] = {}
     for t in trades:
@@ -129,9 +148,20 @@ def cluster_bootstrap_difference(
     n_resamples: int = BOOTSTRAP_RESAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> tuple[float, float, float] | None:
-    """(diferencia, ci_bajo, ci_alto) de la esperanza por operacion APROBADA menos
-    RECHAZADA (como fraccion del margen), con remuestreo de CONGLOMERADOS al 95 %.
-    None si no hay datos de ambos lados o casi ningun remuestreo es valido."""
+    """Diferencia de esperanza APROBADA menos RECHAZADA con IC 95 % por bootstrap de conglomerados.
+
+    Remuestrea unidades (no operaciones) para no tratar como independientes trades que
+    comparten el mismo movimiento de precio. Determinista (semilla fija).
+
+    Args:
+        units: unidades etiquetadas.
+        n_resamples: remuestreos del bootstrap.
+        seed: semilla del generador.
+
+    Returns:
+        La tupla `(diferencia, limite inferior, limite superior)` como fraccion del margen,
+        o `None` si no hay datos de ambos lados o casi ningun remuestreo es valido.
+    """
     if not units:
         return None
     observed_app = [r for u in units for r in u.approved_returns]
@@ -159,6 +189,11 @@ def cluster_bootstrap_difference(
 
 @dataclass(frozen=True)
 class AiValueVerdict:
+    """Resultado de la regla de tres veredictos: conteos, diferencia, intervalo y veredicto.
+
+    `verdict` es `APORTA_VALOR`, `NO_APORTA_VALOR` o `INCONCLUSO`; `magnitud_baja` marca un
+    efecto real pero menor que delta; `reason` explica la decision en texto.
+    """
     n_raw_approved: int
     n_raw_rejected: int
     n_eff_approved: int
@@ -184,24 +219,28 @@ def ai_value_verdict(
     measurement_keys: set[str] | None = None,
     unreliable_keys: set[str] | None = None,
 ) -> AiValueVerdict:
-    """Regla de tres veredictos fijada en `docs/FASE3_6_LLM.md`, seccion (i).
-    `trades` son operaciones sombra candidatas (abiertas y cerradas).
+    """Aplica la regla de tres veredictos fijada en `docs/FASE3_6_LLM.md`, seccion (i).
 
-    - Si se pasa `measurement_keys` (de `llm_logs_repo.
-      get_measurement_signal_group_keys`: `fase='MEDICION'` con el
-      `prompt_sha256` congelado vigente), se descarta cualquier grupo que NO
-      este en ese conjunto -- sombras previas a la 3.6, u otras versiones del
-      prompt, nunca llegaron a pasar por el LLM de esta medicion y no deben
-      contarse como SIN_LLM de ella.
-    - Si se pasa `piloto_keys` (`fase='PILOTO'`), esos grupos se excluyen.
-    - Si se pasa `unreliable_keys` (`shadow_repo.
-      get_unreliable_signal_group_keys`: incidente de estabilidad 2026-10-10,
-      Etapa 2b), esos grupos tambien se excluyen -- su reconciliacion fallo (o
-      sigue fallando), asi que su PnL no es fiable y contaminaria `Δ`. Se
-      mantiene SEPARADO de `piloto_keys` (son razones de exclusion distintas:
-      una es de fase del experimento, la otra es de confiabilidad del dato).
+    Un solo punto de analisis: con `MIN_EFFECTIVE_N` conglomerados efectivos por lado.
+    `APORTA_VALOR` si el IC 95 % de la diferencia esta sobre cero; `NO_APORTA_VALOR` si esta
+    bajo delta; `INCONCLUSO` en el resto, y ANTES de mirar el intervalo si el SIN_LLM supera
+    `MAX_SIN_LLM_SHARE`. Solo las operaciones CERRADAS entran en la diferencia. Los tres
+    filtros de claves son del llamador (la funcion no toca la base): `measurement_keys`
+    descarta sombras que nunca pasaron por el LLM de esta medicion, `piloto_keys` las del
+    piloto y `unreliable_keys` las de reconciliacion fallida.
 
-    Los tres filtros son del llamador: esta funcion no toca la base."""
+    Args:
+        trades: sombras candidatas (abiertas y cerradas).
+        min_effective_n: conglomerados efectivos exigidos por lado.
+        delta: margen de no-valor como fraccion del margen (3 %).
+        max_sin_llm_share: tope de SIN_LLM antes de INCONCLUSO.
+        piloto_keys: claves a excluir por ser del piloto.
+        measurement_keys: si se da, solo estas claves cuentan.
+        unreliable_keys: claves a excluir por PnL no fiable.
+
+    Returns:
+        El `AiValueVerdict`.
+    """
     if measurement_keys is not None:
         trades = [t for t in trades if t.signal_group_key in measurement_keys]
     if piloto_keys:
@@ -300,6 +339,12 @@ def _wilson_interval(successes: int, n: int, z: float = 1.959964) -> tuple[float
 
 @dataclass(frozen=True)
 class PlaceboResult:
+    """Resultado de la calibracion por permutacion: frecuencia de APORTA_VALOR por puro azar.
+
+    `ci_low` y `ci_high` son el IC 95 % de Wilson de esa frecuencia. `calibrated` es el
+    criterio de frecuencia bruta; el que decide hoy es el condicional de
+    `app.trading.ai_value_placebo`.
+    """
     n_repeats: int
     aporta_valor_count: int
     frequency: float
@@ -317,21 +362,25 @@ def placebo_calibration(
     min_effective_n: int = MIN_EFFECTIVE_N,
     delta: float = DELTA_PCT,
 ) -> PlaceboResult:
-    """Calibracion por permutacion (docs/FASE3_6_LLM.md, seccion f): a cada
-    CONGLOMERADO (no a cada operacion, para conservar la dependencia dentro del
-    conglomerado) se le asigna una etiqueta al azar con probabilidad `approval_rate`
-    (la tasa de aprobacion observada del LLM); se aplica la MISMA
-    `ai_value_verdict` sobre esa relabelacion, y se repite `n_repeats` veces.
+    """Calibracion por permutacion (`docs/FASE3_6_LLM.md`, seccion f).
 
-    Si el azar produce APORTA_VALOR con frecuencia >= 0,05, el criterio de
-    decision no esta bien calibrado (`calibrated=False`) y no se usa para decidir
-    hasta corregirlo. `ci_low`/`ci_high` son el IC 95 % de Wilson de esa
-    frecuencia, informativo: con `n_repeats` finito el propio placebo tiene
-    error de muestreo.
+    A cada CONGLOMERADO se le asigna una etiqueta al azar con probabilidad `approval_rate`,
+    se aplica la MISMA `ai_value_verdict` y se repite `n_repeats` veces. Si el azar produce
+    APORTA_VALOR con frecuencia >= 5 %, el criterio no esta bien calibrado. Con los valores
+    por defecto son 2.000.000 de remuestreos y puede tardar minutos; para un chequeo rapido
+    o una prueba, baja `n_repeats`.
 
-    Con el valor por defecto (1.000 repeticiones x 2.000 remuestreos del
-    bootstrap = 2.000.000 remuestreos) puede tardar minutos con el volumen real
-    de conglomerados; para un chequeo rapido o un test, bajar `n_repeats`."""
+    Args:
+        trades: sombras candidatas.
+        approval_rate: tasa de aprobacion observada del LLM.
+        n_repeats: repeticiones del placebo.
+        seed: semilla del generador.
+        min_effective_n: conglomerados efectivos exigidos por lado.
+        delta: margen de no-valor como fraccion del margen.
+
+    Returns:
+        El `PlaceboResult`.
+    """
     closed = [t for t in trades if t.closed_at is not None and t.id is not None]
     clusters = assign_clusters(closed)
     cluster_ids = sorted(set(clusters.values()))

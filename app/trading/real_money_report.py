@@ -86,6 +86,10 @@ RECONCILE_LOG_MARKER = "Reconciliacion fallida"
 
 @dataclass(frozen=True)
 class Criterion:
+    """Un criterio del reporte de paso a dinero real.
+
+    Lleva clave, etiqueta, estado (`PASA`, `NO PASA` o `SIN DATOS`) y detalle.
+    """
     key: str
     label: str
     status: str
@@ -94,6 +98,7 @@ class Criterion:
 
 @dataclass(frozen=True)
 class SymbolExecutability:
+    """Si un simbolo del universo es ejecutable con el margen y apalancamiento configurados."""
     symbol: str
     min_trade_volume: float | None
     base_precision: int | None
@@ -104,6 +109,7 @@ class SymbolExecutability:
 
 @dataclass(frozen=True)
 class DelayStats:
+    """Estadisticos del retraso de decision del LLM y cuantas decisiones superan el limite."""
     n: int
     p50: float | None
     p95: float | None
@@ -114,6 +120,7 @@ class DelayStats:
 
 @dataclass(frozen=True)
 class AvailabilityStats:
+    """Disponibilidad del equipo durante la medicion: horas con evaluaciones y huecos."""
     hours_with_evaluations: int
     gaps_over_threshold: int
     longest_gap_hours: float | None
@@ -121,12 +128,14 @@ class AvailabilityStats:
 
 @dataclass(frozen=True)
 class StressedPf:
+    """Profit factor del brazo ejecutado bajo un escenario de costos."""
     label: str
     pf: float | None
 
 
 @dataclass(frozen=True)
 class DistStats:
+    """Mediana, percentil 95 y maximo de una distribucion."""
     n: int
     median: float
     p95: float
@@ -148,6 +157,10 @@ class ArmLogSummary:
 
 @dataclass
 class OperationalMetrics:
+    """Riesgos operativos medidos del reporte de paso a dinero real.
+
+    Retrasos, ejecutabilidad, disponibilidad, estres de costos y resumen del brazo.
+    """
     arm_log: ArmLogSummary | None = None
     delays: DelayStats | None = None
     executability: list[SymbolExecutability] = field(default_factory=list)
@@ -161,6 +174,10 @@ class OperationalMetrics:
 
 @dataclass
 class RealMoneyReport:
+    """Salida estructurada del reporte de paso a dinero real.
+
+    `state` es `REVEAL_NO_PERMITIDO`, `NO_PASAR_VEREDICTO` o `EVALUADO`. Solo RECOMIENDA.
+    """
     state: str
     frozen_hash: str
     status: MeasurementStatus
@@ -190,8 +207,17 @@ def _parse_dt(value: str) -> datetime:
 
 
 def closed_with_pnl(trades: list[Trade]) -> list[Trade]:
-    """Cerradas con PnL: una cerrada sin PnL (p.ej. RECONCILE_FAILED) no entra a
-    ninguna metrica de rentabilidad -- la marca el criterio de reconciliacion."""
+    """Las operaciones cerradas que tienen PnL.
+
+    Una cerrada sin PnL (p. ej. `RECONCILE_FAILED`) no entra a ninguna metrica de
+    rentabilidad: la marca el criterio de reconciliacion.
+
+    Args:
+        trades: operaciones de la cuenta paper.
+
+    Returns:
+        Las cerradas con `pnl_net_usdt`.
+    """
     return [t for t in trades if t.closed_at is not None and t.pnl_net_usdt is not None]
 
 
@@ -248,6 +274,16 @@ def _dist(values: list[float]) -> DistStats | None:
 
 
 def compute_arm_log_summary(rows: list[dict]) -> ArmLogSummary | None:
+    """Resume `paper_execution_log`: decisiones, aperturas, omisiones por motivo y entrada.
+
+    Solo decisiones de ejecucion, nunca el resultado de las operaciones.
+
+    Args:
+        rows: filas con `outcome`, `reason` y `details`.
+
+    Returns:
+        El `ArmLogSummary`, o `None` si no hay filas.
+    """
     if not rows:
         return None
     reasons: dict[str, int] = {}
@@ -311,6 +347,14 @@ def _load_universe_specs(conn: sqlite3.Connection) -> list[dict]:
 
 
 def profit_factor(pnls: list[float]) -> float | None:
+    """Profit factor de una lista de PnL (ganancia bruta sobre perdida bruta).
+
+    Args:
+        pnls: PnL netos por operacion.
+
+    Returns:
+        El profit factor; `inf` si no hay perdidas pero si ganancias; `None` si todo vale 0.
+    """
     gross_profit = sum(p for p in pnls if p > 0)
     gross_loss = -sum(p for p in pnls if p <= 0)
     if gross_loss > 0:
@@ -321,9 +365,19 @@ def profit_factor(pnls: list[float]) -> float | None:
 def pf_cluster_bootstrap(
     trades: list[Trade], *, n_resamples: int = BOOTSTRAP_RESAMPLES, seed: int = BOOTSTRAP_SEED,
 ) -> tuple[float | None, float | None, float | None, int]:
-    """(PF observado, limite inferior, limite superior del IC 95 %, conglomerados).
-    Remuestrea CONGLOMERADOS (operaciones solapadas del mismo simbolo y direccion
-    se mueven juntas), no operaciones sueltas."""
+    """Profit factor observado y su IC 95 % por bootstrap de CONGLOMERADOS.
+
+    Operaciones solapadas del mismo simbolo y direccion se mueven juntas, asi que se
+    remuestrean conglomerados y no operaciones sueltas.
+
+    Args:
+        trades: operaciones de la cuenta paper.
+        n_resamples: remuestreos.
+        seed: semilla del generador.
+
+    Returns:
+        La tupla `(PF observado, limite inferior, limite superior, conglomerados)`.
+    """
     closed = [t for t in closed_with_pnl(trades) if t.id is not None]
     clusters_of = assign_clusters(closed)  # type: ignore[arg-type]  # duck typing: mismos campos
     grouped: dict[int, list[float]] = {}
@@ -356,8 +410,20 @@ def _fmt_pf(value: float | None) -> str:
 
 
 def count_reconcile_log_lines(path: Path, since: datetime | None) -> int:
-    """Lineas "Reconciliacion fallida" del log (CRITICAL). Best-effort: el log esta
-    en hora LOCAL, asi que con `since` se filtra por fecha con un dia de margen."""
+    """Cuenta las lineas `Reconciliacion fallida` (CRITICAL) del log. Best-effort.
+
+    El log esta en hora local, asi que con `since` se filtra por fecha con un dia de margen.
+
+    Args:
+        path: archivo de log.
+        since: inicio de la ventana, o `None` para contar todo.
+
+    Returns:
+        El numero de lineas.
+
+    Efectos:
+        Lee el archivo de log.
+    """
     floor = (since - timedelta(days=1)).strftime("%Y-%m-%d") if since is not None else None
     count = 0
     with path.open(encoding="utf-8", errors="replace") as fh:
@@ -374,6 +440,22 @@ def evaluate_criteria(
     *, record: VerdictRecordInfo, trades: list[Trade], arm_state: dict[str, str | None],
     settings: Settings, log_reconcile_count: int | None = None,
 ) -> list[Criterion]:
+    """Evalua los criterios del brazo ejecutado.
+
+    Son dias, operaciones, rentabilidad, drawdown, concentracion y reconciliacion. La
+    falta de datos nunca cuenta como "pasa" (`SIN DATOS`). Rentabilidad: PF mayor que
+    `MIN_PROFIT_FACTOR` Y limite inferior del IC 95 % mayor que 1,0.
+
+    Args:
+        record: el registro oficial del veredicto.
+        trades: operaciones del brazo (`decision_source = LLM_APROBADA`).
+        arm_state: claves `real_arm_*` y el contador de drawdown de `system_state`.
+        settings: configuracion (umbrales).
+        log_reconcile_count: lineas CRITICAL de reconciliacion del log, o `None`.
+
+    Returns:
+        La lista de `Criterion`.
+    """
     closed = closed_with_pnl(trades)
     out: list[Criterion] = [Criterion(
         "ia", "Valor de la IA (veredicto oficial 3.6)", PASA,
@@ -493,10 +575,27 @@ def evaluate_criteria(
 
 
 def recommend(criteria: list[Criterion]) -> str:
+    """La recomendacion del reporte: evaluacion manual solo si TODOS los criterios pasan.
+
+    Args:
+        criteria: los criterios evaluados.
+
+    Returns:
+        `EVALUACION_MANUAL` o `NO_PASAR`. Nunca habilita nada.
+    """
     return RECOMMEND_MANUAL if all(c.status == PASA for c in criteria) else RECOMMEND_NO
 
 
 def compute_delay_stats(delays: list[float], limit_s: float) -> DelayStats | None:
+    """Mediana, p95 y maximo del retraso de decision, y cuantas superan el limite.
+
+    Args:
+        delays: retrasos en segundos.
+        limit_s: limite (`LLM_REAL_MAX_DELAY_SECONDS`).
+
+    Returns:
+        Los `DelayStats`, o `None` si no hay datos.
+    """
     if not delays:
         return None
     ordered = sorted(delays)
@@ -513,6 +612,19 @@ def compute_delay_stats(delays: list[float], limit_s: float) -> DelayStats | Non
 def classify_executability(
     specs: list[dict], *, margin_usdt: float, leverage: int,
 ) -> list[SymbolExecutability]:
+    """Clasifica cada simbolo del universo como ejecutable o no con el margen configurado.
+
+    Redondea la cantidad hacia abajo a la precision del contrato, como lo haria la bolsa.
+
+    Args:
+        specs: simbolos con su especificacion y ultimo precio.
+        margin_usdt: margen por operacion.
+        leverage: apalancamiento.
+
+    Returns:
+        Un `SymbolExecutability` por simbolo (`EJECUTABLE`, `NO EJECUTABLE`, `SIN PRECIO` o
+        `SIN SPEC`).
+    """
     out = []
     for item in specs:
         price, min_vol, precision = item["price"], item["min_trade_volume"], item["base_precision"]
@@ -536,6 +648,14 @@ def classify_executability(
 
 
 def compute_availability(hours: list[datetime]) -> AvailabilityStats | None:
+    """Disponibilidad del equipo: horas con evaluaciones y huecos mayores que 2 horas.
+
+    Args:
+        hours: horas (UTC) con al menos una evaluacion, en orden.
+
+    Returns:
+        Los `AvailabilityStats`, o `None` si no hay horas.
+    """
     if not hours:
         return None
     gaps = [
@@ -549,6 +669,14 @@ def compute_availability(hours: list[datetime]) -> AvailabilityStats | None:
 
 
 def compute_stressed(trades: list[Trade]) -> list[StressedPf]:
+    """Profit factor del brazo bajo cinco escenarios de comisiones y slippage.
+
+    Args:
+        trades: operaciones del brazo.
+
+    Returns:
+        Un `StressedPf` por escenario (base, comisiones x2, slippage x2 y x3, y ambos).
+    """
     closed = closed_with_pnl(trades)
     adapted = [
         SimpleNamespace(
@@ -576,6 +704,33 @@ def build_report(
     allow_synthetic_for_tests: bool = False, docs_dir: Path | None = None,
     log_file: Path | None = None,
 ) -> RealMoneyReport:
+    """Construye el reporte con un orden ESTRUCTURAL: nada lee resultados antes del registro.
+
+    1) Gate abierto Y registro oficial: si no, solo "que falta". 2) El veredicto oficial
+    debe ser `APORTA_VALOR`: si no, "no pasar" y nada mas. 3) Solo entonces se evaluan los
+    criterios del brazo ejecutado y los riesgos operativos medidos. SOLO RECOMIENDA: v1 es
+    100 % paper.
+
+    Args:
+        conn: conexion de solo lectura a una COPIA de la base.
+        settings: configuracion (umbrales).
+        frozen_hash: hash del prompt de la medicion; por defecto, el congelado.
+        allow_synthetic_for_tests: acepta otro hash solo con una base positivamente sintetica.
+        docs_dir: carpeta del registro oficial; por defecto, `docs/` del repositorio.
+        log_file: log del bot para contar errores de reconciliacion, o `None`.
+
+    Returns:
+        El `RealMoneyReport`.
+
+    Raises:
+        ValueError: si el hash no es el congelado y no se pidio el modo sintetico.
+        SyntheticGuardError: si se pidio el modo sintetico y la base no lo es.
+
+    Efectos:
+        Lee `llm_logs`, `shadow_trades`, `signals`, `system_state`, `asset_universe`,
+        `contract_specs_cache`, `ohlcv_cache`, `paper_execution_log` y `docs/`. Solo con el
+        registro oficial en `APORTA_VALOR` lee `trades`.
+    """
     check_frozen_hash_mode(conn, frozen_hash, allow_synthetic_for_tests)
 
     # 1) Guardia: nada que lea resultados corre antes de esta comprobacion.
@@ -743,6 +898,15 @@ def _render_operational(op: OperationalMetrics, settings: Settings) -> list[str]
 
 
 def render_report(report: RealMoneyReport, settings: Settings | None = None) -> str:
+    """El reporte de paso a dinero real en texto; termina siempre con el aviso de que es manual.
+
+    Args:
+        report: el `RealMoneyReport`.
+        settings: configuracion; obligatoria cuando el estado es `EVALUADO`.
+
+    Returns:
+        El texto del reporte.
+    """
     lines = ["=== Reporte de paso a dinero real (subfase 3.8) ===", ""]
     if report.state == STATE_NOT_ALLOWED:
         lines += [

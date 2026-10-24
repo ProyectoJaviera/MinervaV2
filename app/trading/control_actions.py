@@ -72,12 +72,22 @@ def _lock_for(db: Database) -> asyncio.Lock:
 
 @dataclass(frozen=True)
 class ControlState:
+    """Estado de los controles: scheduler pausado y kill switch activo."""
     paused: bool
     kill_switch: bool
 
 
 @dataclass(frozen=True)
 class ControlResult:
+    """Resultado de aplicar una accion de control.
+
+    Attributes:
+        action: `pause`, `resume` o `kill`.
+        before: estado antes de la accion.
+        after: estado despues.
+        audit_id: id de la fila de `control_audit`.
+        drawdown_stop_active: si el stop por drawdown sigue activo (la accion no lo levanta).
+    """
     action: str
     before: ControlState
     after: ControlState
@@ -86,10 +96,22 @@ class ControlResult:
 
     @property
     def changed(self) -> bool:
+        """True si la accion cambio algo (pausar un scheduler ya pausado no cambia nada)."""
         return self.before != self.after
 
 
 async def read_state(db: Database) -> ControlState:
+    """El estado actual de los controles.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        Un `ControlState` con la pausa y el kill switch.
+
+    Efectos:
+        Lee `system_state`.
+    """
     return ControlState(
         paused=await control_state.is_scheduler_paused(db),
         kill_switch=await risk_engine.is_kill_switch_active(db),
@@ -99,8 +121,29 @@ async def read_state(db: Database) -> ControlState:
 async def apply_control(
     db: Database, action: str, *, channel: str, actor: str, now: datetime | None = None,
 ) -> ControlResult:
-    """Aplica la accion y deja el rastro. `actor` es el usuario autenticado (dashboard) o
-    "telegram" (sin datos del chat)."""
+    """Aplica una accion de control y deja su rastro; igual en Telegram y en el dashboard.
+
+    `pause` pausa el scheduler; `kill` activa el kill switch Y pausa el scheduler;
+    `resume` levanta la pausa Y el kill switch (no el stop por drawdown, que se resuelve
+    aparte). Un candado por base serializa acciones simultaneas para que el rastro
+    antes/despues sea coherente.
+
+    Args:
+        db: conexion a la base.
+        action: `pause`, `resume` o `kill`.
+        channel: `DASHBOARD` o `TELEGRAM`.
+        actor: usuario autenticado, o `telegram` (sin datos del chat); se recorta a 64.
+        now: hora de la accion; por defecto, ahora (UTC).
+
+    Returns:
+        El `ControlResult`.
+
+    Raises:
+        ValueError: si la accion o el canal son desconocidos.
+
+    Efectos:
+        Escribe `system_state` (pausa y kill switch) y `control_audit` (INSERT).
+    """
     if action not in ACTIONS:
         raise ValueError(f"accion de control desconocida: {action!r}")
     if channel not in (CHANNEL_DASHBOARD, CHANNEL_TELEGRAM):

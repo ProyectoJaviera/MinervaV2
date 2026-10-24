@@ -119,6 +119,17 @@ def _timeframe_groups() -> dict[str, list[str]]:
 
 
 async def get_stale_data_count(db: Database) -> int:
+    """Cuantas evaluaciones se escribieron desde una vela obsoleta (`signals_stale_data_count`).
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        El contador acumulado (0 si nunca hubo).
+
+    Efectos:
+        Lee `system_state`.
+    """
     raw = await system_state_repo.get_state(db, STALE_COUNT_KEY)
     return int(raw) if raw else 0
 
@@ -129,9 +140,23 @@ async def _bump_stale_data_count(db: Database) -> None:
 
 @dataclass
 class SignalCandidate:
-    """Una oportunidad de mercado agrupada -- 1+ estrategias coincidieron
-    en (simbolo, direccion, vela). `sl_margin_loss_pct` es el PEOR (mayor)
-    entre las contribuyentes -- nunca se subestima el riesgo real."""
+    """Una oportunidad de mercado agrupada por simbolo, direccion y vela.
+
+    Reune 1 o mas estrategias que coincidieron. `sl_margin_loss_pct` es el PEOR (mayor)
+    entre las contribuyentes: nunca se subestima el riesgo. Los niveles son los CRUDOS de
+    cada contribuyente (sin completar con el respaldo): el scheduler y el brazo eligen los
+    de la estrategia representante y los completan al precio real de llenado.
+
+    Attributes:
+        symbol: simbolo.
+        side: direccion.
+        candle_close_time: cierre de la vela evaluada.
+        contributing_strategies: nombres de las estrategias que coincidieron, ordenados.
+        sl_margin_loss_pct: peor riesgo planeado entre ellas (porcentaje del margen).
+        levels_by_strategy: niveles crudos por estrategia.
+        price_by_strategy: precio de cierre de la vela evaluada por estrategia (entrada de
+            la sombra).
+    """
 
     symbol: str
     side: Side
@@ -159,11 +184,20 @@ class _ActionableSignal:
 
 
 def pick_representative_strategy(contributing_strategies: list[str], settings: Settings) -> str:
-    """Estrategia a la que se atribuye la apertura real cuando 2+ contribuyeron:
-    la primera (orden alfabetico, determinista) que SI este en
-    `REAL_ACCOUNT_ELIGIBLE_STRATEGIES`; si ninguna lo esta (o la lista esta
-    vacia), la primera en orden alfabetico -- el motor de riesgo audita el
-    rechazo correctamente en cualquier caso."""
+    """La estrategia a la que se atribuye la operacion cuando 2 o mas contribuyeron.
+
+    Es la primera, en orden alfabetico (determinista), que este en
+    `REAL_ACCOUNT_ELIGIBLE_STRATEGIES`; si ninguna lo esta o la lista esta vacia, la
+    primera alfabetica (el motor de riesgo audita el rechazo igual). Fija los niveles de la
+    sombra y de la operacion ejecutada.
+
+    Args:
+        contributing_strategies: estrategias que coincidieron (no vacia).
+        settings: configuracion (lista de elegibles).
+
+    Returns:
+        El nombre de la estrategia representante.
+    """
     ordered = sorted(contributing_strategies)
     eligible = set(settings.real_account_eligible_strategies_list)
     if not eligible:
@@ -394,9 +428,33 @@ async def _evaluate_one(
 async def run_signal_generation_cycle(
     db: Database, rest_client: BitunixRestClient, settings: Settings,
 ) -> list[SignalCandidate]:
-    """Un ciclo completo: universo x estrategias x timeframes -> filas en `signals`
-    -> filtros de vela y funding obsoletos y tope de SL -> candidatos agrupados.
-    Cada (simbolo, timeframe) aisla sus propios errores."""
+    """Un ciclo completo del generador: universo x estrategias x timeframes -> candidatos agrupados.
+
+    Para cada simbolo del universo vigente refresca funding y contrato, descarga velas
+    faltantes, descarta la vela en formacion y evalua cada estrategia con el MISMO codigo
+    que el backtest (`precompute` y `evaluate`). Cada evaluacion (HOLD incluido) es una fila
+    de `signals`; si la vela ya se evaluo no se reprocesa. Una vela atrasada marca la fila
+    `CANDLE_STALE` y veta la senal; una estrategia de funding sin datos frescos queda
+    `FUNDING_STALE`; una senal con `sl_margin_loss_pct` sobre `LIVE_SL_MARGIN_CAP_PCT`
+    queda `DISCARDED_SL_CAP`. Las que sobreviven se agrupan por simbolo, direccion y vela.
+    Con el universo obsoleto o vacio no genera nada. Los errores se aislan por simbolo y
+    timeframe: no se propagan.
+
+    Args:
+        db: conexion a la base.
+        rest_client: cliente REST de Bitunix.
+        settings: configuracion.
+
+    Returns:
+        Los `SignalCandidate` del ciclo.
+
+    Efectos:
+        Lee `asset_universe`, `contract_specs_cache`, `funding_cache`, `ohlcv_cache`. Red:
+        Bitunix (velas, funding, contratos). Escribe `signals`,
+        `signals_discarded_by_sl_cap`, `ohlcv_cache`, `ohlcv_floor`, `funding_cache`,
+        `contract_specs_cache`, `ohlcv_unrepairable_gaps` y `system_state`
+        (`signals_stale_data_count`).
+    """
     if await is_universe_stale(db, settings):
         logger.warning("Universo obsoleto o ausente (> %dh): no se generan senales hasta el "
                        "proximo refresco. Los cierres no se ven afectados.",

@@ -105,9 +105,15 @@ _KEY_DRAWDOWN_STOP_LAST_RESUMED_AT = "drawdown_stop_last_resumed_at"
 
 
 class RiskRejectedError(RuntimeError):
-    """Una entrada nueva fue bloqueada por el motor de riesgo. `reason` es
-    uno de los codigos documentados en el docstring del modulo; `details`
-    trae los valores exactos (ya quedo registrado en `risk_rejections`)."""
+    """Una entrada nueva fue bloqueada por el motor de riesgo.
+
+    Attributes:
+        reason: codigo del rechazo (KILL_SWITCH_ACTIVE, DRAWDOWN_STOP_ACTIVE,
+            CIRCUIT_BREAKER_ACTIVE, DAILY_LOSS_LIMIT, DATA_STALE, STRATEGY_NOT_ELIGIBLE,
+            MAX_SIMULTANEOUS_POSITIONS, MAX_SAME_DIRECTION_POSITIONS, SL_CAP_EXCEEDED o
+            MARGIN_UNAVAILABLE).
+        details: valores exactos del rechazo; ya quedo registrado en `risk_rejections`.
+    """
 
     def __init__(self, reason: str, details: dict) -> None:
         super().__init__(f"Entrada rechazada por el motor de riesgo: {reason} ({details})")
@@ -117,6 +123,15 @@ class RiskRejectedError(RuntimeError):
 
 @dataclass
 class RiskDecision:
+    """Decision del motor de riesgo sobre una entrada nueva.
+
+    Attributes:
+        allowed: True si la entrada puede abrirse.
+        reason: codigo del rechazo si `allowed` es False.
+        details: valores exactos que motivaron el rechazo.
+        approved_margin_usdt: margen que de verdad se debe usar (puede ser menor que el
+            pedido); solo significativo si `allowed`.
+    """
     allowed: bool
     reason: str | None = None
     details: dict = field(default_factory=dict)
@@ -157,9 +172,15 @@ async def _set_int(db: Database, key: str, value: int) -> None:
 
 
 def today_key(tz_name: str, now: datetime | None = None) -> str:
-    """Fecha local (YYYY-MM-DD) en la zona horaria `tz_name` -- define el
-    limite de "dia" para la perdida diaria. `now` es inyectable para
-    tests; por defecto usa la hora real."""
+    """La fecha local `YYYY-MM-DD` en una zona horaria; define el limite de "dia" del riesgo.
+
+    Args:
+        tz_name: zona horaria (`REPORT_TIMEZONE`, p. ej. `America/Santiago`).
+        now: instante de referencia; por defecto, ahora (UTC). Existe para las pruebas.
+
+    Returns:
+        La fecha local como texto.
+    """
     now = now or datetime.now(UTC)
     return now.astimezone(ZoneInfo(tz_name)).strftime("%Y-%m-%d")
 
@@ -168,11 +189,24 @@ def today_key(tz_name: str, now: datetime | None = None) -> str:
 
 
 async def update_equity_tracking(db: Database, settings: Settings, current_equity: float) -> None:
-    """Actualiza el pico historico de equity (para el drawdown) y la linea
-    base del dia (para la perdida diaria) -- se llama tanto al evaluar una
-    entrada nueva como al cerrar una operacion (`record_trade_closed`),
-    para que estos numeros esten al dia incluso antes de que el monitor de
-    posiciones en vivo (subfase 3.4) corra de forma continua."""
+    """Actualiza el pico historico de equity y la linea base del dia.
+
+    Del pico sale el drawdown: al cruzar `MAX_DRAWDOWN_PCT` (solo en el flanco de subida)
+    sube el contador `drawdown_stop_would_have_triggered_count` en CUALQUIER modo y, en
+    modo `duro`, activa el stop. De la linea base sale la perdida diaria: al cambiar el dia
+    local se fija con el equity de ese instante y se libera el bloqueo; al cruzar
+    `MAX_DAILY_LOSS_PCT` el bloqueo queda enganchado hasta el cambio de dia, aunque el
+    equity se recupere. Se llama al evaluar una entrada, al cerrar una operacion y desde el
+    monitor.
+
+    Args:
+        db: conexion a la base.
+        settings: configuracion.
+        current_equity: capital realizado MAS PnL flotante, en USDT.
+
+    Efectos:
+        Lee y escribe `system_state` (`equity_peak_usdt`, `drawdown_*`, `daily_loss_*`).
+    """
     peak = await _get_float(db, _KEY_EQUITY_PEAK, settings.initial_capital_usdt)
     if current_equity > peak:
         peak = current_equity
@@ -241,10 +275,23 @@ async def _daily_loss_breached(db: Database) -> bool:
 async def record_trade_closed(
     db: Database, settings: Settings, pnl_net_usdt: float, current_equity: float
 ) -> None:
-    """Actualiza la racha de perdidas consecutivas (y dispara el circuit
-    breaker si corresponde) y los trackers de equity. Se llama DESPUES de
-    cerrar una operacion -- nunca bloquea el cierre en si, solo actualiza
-    el estado que `check_new_entry` leera la proxima vez."""
+    """Actualiza la racha de perdidas, dispara el circuit breaker si corresponde y el equity.
+
+    Se llama DESPUES de cerrar una operacion; nunca bloquea el cierre. Una perdida suma a
+    la racha y, al llegar a `CONSECUTIVE_LOSSES_CIRCUIT_BREAKER`, fija
+    `circuit_breaker_until` (ahora mas `CIRCUIT_BREAKER_COOLDOWN_HOURS`) y reinicia la
+    racha; cualquier otro resultado la pone en cero.
+
+    Args:
+        db: conexion a la base.
+        settings: configuracion.
+        pnl_net_usdt: PnL neto de la operacion cerrada.
+        current_equity: equity tras el cierre, en USDT.
+
+    Efectos:
+        Lee y escribe `system_state` (`consecutive_losses`, `circuit_breaker_until` y lo de
+        `update_equity_tracking`).
+    """
     if pnl_net_usdt < 0:
         count = await _get_int(db, _KEY_CONSECUTIVE_LOSSES, 0) + 1
         await _set_int(db, _KEY_CONSECUTIVE_LOSSES, count)
@@ -264,35 +311,107 @@ async def record_trade_closed(
 
 
 async def activate_kill_switch(db: Database) -> None:
+    """Activa el kill switch: no se abren posiciones nuevas hasta reanudar.
+
+    Args:
+        db: conexion a la base.
+
+    Efectos:
+        Escribe `system_state` (`kill_switch_active`).
+    """
     await _set_bool(db, _KEY_KILL_SWITCH, True)
 
 
 async def deactivate_kill_switch(db: Database) -> None:
+    """Desactiva el kill switch.
+
+    Args:
+        db: conexion a la base.
+
+    Efectos:
+        Escribe `system_state` (`kill_switch_active`).
+    """
     await _set_bool(db, _KEY_KILL_SWITCH, False)
 
 
 async def is_kill_switch_active(db: Database) -> bool:
+    """Dice si el kill switch esta activo.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        True si esta activo.
+
+    Efectos:
+        Lee `system_state`.
+    """
     return await _get_bool(db, _KEY_KILL_SWITCH, False)
 
 
 async def is_drawdown_stop_active(db: Database) -> bool:
+    """Dice si el stop por drawdown (modo duro) esta activo.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        True si esta activo.
+
+    Efectos:
+        Lee `system_state`.
+    """
     return await _get_bool(db, _KEY_DRAWDOWN_STOP_ACTIVE, False)
 
 
 async def is_daily_loss_limit_locked(db: Database) -> bool:
-    """Si el limite de perdida diaria ya se alcanzo hoy (queda enganchado hasta el cambio de dia
-    local). Solo lectura: lo usan el dashboard y las notificaciones (Fase 5)."""
+    """Dice si el limite de perdida diaria ya se alcanzo hoy.
+
+    Queda enganchado hasta el cambio de dia local. Solo lectura: lo usan el dashboard y
+    las notificaciones.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        True si el bloqueo esta activo.
+
+    Efectos:
+        Lee `system_state`.
+    """
     return await _daily_loss_breached(db)
 
 
 async def get_consecutive_losses(db: Database) -> int:
-    """Racha actual de perdidas consecutivas. Es un dato derivado de RESULTADOS: quien lo muestre
-    debe pasar por la puerta `app.trading.reveal.reveal_allowed`."""
+    """La racha actual de perdidas consecutivas.
+
+    Es un dato derivado de RESULTADOS: quien lo muestre debe pasar por
+    `app.trading.reveal.reveal_allowed`.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        El numero de perdidas seguidas.
+
+    Efectos:
+        Lee `system_state`.
+    """
     return await _get_int(db, _KEY_CONSECUTIVE_LOSSES, 0)
 
 
 async def get_active_circuit_breaker_until(db: Database) -> datetime | None:
-    """Hasta cuando dura el circuit breaker si sigue vigente; `None` si no hay o ya vencio."""
+    """Hasta cuando dura el circuit breaker, si sigue vigente.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        El instante de fin, o `None` si no hay breaker o ya vencio.
+
+    Efectos:
+        Lee `system_state`.
+    """
     raw = await system_state_repo.get_state(db, _KEY_CIRCUIT_BREAKER_UNTIL)
     if not raw:
         return None
@@ -301,22 +420,21 @@ async def get_active_circuit_breaker_until(db: Database) -> datetime | None:
 
 
 async def resume_drawdown_stop(db: Database, current_equity: float) -> None:
-    """Reanudacion manual del stop por drawdown (modo `"duro"`) -- a
-    diferencia del circuit breaker, este nunca se levanta solo.
+    """Reanudacion MANUAL del stop por drawdown (modo `duro`); nunca se levanta solo.
 
-    **Corregido** (antes esta funcion solo apagaba el flag activo): el pico
-    historico de equity se REINICIA al equity actual y la marca de "brecha
-    en curso" se limpia -- sin esto, tras reanudar, el drawdown seguia
-    calculandose por encima del umbral contra el pico VIEJO, y como
-    `update_equity_tracking` solo dispara el stop en el flanco de subida
-    (`breaching and not was_breaching`), nunca volvia a activarse hasta que
-    el equity se recuperara por completo al pico viejo -- en la practica,
-    el stop quedaba inerte para el resto de la vida de la cuenta. El
-    contador `drawdown_stop_would_have_triggered_count` (criterio de paso a
-    dinero real) NO se toca aqui -- es deliberadamente una metrica aparte
-    del drawdown acumulado desde el pico HISTORICO, nunca reiniciada por una
-    reanudacion manual. Se registra el instante de la reanudacion en
-    `system_state` para poder auditarlo."""
+    Apaga el stop, limpia la marca de brecha en curso y REINICIA el pico de equity al
+    equity actual (sin eso, el drawdown se seguiria calculando contra el pico viejo y el
+    stop quedaria inerte). El contador `drawdown_stop_would_have_triggered_count`, que es
+    una metrica aparte del criterio de dinero real, NO se toca. Registra el instante.
+
+    Args:
+        db: conexion a la base.
+        current_equity: equity actual, en USDT.
+
+    Efectos:
+        Escribe `system_state` (`drawdown_stop_active`, `drawdown_breach_in_progress`,
+        `equity_peak_usdt`, `drawdown_stop_last_resumed_at`).
+    """
     await _set_bool(db, _KEY_DRAWDOWN_STOP_ACTIVE, False)
     await _set_bool(db, _KEY_DRAWDOWN_BREACH_IN_PROGRESS, False)
     await _set_float(db, _KEY_EQUITY_PEAK, current_equity)
@@ -326,10 +444,20 @@ async def resume_drawdown_stop(db: Database, current_equity: float) -> None:
 
 
 async def get_drawdown_stop_trigger_count(db: Database) -> int:
-    """Cuantas veces el drawdown cruzo el umbral, en CUALQUIER modo -- usa
-    esto (no el modo) para el criterio de paso a dinero real (punto 8 de
-    `docs/FASE3_PLAN.md`), para que correr en `"alerta"` no haga parecer la
-    cuenta mas segura de lo que realmente fue."""
+    """Cuantas veces el drawdown cruzo el umbral, en CUALQUIER modo.
+
+    Es el dato del criterio de paso a dinero real: asi correr en modo `alerta` no hace
+    parecer la cuenta mas segura de lo que fue.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        El contador acumulado.
+
+    Efectos:
+        Lee `system_state`.
+    """
     return await _get_int(db, _KEY_DRAWDOWN_TRIGGER_COUNT, 0)
 
 
@@ -355,20 +483,38 @@ async def check_new_entry(
     sl_margin_loss_pct: float | None = None,
     is_manual: bool = False,
 ) -> RiskDecision:
-    """Decide si una entrada nueva se puede abrir. Nunca evalua cierres --
-    ver el docstring del modulo. Actualiza los trackers de equity primero
-    (para que el drawdown/perdida diaria reflejen `current_equity` aunque
-    esta entrada termine rechazada por otro motivo).
+    """Decide si una entrada NUEVA puede abrirse. Nunca evalua cierres.
 
-    `is_manual` (nuevo) distingue una entrada tecleada por el usuario (sin
-    estrategia, nunca sujeta a la lista de elegibilidad ni al SL
-    obligatorio) de una entrada generada por el pipeline automatico
-    (generador de senales, Fase 3 subfase 3.3) que simplemente perdio el
-    nombre de su estrategia por un bug -- antes `strategy=None` saltaba la
-    lista de elegibilidad SIEMPRE, lo que habria dejado pasar ese bug sin
-    aviso. `sl_margin_loss_pct` es obligatorio para toda entrada NO manual
-    (`ValueError`, no un rechazo auditado -- es un error de programacion
-    del llamador, no una decision de riesgo)."""
+    Actualiza antes los trackers de equity y evalua, en este orden: kill switch, stop por
+    drawdown (modo `duro`), circuit breaker, perdida diaria, feed obsoleto (`DATA_STALE`),
+    elegibilidad de la estrategia, cupo de posiciones, cupo en la misma direccion, tope de
+    SL y margen disponible. Cada rechazo se guarda en `risk_rejections` con sus valores. El
+    margen aprobado puede ser MENOR que el pedido (es un ajuste, no un rechazo).
+
+    Args:
+        db: conexion a la base.
+        settings: configuracion.
+        symbol: simbolo.
+        side: direccion.
+        strategy: estrategia que origina la entrada.
+        margin_usdt: margen pedido, en USDT.
+        current_equity: capital realizado MAS PnL flotante, en USDT.
+        sl_margin_loss_pct: riesgo planeado al abrir (porcentaje del margen); obligatorio
+            salvo entradas manuales.
+        is_manual: True para una entrada tecleada por una persona (se salta la lista de
+            elegibilidad y el SL obligatorio).
+
+    Returns:
+        La `RiskDecision`.
+
+    Raises:
+        ValueError: si una entrada no manual no trae `sl_margin_loss_pct` (es un error del
+            llamador, no una decision de riesgo, y no se audita).
+
+    Efectos:
+        Lee `system_state` y `trades`; escribe `system_state` (trackers de equity) y, si
+        rechaza, `risk_rejections`.
+    """
     if not is_manual and sl_margin_loss_pct is None:
         raise ValueError(
             "sl_margin_loss_pct es obligatorio para entradas generadas por una estrategia "

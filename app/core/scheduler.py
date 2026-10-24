@@ -1,19 +1,12 @@
-"""Loop asincrono del generador de senales y de la apertura automatica.
+"""Bucle asincrono del scheduler: genera senales, abre sombras y dispara el etiquetado.
 
-universo vigente + TODAS las estrategias (`app.trading.signal_generator`)
--> candidatos agrupados -> motor de riesgo en vivo (`PaperBackend.open_position`)
--> persistencia.
-
-Este loop SOLO abre posiciones. Los cierres (SL, TP, trailing, liquidacion,
-manual) los hace el monitor de posiciones (`app.trading.position_monitor`) con
-el WebSocket; una senal contraria con posicion abierta se ignora, igual que el
-backtest (docs/FASE2_CRITERIOS.md punto 6).
-
-La apertura automatica esta desactivada por defecto (`AUTO_OPEN_WITHOUT_LLM=false`)
-hasta la subfase 3.6: sin LLM las senales se registran en `signals` pero no
-llegan a la cuenta real. Las aperturas de la cuenta paper con LLM NO pasan por aqui:
-las hace el brazo ejecutado (`app.trading.paper_execution`) cuando el etiquetado en vivo
-guarda una decision APROBADA (subfase 3.9).
+Cadena de cada ciclo: universo vigente y TODAS las estrategias
+(`run_signal_generation_cycle`) -> candidatos agrupados -> sombra (`ShadowBook`) ->
+etiquetado en vivo (`ShadowLiveLabeler`, en segundo plano) y, solo con la apertura
+automatica sin LLM (`AUTO_OPEN_WITHOUT_LLM`, apagada), apertura en la cuenta paper.
+Este bucle SOLO abre: los cierres (SL, TP, trailing, liquidacion, manual) los hace el
+monitor de posiciones. Las aperturas con LLM no pasan por aqui: las hace el brazo
+ejecutado (`app.trading.paper_execution`) cuando el etiquetado guarda una APROBADA.
 """
 
 from __future__ import annotations
@@ -41,6 +34,16 @@ logger = get_logger(__name__)
 
 
 class Scheduler:
+    """Orquesta un ciclo de senales cada `SCHEDULER_POLL_SECONDS` hasta que se pide parar.
+
+    Un error en un ciclo, o en una sombra o candidato concreto, se registra y no tumba el
+    bucle. Pausar el scheduler (`control_state`) detiene la medicion: no hay senales,
+    sombras ni etiquetado mientras dure.
+
+    Attributes:
+        last_cycle_at: fin del ultimo ciclo COMPLETO (no el latido); `GET /health` lo
+            expone y pasa a `stale` si se queda atras.
+    """
     def __init__(
         self,
         db: Database,
@@ -66,9 +69,15 @@ class Scheduler:
         self._pause_logged = False
 
     def stop(self) -> None:
+        """Pide que `run_forever` termine despues de su espera actual."""
         self._stop.set()
 
     async def run_forever(self) -> None:
+        """Ejecuta `run_cycle` y espera `SCHEDULER_POLL_SECONDS`, en bucle, hasta `stop()`.
+
+        Efectos:
+            Ver `run_cycle`. Una excepcion del ciclo se registra y el bucle sigue.
+        """
         while not self._stop.is_set():
             try:
                 await self.run_cycle()
@@ -82,6 +91,25 @@ class Scheduler:
                 pass
 
     async def run_cycle(self) -> list[SignalCandidate]:
+        """Un ciclo completo: senales, sombras, etiquetado en vivo y suscripciones del feed.
+
+        Con el scheduler pausado devuelve una lista vacia SIN avanzar `last_cycle_at`, de modo
+        que `/health` pasa a `stale` y la alerta externa avisa (una pausa que detiene la
+        medicion no puede ser silenciosa). Una vez por ciclo avisa al etiquetador
+        (`note_cycle_start`, que comprueba el hash congelado). Por cada candidato abre la sombra,
+        dispara `maybe_label` (fuego y olvido, con el candidato para el brazo ejecutado) y, solo
+        si `AUTO_OPEN_WITHOUT_LLM` esta activo, intenta abrir en la cuenta paper y marca la
+        sombra como ejecutada.
+
+        Returns:
+            Los candidatos agrupados del ciclo (vacia si estaba pausado).
+
+        Efectos:
+            Lee `system_state` (pausa). Red: Bitunix (velas, funding, contratos) y la
+            suscripcion del WebSocket. Escribe `signals`, `signals_discarded_by_sl_cap`,
+            `shadow_trades`, caches de mercado y, con la apertura sin LLM, `trades`. El
+            etiquetado escribe `llm_logs` en su propia tarea.
+        """
         # Pausa pedida por Telegram (subfase 3.7, `app.trading.control_state`):
         # sin senales, sombras ni etiquetado = SIN medicion. `last_cycle_at` NO
         # avanza, asi `/health` pasa a "stale" y la alerta externa avisa: una
@@ -125,6 +153,11 @@ class Scheduler:
         return candidates
 
     async def sync_ws_subscriptions(self) -> None:
+        """Suscribe el WebSocket al universo vigente mas los simbolos con posicion abierta.
+
+        Efectos:
+            Lee `asset_universe` y `trades`. Red: mensaje `subscribe` al WebSocket de Bitunix.
+        """
         if self.ws_client is None:
             return
         symbols = set(await universe_repo.get_included_symbols(self.db))

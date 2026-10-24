@@ -56,9 +56,18 @@ NOT_INFORMATIVE = "NO_INFORMATIVO"
 
 
 def classify_calibration(frequency: float, valid_probability: float) -> tuple[str, float | None]:
-    """(estado, tasa condicional). NO INFORMATIVO si la probabilidad de llegar al
-    punto de analisis es < 50 % (no hay tasa condicional fiable); si no, CALIBRADO
-    cuando frecuencia / probabilidad < 5 %."""
+    """Estado de calibracion y tasa condicional del placebo.
+
+    NO INFORMATIVO si la probabilidad de llegar al punto de analisis es menor que 50 %; si
+    no, CALIBRADO cuando frecuencia / probabilidad < 5 %.
+
+    Args:
+        frequency: frecuencia bruta de APORTA_VALOR por azar.
+        valid_probability: probabilidad de que una repeticion llegue al punto de analisis.
+
+    Returns:
+        La tupla `(estado, tasa condicional o None)`.
+    """
     if valid_probability < INFORMATIVE_VALID_FRACTION:
         return NOT_INFORMATIVE, None
     conditional = min(1.0, frequency / valid_probability)
@@ -68,6 +77,8 @@ def classify_calibration(frequency: float, valid_probability: float) -> tuple[st
 
 @dataclass(frozen=True)
 class PlaceboRun:
+    """Resultado completo de un placebo sobre una copia de la base, con los filtros del veredicto.
+    """
     frozen_hash: str
     n_repeats: int
     groups_after_filters: int
@@ -83,7 +94,7 @@ class PlaceboRun:
 
     @property
     def calibration(self) -> str | None:
-        """CALIBRADO / NO_CALIBRADO / NO_INFORMATIVO, o None si no hay nada que calibrar."""
+        """CALIBRADO, NO_CALIBRADO o NO_INFORMATIVO; `None` si no hay nada que calibrar."""
         if self.result is None:
             return None
         return classify_calibration(
@@ -92,9 +103,10 @@ class PlaceboRun:
 
     @property
     def conditional_rate(self) -> float | None:
-        """Frecuencia de APORTA_VALOR si solo contaran las repeticiones que llegan
-        al punto de analisis (frecuencia / probabilidad de llegar); None si no es
-        informativo."""
+        """Frecuencia de APORTA_VALOR contando solo las repeticiones que llegan al analisis.
+
+        `None` si no es informativo.
+        """
         if self.result is None:
             return None
         return classify_calibration(
@@ -103,9 +115,19 @@ class PlaceboRun:
 
 
 def prob_both_sides_reach(n_clusters: int, approval_rate: float, min_n: int) -> float:
-    """P(min_n <= X <= n_clusters - min_n) con X ~ Binomial(n_clusters, approval_rate):
-    la probabilidad de que una relabelacion al azar deje al menos `min_n`
-    conglomerados en cada lado."""
+    """Probabilidad de que una relabelacion al azar deje al menos `min_n` conglomerados por lado.
+
+    Es exacta (binomial): `P(min_n <= X <= n_clusters - min_n)` con `X` binomial de
+    `n_clusters` y `approval_rate`.
+
+    Args:
+        n_clusters: conglomerados cerrados del universo del placebo.
+        approval_rate: tasa de aprobacion observada.
+        min_n: minimo por lado.
+
+    Returns:
+        La probabilidad (0 si no hay conglomerados suficientes).
+    """
     if n_clusters < 2 * min_n or not 0.0 < approval_rate < 1.0:
         return 0.0
     log_p, log_q = math.log(approval_rate), math.log(1.0 - approval_rate)
@@ -124,6 +146,29 @@ def build_placebo(
     conn: sqlite3.Connection, *, frozen_hash: str = FROZEN_PROMPT_SHA256,
     allow_synthetic_for_tests: bool = False, n_repeats: int = PLACEBO_REPEATS,
 ) -> PlaceboRun:
+    """Corre el placebo sobre una COPIA de la base (solo lectura), con los filtros del veredicto.
+
+    No revela nada de la IA: relabela al azar cada conglomerado, asi que solo intervienen la
+    estructura de conglomerados, los retornos y la tasa de aprobacion. Por eso puede
+    correrse antes de que el gate se abra (y debe registrarse antes de la primera decision
+    real). Aunque `load_verdict_inputs` lee PnL, ninguna salida enlaza etiqueta y resultado.
+
+    Args:
+        conn: conexion de solo lectura a la copia.
+        frozen_hash: hash del prompt de la medicion; por defecto, el congelado.
+        allow_synthetic_for_tests: acepta otro hash solo con una base positivamente sintetica.
+        n_repeats: repeticiones del placebo.
+
+    Returns:
+        El `PlaceboRun`.
+
+    Raises:
+        ValueError: si el hash no es el congelado y no se pidio el modo sintetico.
+        SyntheticGuardError: si se pidio el modo sintetico y la base no lo es.
+
+    Efectos:
+        Lee `llm_logs` y `shadow_trades` (incluidas columnas de resultado).
+    """
     check_frozen_hash_mode(conn, frozen_hash, allow_synthetic_for_tests)
     inputs = load_verdict_inputs(conn, frozen_hash)
     filtered = inputs.filtered
@@ -158,6 +203,16 @@ def build_placebo(
 
 
 def render_placebo(run: PlaceboRun, *, run_at: datetime, elapsed_s: float | None = None) -> str:
+    """El informe de texto del placebo, con el bloque para copiar al registro.
+
+    Args:
+        run: el resultado del placebo.
+        run_at: hora de la corrida (para el registro).
+        elapsed_s: duracion de la corrida en segundos, o `None`.
+
+    Returns:
+        El texto del informe.
+    """
     lines = [
         "=== Calibracion por placebo (docs/FASE3_6_LLM.md, seccion f) ===",
         "",

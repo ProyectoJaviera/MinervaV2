@@ -40,6 +40,12 @@ from app.trading.ai_value import AiValueVerdict, ai_value_verdict, assign_cluste
 
 @dataclass
 class StrategyShadowRow:
+    """Resumen de las sombras atribuidas a una estrategia, separando grupos simples y mixtos.
+
+    Una sombra de varias estrategias se acredita a CADA una con su resultado completo. Las
+    columnas `single_*` cuentan solo los grupos de una sola estrategia (comparables con su
+    backtest); `mixed_*`, los mixtos (no comparables).
+    """
     strategy: str
     groups: int = 0
     closed: int = 0
@@ -61,31 +67,41 @@ class StrategyShadowRow:
 
     @property
     def profit_factor(self) -> float | None:
+        """Profit factor del total atribuido; `None` si no hay perdidas."""
         return self._pf(self.gross_profit, self.gross_loss)
 
     @property
     def single_profit_factor(self) -> float | None:
+        """Profit factor de los grupos de una sola estrategia; `None` si no hay perdidas."""
         return self._pf(self.single_gross_profit, self.single_gross_loss)
 
     @property
     def expectancy(self) -> float | None:
+        """PnL neto medio por operacion cerrada; `None` si no hay cerradas."""
         return self.pnl_net_total / self.closed if self.closed else None
 
     @property
     def single_expectancy(self) -> float | None:
+        """PnL neto medio por operacion cerrada de grupos simples; `None` si no hay."""
         return self.single_pnl_net / self.single_closed if self.single_closed else None
 
     @property
     def winrate(self) -> float | None:
+        """Fraccion de cerradas con PnL positivo; `None` si no hay cerradas."""
         return self.wins / self.closed if self.closed else None
 
     @property
     def single_winrate(self) -> float | None:
+        """Fraccion de cerradas de grupos simples con PnL positivo; `None` si no hay."""
         return self.single_wins / self.single_closed if self.single_closed else None
 
 
 @dataclass
 class ShadowTotals:
+    """Totales de las sombras: grupos, cerradas, abiertas, PnL neto y conteos por etiqueta del LLM.
+
+    `by_label_effective` cuenta conglomerados, no operaciones.
+    """
     groups: int
     closed: int
     open: int
@@ -103,6 +119,15 @@ def _all(trades_open: list[ShadowTrade], trades_closed: list[ShadowTrade]) -> li
 def summarize_by_strategy(
     trades_open: list[ShadowTrade], trades_closed: list[ShadowTrade]
 ) -> list[StrategyShadowRow]:
+    """Resume las sombras por estrategia contribuyente.
+
+    Args:
+        trades_open: sombras abiertas.
+        trades_closed: sombras cerradas.
+
+    Returns:
+        Una `StrategyShadowRow` por estrategia, en orden alfabetico.
+    """
     rows: dict[str, StrategyShadowRow] = {}
     for trade in _all(trades_open, trades_closed):
         for strategy in trade.contributing_strategies:
@@ -138,6 +163,15 @@ def summarize_by_strategy(
 def summarize_totals(
     trades_open: list[ShadowTrade], trades_closed: list[ShadowTrade]
 ) -> ShadowTotals:
+    """Totales de las sombras, con N bruto y N efectivo (conglomerados) por etiqueta.
+
+    Args:
+        trades_open: sombras abiertas.
+        trades_closed: sombras cerradas.
+
+    Returns:
+        Los `ShadowTotals`.
+    """
     by_label_raw: dict[str, int] = {}
     for trade in _all(trades_open, trades_closed):
         by_label_raw[trade.llm_decision] = by_label_raw.get(trade.llm_decision, 0) + 1
@@ -185,6 +219,18 @@ def render_markdown(
     rows: list[StrategyShadowRow], totals: ShadowTotals, verdict: AiValueVerdict,
     excluded_reconcile_failed: int = 0,
 ) -> str:
+    """El reporte de sombras en Markdown: totales, grupos simples, mixtos, atribucion y veredicto.
+
+    Args:
+        rows: resumen por estrategia.
+        totals: totales.
+        verdict: veredicto del criterio de valor de la IA.
+        excluded_reconcile_failed: sombras cerradas administrativamente (`RECONCILE_FAILED`),
+            que se cuentan aparte para no diluir las tasas.
+
+    Returns:
+        El texto Markdown.
+    """
     lines = [
         "## Total de operaciones sombra",
         "",
@@ -245,6 +291,21 @@ def render_markdown(
 
 
 async def build_report(db: Database) -> str:
+    """Construye el reporte de sombras leyendo la base. LEE RESULTADOS (PnL).
+
+    Separa antes las sombras `RECONCILE_FAILED` (PnL cero forzado) de todos los agregados.
+    El veredicto mira todos los grupos con los tres filtros de claves.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        El reporte en Markdown. Quien lo muestre hacia fuera debe pasar por la puerta de
+        resultados.
+
+    Efectos:
+        Lee `shadow_trades` y `llm_logs`.
+    """
     trades_open = await shadow_repo.get_open(db)
     trades_closed_all = await shadow_repo.get_closed(db)
     # Revision de Etapa 2, correccion 3: una sombra RECONCILE_FAILED tiene PnL

@@ -72,11 +72,30 @@ def _as_utc(value: datetime) -> datetime:
 
 
 def eval_marks_lower_bound(first_medicion_row_at: datetime) -> str:
+    """Cota inferior (minuto, UTC) de las marcas de evaluacion que hace falta leer.
+
+    Es el inicio de la medicion MENOS el umbral de apagado: una marca anterior habria dejado
+    un hueco mayor que el umbral hasta la primera marca leida.
+
+    Args:
+        first_medicion_row_at: hora de la primera fila de medicion.
+
+    Returns:
+        El texto `YYYY-MM-DDTHH:MM`.
+    """
     start = _as_utc(first_medicion_row_at) - timedelta(hours=OFFLINE_GAP_HOURS)
     return start.strftime("%Y-%m-%dT%H:%M")
 
 
 def parse_eval_marks(rows: Iterable) -> list[datetime]:
+    """Convierte las marcas `YYYY-MM-DDTHH:MM` de la base en instantes UTC.
+
+    Args:
+        rows: filas con la columna `m`.
+
+    Returns:
+        Lista de `datetime` UTC (se ignoran las filas vacias).
+    """
     return [
         datetime.strptime(r["m"], "%Y-%m-%dT%H:%M").replace(tzinfo=UTC) for r in rows if r["m"]
     ]
@@ -86,11 +105,22 @@ def running_seconds(
     marks: Iterable[datetime], window_start: datetime, window_end: datetime,
     *, gap_hours: float = OFFLINE_GAP_HOURS,
 ) -> float:
-    """Segundos EN MARCHA dentro de `[window_start, window_end]`: cada par de marcas
-    consecutivas separadas por <= `gap_hours` cuenta completo; un hueco mayor cuenta
-    ENTERO como apagado. El extremo final de la ventana funciona como una marca mas (si
-    la ultima evaluacion fue hace <= `gap_hours`, el bot sigue en marcha); el comienzo
-    anterior a la primera marca cuenta apagado."""
+    """Segundos EN MARCHA dentro de una ventana, segun las marcas de evaluacion de los ciclos.
+
+    Cada par de marcas consecutivas separadas por `gap_hours` o menos cuenta completo; un
+    hueco mayor cuenta ENTERO como apagado. El extremo final de la ventana funciona como una
+    marca mas (si la ultima evaluacion fue hace `gap_hours` o menos, el bot sigue en
+    marcha); el comienzo anterior a la primera marca cuenta apagado.
+
+    Args:
+        marks: instantes de evaluacion (`signals.evaluated_at`, a resolucion de minuto).
+        window_start: inicio de la ventana.
+        window_end: fin de la ventana.
+        gap_hours: hueco maximo que sigue contando como en marcha.
+
+    Returns:
+        Los segundos en marcha.
+    """
     start, end = _as_utc(window_start), _as_utc(window_end)
     if end <= start:
         return 0.0
@@ -112,9 +142,11 @@ def running_seconds(
 
 @dataclass(frozen=True)
 class ClosedLabeledTrade:
-    """Solo lo necesario para agrupar en conglomerados (seccion i): simbolo,
-    direccion, ventana de vida y la etiqueta del LLM. Deliberadamente SIN
-    ningun campo de PnL."""
+    """Lo necesario para agrupar en conglomerados: simbolo, lado, vida y etiqueta del LLM.
+
+    Deliberadamente SIN ningun campo de PnL: el avance de la medicion jamas debe mirar
+    resultados.
+    """
 
     symbol: str
     side: str
@@ -125,13 +157,18 @@ class ClosedLabeledTrade:
 
 
 def cluster_effective_counts(trades: list[ClosedLabeledTrade]) -> tuple[int, int]:
-    """N efectivo por lado: conglomerados (por simbolo+direccion, intervalos
-    [apertura, cierre] que se solapan fusionados en una sola unidad) con AL
-    MENOS una operacion cerrada de ese lado. Mismo algoritmo que
-    `app.trading.ai_value.assign_clusters`/`build_units`, reimplementado
-    sobre `ClosedLabeledTrade` (nunca lee PnL) en vez de reusar esas
-    funciones (que exigen un `ShadowTrade` completo, con sus campos de PnL
-    poblados) -- ver docstring del modulo."""
+    """N efectivo por lado: conglomerados con al menos una operacion cerrada de ese lado.
+
+    Un conglomerado es un conjunto de operaciones del mismo simbolo y direccion cuyos
+    intervalos `[apertura, cierre]` se solapan. Mismo algoritmo que
+    `ai_value.assign_clusters`, reimplementado sobre `ClosedLabeledTrade` para no leer PnL.
+
+    Args:
+        trades: operaciones cerradas y etiquetadas.
+
+    Returns:
+        La tupla `(conglomerados con APROBADA, conglomerados con RECHAZADA)`.
+    """
     groups: dict[tuple[str, str], list[ClosedLabeledTrade]] = {}
     for t in trades:
         groups.setdefault((t.symbol, t.side), []).append(t)
@@ -163,6 +200,11 @@ def cluster_effective_counts(trades: list[ClosedLabeledTrade]) -> tuple[int, int
 
 @dataclass(frozen=True)
 class MeasurementStatus:
+    """Avance de la medicion bajo el hash congelado: conteos, ritmo y gasto. NUNCA resultados.
+
+    Los porcentajes de tiempo en marcha son fracciones 0-1. `None` en un ritmo significa
+    "sin datos para estimar".
+    """
     frozen_hash: str
     total_medicion_rows: int = 0
     ok_by_label: dict[str, int] = field(default_factory=lambda: {"APROBADA": 0, "RECHAZADA": 0})
@@ -189,32 +231,71 @@ class MeasurementStatus:
 
     @property
     def total_ok(self) -> int:
+        """Filas de medicion con decision valida (APROBADA mas RECHAZADA)."""
         return self.ok_by_label["APROBADA"] + self.ok_by_label["RECHAZADA"]
 
     def non_ok_pct(self, status: str) -> float | None:
+        """Fraccion de las filas de medicion que terminaron en un estado concreto distinto de OK.
+
+        Args:
+            status: `TIMEOUT`, `ERROR_HTTP`, `INVALID` o `BUDGET_EXCEEDED`.
+
+        Returns:
+            La fraccion 0-1, o `None` si todavia no hay filas.
+        """
         if self.total_medicion_rows == 0:
             return None
         return self.non_ok_counts[status] / self.total_medicion_rows
 
     def cost_per_row_usd(self) -> float | None:
+        """Costo medio por fila de medicion.
+
+        Returns:
+            USD por fila, o `None` si todavia no hay filas.
+        """
         if self.total_medicion_rows == 0:
             return None
         return self.total_cost_usd / self.total_medicion_rows
 
     def shortfall(self, side: str) -> int:
+        """Cuantos conglomerados efectivos faltan para el punto de analisis en un lado.
+
+        Args:
+            side: `APROBADA` o `RECHAZADA`.
+
+        Returns:
+            `MIN_EFFECTIVE_N` menos el N efectivo actual (nunca negativo).
+        """
         n_eff = self.n_eff_approved if side == "APROBADA" else self.n_eff_rejected
         return max(0, MIN_EFFECTIVE_N - n_eff)
 
     def days_needed(self, side: str) -> float | None:
-        """Dias de CALENDARIO estimados (el ritmo incluye los dias que el bot estuvo
-        apagado). `None` significa "no se puede estimar" (sin historia suficiente en
-        la ventana, o ritmo reciente nulo) -- NUNCA una cantidad negativa."""
+        """Dias de CALENDARIO estimados para completar un lado.
+
+        El ritmo incluye los dias en que el bot estuvo apagado. Nunca devuelve una cantidad
+        negativa.
+
+        Args:
+            side: `APROBADA` o `RECHAZADA`.
+
+        Returns:
+            Los dias, 0.0 si ya se alcanzo, o `None` si no se puede estimar (sin historia en
+            la ventana o ritmo nulo).
+        """
         rate = self.rate_approved_per_day if side == "APROBADA" else self.rate_rejected_per_day
         return self._days(side, rate)
 
     def days_needed_running(self, side: str) -> float | None:
-        """Dias EN MARCHA estimados con el ritmo del tiempo que el bot estuvo
-        evaluando. Equivale a dias de calendario solo si el bot no vuelve a apagarse."""
+        """Dias EN MARCHA estimados para completar un lado, con el ritmo del tiempo evaluando.
+
+        Equivale a dias de calendario solo si el bot no vuelve a apagarse.
+
+        Args:
+            side: `APROBADA` o `RECHAZADA`.
+
+        Returns:
+            Los dias, 0.0 si ya se alcanzo, o `None` si no se puede estimar.
+        """
         rate = (
             self.rate_approved_running_per_day if side == "APROBADA"
             else self.rate_rejected_running_per_day
@@ -243,8 +324,17 @@ def _fmt_rate(rate: float | None, suffix: str) -> str:
 
 
 def pace_lines(status: MeasurementStatus) -> list[str]:
-    """Ritmo y dias estimados, los DOS, con rotulos explicitos -- texto comun de
-    `scripts/measurement_status.py`, `/metrics` de Telegram y el resumen diario. Sin PnL."""
+    """Ritmo y dias estimados (calendario y en marcha), con rotulos explicitos. Sin PnL.
+
+    Es el texto comun de `scripts/measurement_status.py`, `/metrics` de Telegram y el
+    resumen diario.
+
+    Args:
+        status: el avance de la medicion.
+
+    Returns:
+        Las lineas de texto.
+    """
     window = f"{status.window_days:.1f}"
     lines = [
         f"Ritmo por CALENDARIO (ultimos {window} dias, INCLUYE el tiempo con el bot apagado): "
@@ -286,20 +376,39 @@ def pace_lines(status: MeasurementStatus) -> list[str]:
 
 
 def is_measurement_gate_open(status: MeasurementStatus) -> bool:
-    """UNICA fuente de verdad sobre si la medicion ya junto `MIN_EFFECTIVE_N`
-    conglomerados por lado -- `app/api/serializers.py` la usa para decidir si
-    una respuesta puede revelar PnL/resultados de sombras etiquetadas."""
+    """UNICA fuente de verdad: dice si la medicion ya junto `MIN_EFFECTIVE_N` por lado.
+
+    Son conglomerados efectivos por lado. Abrir el gate NO basta para mostrar
+    resultados: ver `is_outcome_reveal_allowed`.
+
+    Args:
+        status: el avance de la medicion.
+
+    Returns:
+        True si ambos lados alcanzaron el minimo (300).
+    """
     return status.n_eff_approved >= MIN_EFFECTIVE_N and status.n_eff_rejected >= MIN_EFFECTIVE_N
 
 
 def is_outcome_reveal_allowed(status: MeasurementStatus, docs_dir: Path | None = None) -> bool:
-    """CONDICION UNICA para mostrar resultados (PnL, salida, motivo de cierre) de
-    las sombras etiquetadas, en la API, el dashboard y los scripts de reporte:
-    el gate abierto Y un registro oficial del veredicto en `docs/`
-    (`app.trading.verdict_record`). Con el gate abierto y sin registro todavia
-    hay que seguir `docs/VEREDICTO_3_6.md` (copia, placebo oficial, veredicto): si
-    el placebo sale NO INFORMATIVO se esperan 7 dias y en ese tiempo NO se ven
-    resultados (regla del 2026-10-17). Un registro sin gate abierto tampoco basta."""
+    """CONDICION UNICA para mostrar resultados (PnL, salida, motivo de cierre) de las sombras.
+
+    Exige el gate abierto Y un registro oficial del veredicto en `docs/`
+    (`app.trading.verdict_record`). Un registro sin gate abierto tampoco basta. Con el gate
+    abierto y sin registro hay que seguir `docs/VEREDICTO_3_6.md`: copia, placebo oficial y
+    veredicto; si el placebo sale NO INFORMATIVO se esperan 7 dias sin ver resultados
+    (regla del 2026-10-17).
+
+    Args:
+        status: el avance de la medicion.
+        docs_dir: carpeta donde buscar el registro; por defecto, `docs/` del repositorio.
+
+    Returns:
+        True si se pueden mostrar resultados.
+
+    Efectos:
+        Lee el directorio `docs/` (busca `VEREDICTO_3_6_REGISTRO*.txt`).
+    """
     return is_measurement_gate_open(status) and (
         verdict_record.find_verdict_record(docs_dir) is not None
     )
@@ -400,8 +509,23 @@ def compute_status(
     frozen_hash: str = FROZEN_PROMPT_SHA256,
     rate_window_days: float = RATE_WINDOW_DAYS,
 ) -> MeasurementStatus:
-    """Variante SINCRONA, sobre un `sqlite3.Connection` en modo solo lectura
-    -- la usa `scripts/measurement_status.py` contra una copia offline."""
+    """Avance de la medicion sobre un `sqlite3.Connection` de SOLO LECTURA (copia offline).
+
+    Lo usa `scripts/measurement_status.py`. Nunca lee `pnl_*`, `exit_price` ni
+    `close_reason`.
+
+    Args:
+        conn: conexion de solo lectura a una copia de la base.
+        frozen_hash: hash del prompt de la medicion; por defecto, el congelado.
+        rate_window_days: dias de la ventana del ritmo (se ancla al dato mas reciente de
+            la copia, no al reloj).
+
+    Returns:
+        El `MeasurementStatus` (vacio si no hay filas de medicion).
+
+    Efectos:
+        Lee `llm_logs`, `shadow_trades` y `signals`.
+    """
     rows = conn.execute(
         "SELECT status, decision, json_repaired, cost_usd, created_at, signal_group_key "
         "FROM llm_logs WHERE fase = ? AND prompt_sha256 = ?",
@@ -449,9 +573,19 @@ async def compute_status_async(
     frozen_hash: str = FROZEN_PROMPT_SHA256,
     rate_window_days: float = RATE_WINDOW_DAYS,
 ) -> MeasurementStatus:
-    """Variante ASYNC, sobre la `Database` del bot ya conectada -- la usan
-    los endpoints de solo lectura bajo `/api/` (Subfase C). MISMA logica que
-    `compute_status`, solo cambia el estilo de llamada a la base."""
+    """Lo mismo que `compute_status`, sobre la `Database` del bot (para la API y Telegram).
+
+    Args:
+        db: conexion a la base del bot.
+        frozen_hash: hash del prompt de la medicion; por defecto, el congelado.
+        rate_window_days: dias de la ventana del ritmo.
+
+    Returns:
+        El `MeasurementStatus`.
+
+    Efectos:
+        Lee `llm_logs`, `shadow_trades` y `signals`. Nunca PnL.
+    """
     rows = await db.fetch_all(
         "SELECT status, decision, json_repaired, cost_usd, created_at, signal_group_key "
         "FROM llm_logs WHERE fase = ? AND prompt_sha256 = ?",

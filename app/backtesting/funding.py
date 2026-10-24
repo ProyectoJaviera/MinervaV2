@@ -26,9 +26,19 @@ DEFAULT_FUNDING_INTERVAL_HOURS = 8.0
 def build_funding_series(
     bar_open_times: list[int], real_events: list[tuple[int, float]]
 ) -> tuple[list[float], list[bool]]:
-    """Devuelve (tasas, es_aproximado) alineados 1:1 con `bar_open_times`
-    (ordenados ascendentemente). `real_events` son (fundingTime_ms, rate)
-    verificados contra la API real."""
+    """Alinea el funding real con las velas del backtest, aproximando donde no hay dato.
+
+    Antes del primer evento real de un simbolo se usa la MEDIANA del funding real observado
+    y se marca la vela como aproximada; sin ningun evento real todas valen 0.0 y estan
+    marcadas como aproximadas.
+
+    Args:
+        bar_open_times: `open_time` de las velas, en ms Unix y ascendentes.
+        real_events: eventos reales `(fundingTime en ms, tasa)`.
+
+    Returns:
+        La tupla `(tasas, es_aproximado)`, alineadas 1:1 con `bar_open_times`.
+    """
     if not bar_open_times:
         return [], []
     if not real_events:
@@ -59,9 +69,21 @@ def funding_cost_for_bar(
     bar_duration_hours: float,
     funding_interval_hours: float = DEFAULT_FUNDING_INTERVAL_HOURS,
 ) -> float:
-    """Costo de funding (positivo = la posicion paga) para una vela, con la
-    tasa prorrateada segun la duracion de la vela respecto al intervalo de
-    funding del contrato. Convencion: funding positivo -> LONG paga a SHORT."""
+    """Costo de funding de una vela, con la tasa prorrateada por su duracion.
+
+    Convencion: con tasa positiva el LONG paga al SHORT. Se prorratea linealmente respecto
+    al intervalo de funding del contrato (en vez de aplicar eventos puntuales).
+
+    Args:
+        notional: nocional de la posicion, en USDT.
+        rate: tasa de funding vigente en la vela.
+        side: direccion de la posicion.
+        bar_duration_hours: duracion de la vela, en horas.
+        funding_interval_hours: intervalo de funding del contrato (8 h si es <= 0).
+
+    Returns:
+        El costo en USDT; positivo significa que la posicion paga.
+    """
     if funding_interval_hours <= 0:
         funding_interval_hours = DEFAULT_FUNDING_INTERVAL_HOURS
     prorated_rate = rate * (bar_duration_hours / funding_interval_hours)

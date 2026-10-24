@@ -69,6 +69,14 @@ RISK_PREFIX = "RISK_"
 
 @dataclass(frozen=True)
 class OrderSizeCheck:
+    """Resultado de comprobar si una orden alcanza el tamano minimo del contrato.
+
+    Attributes:
+        qty: cantidad bruta que daria el margen.
+        qty_floored: cantidad redondeada hacia abajo a la precision del contrato.
+        min_trade_volume: volumen minimo del contrato, o `None` si no se conoce.
+        base_precision: decimales de cantidad que admite el contrato, o `None`.
+    """
     qty: float
     qty_floored: float
     min_trade_volume: float | None
@@ -76,14 +84,27 @@ class OrderSizeCheck:
 
     @property
     def executable(self) -> bool:
+        """True si la cantidad redondeada llega al minimo del contrato.
+
+        Sin minimo conocido se considera ejecutable (igual que `PaperBackend`).
+        """
         if self.min_trade_volume is None:
             return True  # sin minimo conocido: igual que PaperBackend
         return self.qty_floored >= self.min_trade_volume
 
 
 def floor_to_precision(qty: float, base_precision: int | None) -> float:
-    """`qty` redondeada HACIA ABAJO a `base_precision` decimales (el exchange no admite
-    fracciones del paso). Sin precision conocida se devuelve igual."""
+    """La cantidad redondeada HACIA ABAJO a `base_precision` decimales.
+
+    La bolsa no admite fracciones del paso. Sin precision conocida devuelve la cantidad igual.
+
+    Args:
+        qty: cantidad.
+        base_precision: decimales admitidos, o `None`.
+
+    Returns:
+        La cantidad redondeada.
+    """
     if base_precision is None:
         return qty
     step = 10 ** -base_precision
@@ -93,6 +114,18 @@ def floor_to_precision(qty: float, base_precision: int | None) -> float:
 def check_order_size(
     *, margin_usdt: float, leverage: int, price: float, taker_fee_pct: float, spec: ContractSpec,
 ) -> OrderSizeCheck:
+    """Comprueba si una orden alcanza el tamano minimo del contrato, sin tocar el margen.
+
+    Args:
+        margin_usdt: margen de la orden, en USDT.
+        leverage: apalancamiento.
+        price: precio de referencia.
+        taker_fee_pct: comision taker como fraccion.
+        spec: especificacion del contrato.
+
+    Returns:
+        El `OrderSizeCheck`.
+    """
     qty = compute_open_fill(margin_usdt, leverage, price, taker_fee_pct).qty
     return OrderSizeCheck(
         qty=qty, qty_floored=floor_to_precision(qty, spec.base_precision),
@@ -101,9 +134,19 @@ def check_order_size(
 
 
 def adverse_gap_bps(side: Side, shadow_price: float, executed_price: float) -> float | None:
-    """Diferencia entre el precio de entrada ejecutado y el de la sombra en puntos basicos,
-    POSITIVA cuando es peor para la posicion (pago mas en un LONG, vendo mas barato en un
-    SHORT)."""
+    """Diferencia entre el precio de entrada ejecutado y el de la sombra, en puntos basicos.
+
+    Es POSITIVA cuando es peor para la posicion (se paga mas en un LONG, se vende mas
+    barato en un SHORT).
+
+    Args:
+        side: direccion.
+        shadow_price: precio de entrada de la sombra.
+        executed_price: precio de entrada ejecutado.
+
+    Returns:
+        Los puntos basicos, o `None` si el precio de la sombra no es positivo.
+    """
     if shadow_price <= 0:
         return None
     raw = (executed_price - shadow_price) / shadow_price * 10_000
@@ -111,6 +154,20 @@ def adverse_gap_bps(side: Side, shadow_price: float, executed_price: float) -> f
 
 
 class PaperExecutionArm:
+    """El brazo EJECUTADO de la cuenta paper: abre solo las senales APROBADA que llegaron a tiempo.
+
+    100 % paper: solo conoce a `PaperBackend`. Lo invoca el etiquetador DESPUES de persistir
+    la etiqueta, con `submit`, que crea una tarea propia y no lanza jamas. Su unico estado
+    propio es `paper_execution_log` (una fila por decision APROBADA considerada, abra o
+    no). Apagado por defecto (`PAPER_EXECUTION_ENABLED`) y se niega a activarse si
+    `AUTO_OPEN_WITHOUT_LLM` esta en true.
+
+    Attributes:
+        db: conexion a la base.
+        settings: configuracion.
+        paper_backend: la cuenta paper por la que se abre.
+        active: True una vez que `activate()` lo dejo armado.
+    """
     def __init__(
         self, db: Database, settings: Settings, paper_backend: PaperBackend,
         *, clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -125,7 +182,21 @@ class PaperExecutionArm:
     # --- activacion ------------------------------------------------------------------------
 
     async def activate(self) -> bool:
-        """Llamado una vez desde el `lifespan`. Devuelve si el brazo queda activo."""
+        """Arma el brazo (una vez, desde el `lifespan`) si la configuracion lo permite.
+
+        No se activa con `PAPER_EXECUTION_ENABLED` apagado ni con `AUTO_OPEN_WITHOUT_LLM`
+        encendido (mezclaria dos fuentes de apertura en la misma cuenta). Resuelve las filas
+        PENDING que dejo un reinicio y escribe UNA sola vez `real_arm_started_at` y
+        `real_arm_drawdown_baseline` (las claves que espera el reporte de paso a dinero real);
+        reiniciar ese criterio es una accion manual y deliberada.
+
+        Returns:
+            True si el brazo queda activo.
+
+        Efectos:
+            Lee y escribe `paper_execution_log`; lee `trades`; escribe `system_state` (solo si
+            las claves `real_arm_*` no existian).
+        """
         if not self.settings.paper_execution_enabled:
             logger.info("Brazo ejecutado (paper) desactivado (PAPER_EXECUTION_ENABLED no es true).")
             return False
@@ -183,8 +254,19 @@ class PaperExecutionArm:
     # --- punto de entrada desde el labeler ------------------------------------------------------
 
     def submit(self, shadow: Any, result: Any, candidate: SignalCandidate | None) -> None:
-        """Sincrono, barato y SIN excepciones: crea una tarea propia. El `ShadowLiveLabeler`
-        lo llama despues de persistir la etiqueta."""
+        """Encola el tratamiento de una decision en una tarea propia; sincrono y sin excepciones.
+
+        El etiquetador lo llama tras persistir la etiqueta. No hace nada si el brazo no esta
+        activo, si no hay candidato o si la etiqueta no es APROBADA.
+
+        Args:
+            shadow: la sombra etiquetada.
+            result: el resultado de la decision (`label`, `decision_delay_s`).
+            candidate: la senal agrupada de la que salio la sombra.
+
+        Efectos:
+            Crea una tarea asyncio; ver `handle` para lo que hace.
+        """
         try:
             if not self.active or candidate is None:
                 return
@@ -221,8 +303,10 @@ class PaperExecutionArm:
             pass
 
     async def shutdown(self) -> None:
-        """Cierre ordenado: cancela lo pendiente y espera (lo que quede PENDING se resuelve
-        en el proximo arranque)."""
+        """Cierre ordenado: cancela las tareas pendientes y espera.
+
+        Lo que quede PENDING en `paper_execution_log` se resuelve en el proximo arranque.
+        """
         tasks = list(self._tasks)
         for task in tasks:
             task.cancel()
@@ -245,8 +329,31 @@ class PaperExecutionArm:
     async def handle(
         self, shadow: Any, result: Any, candidate: SignalCandidate,
     ) -> str | None:
-        """Aplica las reglas a una decision. Devuelve `"OPENED"`, el motivo del SKIPPED o
-        `None` si no era del brazo (no APROBADA) o ya estaba reclamado."""
+        """Aplica las reglas del brazo a una decision y deja su rastro en `paper_execution_log`.
+
+        En orden: etiqueta distinta de APROBADA (nada); reclamo idempotente del grupo;
+        decision tardia (`LATE_DECISION`, mas de `LLM_REAL_MAX_DELAY_SECONDS`); scheduler
+        pausado (`SCHEDULER_PAUSED`); simbolo con posicion abierta (`POSITION_ALREADY_OPEN`);
+        sin especificacion de contrato (`NO_CONTRACT_SPEC`); bajo el tamano minimo con la
+        cantidad redondeada hacia abajo (`BELOW_MIN_ORDER`, el margen NO se cambia); y por fin
+        `PaperBackend.open_position(..., decision_source="LLM_APROBADA")`, cuyo rechazo de
+        riesgo queda como `RISK_<codigo>`, un nivel ya superado como `LEVELS_INVALID` y
+        cualquier otro fallo como `OPEN_ERROR` (solo el tipo).
+
+        Args:
+            shadow: la sombra etiquetada.
+            result: el resultado de la decision (`label`, `decision_delay_s`).
+            candidate: la senal agrupada de la que salio la sombra.
+
+        Returns:
+            `"OPENED"`, el motivo del `SKIPPED`, o `None` si no era del brazo o ya estaba
+            reclamado.
+
+        Efectos:
+            Lee `system_state`, `trades`, `contract_specs_cache`. Red: GET `tickers` (por
+            `open_position`). Escribe `paper_execution_log` y, si abre, `trades`, ademas de lo
+            que escribe el motor de riesgo (`risk_rejections`, `system_state`).
+        """
         if getattr(result, "label", None) != LABEL_APPROVED:
             return None
         representative = pick_representative_strategy(
@@ -330,6 +437,14 @@ class PaperExecutionArm:
     # --- visibilidad (sin PnL) -------------------------------------------------------------------
 
     async def health_block(self) -> dict:
+        """El bloque `paper_execution` de `GET /health`: estado del brazo y conteos de hoy, sin PnL.
+
+        Returns:
+            Diccionario con `enabled`, `active`, `armed_since`, `opened_today` y `skipped_today`.
+
+        Efectos:
+            Lee `paper_execution_log` y `system_state`.
+        """
         since = local_day_start_utc(self.settings.report_timezone, self._clock())
         counts = await log_repo.count_outcomes_since(self.db, since)
         return {

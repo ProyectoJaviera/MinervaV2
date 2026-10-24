@@ -67,6 +67,10 @@ class SyntheticGuardError(Exception):
 
 @dataclass(frozen=True)
 class LogMeta:
+    """Metadatos de una fila de `llm_logs`, sin respuesta ni prompt.
+
+    Clave del grupo, fase, hash del prompt, estado, hora UTC, ATR y si el JSON se reparo.
+    """
     key: str
     fase: str
     prompt_sha256: str
@@ -92,6 +96,7 @@ class LightShadow:
 
 @dataclass(frozen=True)
 class GroupPartition:
+    """Particion de todos los grupos sombra segun hayan pasado o no por el LLM de la medicion."""
     total_groups: int
     measurement: int
     measurement_unreliable: int
@@ -114,6 +119,7 @@ class OmittedProfile:
 
 @dataclass(frozen=True)
 class StratumShare:
+    """Peso de un estrato en todos los grupos medidos frente a su peso entre los SIN_LLM."""
     label: str
     all_share: float
     sin_llm_share: float | None
@@ -122,6 +128,7 @@ class StratumShare:
 
 @dataclass(frozen=True)
 class SinLlmDiagnostics:
+    """SIN_LLM por causa, franja horaria UTC y tercil de volatilidad (seccion m del informe)."""
     groups_with_log: int
     sin_llm_by_cause: dict[str, int]
     sin_llm_rows: int
@@ -131,6 +138,7 @@ class SinLlmDiagnostics:
 
 @dataclass(frozen=True)
 class SensitivityResult:
+    """Veredicto recalculado sin las filas con JSON reparado, y si coincide con el principal."""
     excluded_groups: int
     verdict: AiValueVerdict | None
     robust: bool | None
@@ -138,6 +146,10 @@ class SensitivityResult:
 
 @dataclass(frozen=True)
 class BucketResult:
+    """Resultado de un cubo del desglose (estrategia o simbolo).
+
+    `diff` es la diferencia APROBADA menos RECHAZADA; `None` si el N es insuficiente.
+    """
     label: str
     n_trades: int
     n_eff_approved: int
@@ -150,6 +162,11 @@ class BucketResult:
 
 @dataclass(frozen=True)
 class ReportResult:
+    """Salida estructurada del informe del veredicto.
+
+    `state` es `GATE_CERRADO`, `PUNTO_NO_ALCANZADO` o `VEREDICTO`; solo en el ultimo estan
+    `verdict`, `sensitivity` y los desgloses.
+    """
     state: str
     frozen_hash: str
     status: MeasurementStatus
@@ -169,6 +186,18 @@ class ReportResult:
 
 
 def assert_synthetic_database(conn: sqlite3.Connection) -> None:
+    """Comprueba que la base es POSITIVAMENTE sintetica; si no, rechaza la bandera de pruebas.
+
+    Args:
+        conn: conexion de solo lectura.
+
+    Raises:
+        SyntheticGuardError: si `llm_logs` esta vacia, tiene un modelo distinto de
+            `synthetic-test` o tiene filas con el hash congelado real.
+
+    Efectos:
+        Lee `llm_logs`.
+    """
     rows = conn.execute("SELECT DISTINCT model, prompt_sha256 FROM llm_logs").fetchall()
     if not rows:
         raise SyntheticGuardError(
@@ -242,6 +271,16 @@ def _load_outcome_trades(conn: sqlite3.Connection) -> list[ShadowTrade]:
 def compute_partition(
     shadows: list[LightShadow], metas: list[LogMeta], frozen_hash: str,
 ) -> GroupPartition:
+    """Cuenta los grupos sombra por categoria (seccion m): medidos, piloto, otro hash y omitidos.
+
+    Args:
+        shadows: sombras sin campos de resultado.
+        metas: metadatos de `llm_logs`.
+        frozen_hash: hash del prompt de la medicion.
+
+    Returns:
+        La `GroupPartition`.
+    """
     meta_by_key = {m.key: m for m in metas}
     frozen_times = [
         m.created_at for m in metas if m.fase == FASE_MEDICION and m.prompt_sha256 == frozen_hash
@@ -274,6 +313,18 @@ def compute_partition(
 def compute_omitted_profile(
     shadows: list[LightShadow], metas: list[LogMeta], frozen_hash: str,
 ) -> OmittedProfile:
+    """Perfil (sin PnL) de los omitidos posteriores a la activacion frente a los medidos.
+
+    Detecta si el salto de la medicion fue selectivo.
+
+    Args:
+        shadows: sombras sin campos de resultado.
+        metas: metadatos de `llm_logs`.
+        frozen_hash: hash del prompt de la medicion.
+
+    Returns:
+        El `OmittedProfile`.
+    """
     meta_by_key = {m.key: m for m in metas}
     frozen_times = [
         m.created_at for m in metas if m.fase == FASE_MEDICION and m.prompt_sha256 == frozen_hash
@@ -316,15 +367,29 @@ def _strata_shares(
 
 
 def hour_bin_label(hour_utc: int) -> str:
+    """La etiqueta de la franja de 4 horas UTC a la que pertenece una hora.
+
+    Args:
+        hour_utc: hora UTC (0-23).
+
+    Returns:
+        Texto como `04-07 UTC`.
+    """
     start = (hour_utc // HOUR_BIN_SIZE) * HOUR_BIN_SIZE
     return f"{start:02d}-{start + HOUR_BIN_SIZE - 1:02d} UTC"
 
 
 def compute_sin_llm_diagnostics(measured_metas: list[LogMeta]) -> SinLlmDiagnostics:
-    """Seccion (m), puntos 1 y 2: SIN_LLM por causa y su distribucion por franja
-    horaria UTC (6 franjas de 4 h) y por tercil de `atr_pct` de la muestra,
-    comparada con la de TODOS los grupos medidos (un grupo SIN_LLM aqui es una fila
-    de `llm_logs` con `status != 'OK'`)."""
+    """SIN_LLM por causa y su distribucion por franja horaria y por tercil de `atr_pct`.
+
+    Un grupo SIN_LLM es una fila de `llm_logs` con `status != 'OK'`.
+
+    Args:
+        measured_metas: metadatos de los grupos medidos.
+
+    Returns:
+        Los `SinLlmDiagnostics`.
+    """
     causes: dict[str, int] = {}
     for m in measured_metas:
         if m.status != "OK":
@@ -371,6 +436,14 @@ def _verdict_inputs(
 
 
 def clean_effective_n(trades: list[ShadowTrade]) -> tuple[int, int]:
+    """N efectivo (conglomerados) aprobado y rechazado de las sombras ya filtradas.
+
+    Args:
+        trades: sombras tras los tres filtros.
+
+    Returns:
+        La tupla `(aprobadas, rechazadas)`.
+    """
     units = build_units(trades)
     return (
         sum(1 for u in units if u.approved_returns),
@@ -382,10 +455,22 @@ def compute_sensitivity(
     trades: list[ShadowTrade], main: AiValueVerdict, *, measurement_keys: set[str],
     piloto_keys: set[str], unreliable_keys: set[str], repaired_keys: set[str],
 ) -> SensitivityResult:
-    """Veredicto recalculado sin los grupos cuya fila de `llm_logs` tiene
-    `json_repaired = 1`. Usa `min_effective_n=1` SOLO para obtener el IC (el N
-    efectivo real queda en el resultado; el informe lo rotula orientativo si es
-    < MIN_EFFECTIVE_N)."""
+    """Veredicto recalculado sin los grupos cuya fila de `llm_logs` tiene `json_repaired = 1`.
+
+    Usa `min_effective_n=1` SOLO para obtener el IC; el informe lo rotula orientativo si el
+    N efectivo real es menor que `MIN_EFFECTIVE_N`.
+
+    Args:
+        trades: sombras candidatas.
+        main: el veredicto principal.
+        measurement_keys: claves de la medicion.
+        piloto_keys: claves del piloto.
+        unreliable_keys: claves no confiables.
+        repaired_keys: claves con JSON reparado.
+
+    Returns:
+        El `SensitivityResult` (`robust` es `None` si no hay filas reparadas).
+    """
     excluded = repaired_keys & measurement_keys
     if not excluded:
         return SensitivityResult(excluded_groups=0, verdict=None, robust=None)
@@ -400,9 +485,19 @@ def compute_sensitivity(
 def compute_breakdown(
     trades: list[ShadowTrade], bucket_of, *, min_effective_n: int = BREAKDOWN_MIN_EFFECTIVE_N,
 ) -> list[BucketResult]:
-    """Δ por cubo (cada operacion en UN solo cubo, sin doble conteo). Los
-    conglomerados se recalculan dentro de cada cubo. Un cubo con menos de
-    `min_effective_n` conglomerados en algun lado se lista sin IC."""
+    """Diferencia por cubo (cada operacion en UN solo cubo). Exploratorio: no cambia el veredicto.
+
+    Los conglomerados se recalculan dentro de cada cubo. Un cubo con menos de
+    `min_effective_n` conglomerados en algun lado se lista sin intervalo.
+
+    Args:
+        trades: sombras ya filtradas.
+        bucket_of: funcion que asigna una sombra a su cubo (estrategia o simbolo).
+        min_effective_n: minimo por lado para calcular el intervalo.
+
+    Returns:
+        Un `BucketResult` por cubo, en orden alfabetico.
+    """
     labeled = [
         t for t in trades
         if t.closed_at is not None and t.llm_decision in (APROBADA, RECHAZADA)
@@ -435,10 +530,11 @@ def compute_breakdown(
 
 @dataclass(frozen=True)
 class VerdictInputs:
-    """Todo lo que el veredicto (y el placebo, que debe usar EXACTAMENTE los mismos
-    filtros) necesita de la base: `trades` son todas las sombras (abiertas y
-    cerradas, con resultados) y `filtered` las que sobreviven a los tres filtros
-    (hash congelado, sin piloto, sin no confiables)."""
+    """Todo lo que el veredicto y el placebo necesitan de la base, con los mismos filtros.
+
+    `trades` son todas las sombras (con resultados) y `filtered` las que sobreviven a los
+    tres filtros (hash congelado, sin piloto, sin no confiables).
+    """
 
     metas: list[LogMeta]
     light: list[LightShadow]
@@ -453,8 +549,22 @@ class VerdictInputs:
 def check_frozen_hash_mode(
     conn: sqlite3.Connection, frozen_hash: str, allow_synthetic_for_tests: bool,
 ) -> None:
-    """Un hash distinto del congelado real solo se acepta con la bandera sintetica,
-    y esa bandera solo con una base positivamente sintetica."""
+    """Un hash distinto del congelado real solo se acepta con la bandera sintetica.
+
+    Y esa bandera solo con una base positivamente sintetica.
+
+    Args:
+        conn: conexion de solo lectura.
+        frozen_hash: hash que se quiere usar.
+        allow_synthetic_for_tests: bandera de pruebas.
+
+    Raises:
+        ValueError: si el hash no es el congelado y no se pidio el modo sintetico.
+        SyntheticGuardError: si se pidio el modo sintetico y la base no lo es.
+
+    Efectos:
+        Lee `llm_logs` (solo en modo sintetico).
+    """
     if allow_synthetic_for_tests:
         assert_synthetic_database(conn)
     elif frozen_hash != FROZEN_PROMPT_SHA256:
@@ -462,8 +572,22 @@ def check_frozen_hash_mode(
 
 
 def load_verdict_inputs(conn: sqlite3.Connection, frozen_hash: str) -> VerdictInputs:
-    """LEE RESULTADOS (PnL): solo llamar con el gate abierto o desde una
-    herramienta que no revele la relacion etiqueta-resultado (el placebo)."""
+    """Carga y filtra las sombras para el veredicto o el placebo. LEE RESULTADOS (PnL).
+
+    Solo llamar con el gate abierto o desde una herramienta que no revele la relacion
+    etiqueta-resultado (el placebo).
+
+    Args:
+        conn: conexion de solo lectura.
+        frozen_hash: hash del prompt de la medicion.
+
+    Returns:
+        Los `VerdictInputs`.
+
+    Efectos:
+        Lee `llm_logs` y `shadow_trades` (todas las columnas, incluidos PnL, precio de
+        salida y motivo de cierre).
+    """
     metas = _load_log_metas(conn)
     light = _load_light_shadows(conn)
     measurement_keys = {
@@ -485,6 +609,29 @@ def build_report(
     conn: sqlite3.Connection, *, frozen_hash: str = FROZEN_PROMPT_SHA256,
     allow_synthetic_for_tests: bool = False,
 ) -> ReportResult:
+    """Construye el informe del veredicto con la guardia del gate de forma ESTRUCTURAL.
+
+    Empieza con `compute_status` (sin PnL) y, si el gate esta cerrado, devuelve sin haber
+    ejecutado jamas la consulta que lee resultados. Si el gate abre pero tras excluir
+    sombras no confiables y del piloto el N efectivo limpio es menor que
+    `MIN_EFFECTIVE_N`, declara "punto de analisis no alcanzado" y NO muestra diferencia,
+    intervalo ni desglose.
+
+    Args:
+        conn: conexion de solo lectura a una COPIA de la base.
+        frozen_hash: hash del prompt de la medicion; por defecto, el congelado.
+        allow_synthetic_for_tests: acepta otro hash solo con una base positivamente sintetica.
+
+    Returns:
+        El `ReportResult`.
+
+    Raises:
+        ValueError: si el hash no es el congelado y no se pidio el modo sintetico.
+        SyntheticGuardError: si se pidio el modo sintetico y la base no lo es.
+
+    Efectos:
+        Lee `llm_logs`, `shadow_trades` y `signals`; PnL solo con el gate abierto.
+    """
     check_frozen_hash_mode(conn, frozen_hash, allow_synthetic_for_tests)
 
     status = compute_status(conn, frozen_hash=frozen_hash)
@@ -707,6 +854,18 @@ def _render_breakdown(result: ReportResult) -> list[str]:
 
 
 def render_report(result: ReportResult) -> str:
+    """El informe de texto del veredicto.
+
+    Con el gate cerrado solo muestra cuanto falta; sin el punto de analisis limpio no
+    muestra ninguna diferencia.
+
+    Args:
+        result: el `ReportResult`.
+
+    Returns:
+        El texto del informe (es lo que `scripts/ai_value_report.py --out` guarda como
+        registro oficial).
+    """
     if result.state == STATE_GATE_CLOSED:
         return "\n".join(_render_gate_closed(result)) + "\n"
 

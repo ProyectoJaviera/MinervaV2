@@ -21,8 +21,30 @@ KEY_SCHEDULER_PAUSED = "scheduler_paused"
 
 
 async def is_scheduler_paused(db: Database) -> bool:
+    """Dice si el scheduler esta pausado (`system_state.scheduler_paused`).
+
+    La pausa sobrevive a un reinicio a proposito.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        True si esta pausado.
+
+    Efectos:
+        Lee `system_state`.
+    """
     return await system_state_repo.get_state(db, KEY_SCHEDULER_PAUSED, "0") == "1"
 
 
 async def set_scheduler_paused(db: Database, paused: bool) -> None:
+    """Pausa o reanuda el scheduler. Pausar DETIENE LA MEDICION.
+
+    Args:
+        db: conexion a la base.
+        paused: True para pausar.
+
+    Efectos:
+        Escribe `system_state` (`scheduler_paused`).
+    """
     await system_state_repo.set_state(db, KEY_SCHEDULER_PAUSED, "1" if paused else "0")

@@ -34,6 +34,15 @@ from app.persistence.models import Side, Trade
 
 
 class BitunixBackend(ExecutionBackend):
+    """Futura ejecucion REAL en Bitunix: solo documentacion, NO se puede instanciar.
+
+    El constructor lanza siempre `NotImplementedError` y nada del codigo la importa (lo
+    comprueba una prueba por AST). Fija la interfaz y deja anotado lo verificado y lo no
+    verificado de la API de Bitunix (ver el docstring del modulo).
+
+    Raises:
+        NotImplementedError: siempre, al construirla.
+    """
     def __init__(self, *_args, **_kwargs) -> None:
         raise NotImplementedError(
             "BitunixBackend es solo un diseno documentado para v1. No se "
@@ -50,13 +59,46 @@ class BitunixBackend(ExecutionBackend):
         sl_margin_loss_pct: float | None = None,
         is_manual: bool = False,
     ) -> Trade:
+        """Desactivado: la ejecucion real no existe en v1.
+
+        Args:
+            symbol: simbolo (se ignora).
+            side: direccion (se ignora).
+            margin_usdt: margen (se ignora).
+            leverage: apalancamiento (se ignora).
+            strategy: estrategia (se ignora).
+            sl_margin_loss_pct: riesgo planeado (se ignora).
+            is_manual: entrada manual (se ignora).
+
+        Raises:
+            NotImplementedError: siempre.
+        """
         raise NotImplementedError("Ejecucion real desactivada en v1.")
 
     async def close_position(self, trade_id: int, reason: str = "MANUAL") -> Trade:
+        """Desactivado: la ejecucion real no existe en v1.
+
+        Args:
+            trade_id: id de la operacion (se ignora).
+            reason: motivo (se ignora).
+
+        Raises:
+            NotImplementedError: siempre.
+        """
         raise NotImplementedError("Ejecucion real desactivada en v1.")
 
     async def get_balance(self) -> float:
+        """Desactivado: la ejecucion real no existe en v1.
+
+        Raises:
+            NotImplementedError: siempre.
+        """
         raise NotImplementedError("Ejecucion real desactivada en v1.")
 
     async def get_positions(self) -> list[Trade]:
+        """Desactivado: la ejecucion real no existe en v1.
+
+        Raises:
+            NotImplementedError: siempre.
+        """
         raise NotImplementedError("Ejecucion real desactivada en v1.")

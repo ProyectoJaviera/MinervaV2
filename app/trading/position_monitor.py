@@ -121,6 +121,16 @@ def _residual_gaps_are_tolerable(gaps: list[int], mark_times: set[int], expected
 
 
 class PositionMonitor:
+    """Monitor de posiciones en vivo: el UNICO que cierra por SL, TP, trailing y liquidacion.
+
+    Vigila a la vez las posiciones de la cuenta paper y las sombras. Con cada tick del
+    WebSocket evalua los niveles (modo tick); cada `MONITOR_TICK_SECONDS` recarga las
+    posiciones, persiste el trailing, refresca marcas y funding y actualiza el equity.
+    Al arrancar reproduce con velas de 1 minuto el periodo caido (`reconcile_on_startup`).
+    NUNCA bloquea cierres; solo el motor de riesgo bloquea aperturas. Reglas de relleno:
+    SL y trailing al precio del tick; TP al nominal salvo un hueco evidente; liquidacion
+    solo si el precio de marca por REST la confirma.
+    """
     def __init__(
         self,
         db: Database,
@@ -152,19 +162,31 @@ class PositionMonitor:
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
+        """Pide que `run_forever` termine despues de su espera actual."""
         self._stop.set()
 
     # --- latido del feed (ws_feed) ------------------------------------------
 
     async def start_feed(self) -> None:
-        """Registra el feed al arrancar: sin esta fila el riesgo no comprueba el latido."""
+        """Registra el feed al arrancar: sin esa fila el motor de riesgo no comprueba el latido.
+
+        Efectos:
+            Escribe `data_source_health` (`ws_feed`).
+        """
         await health_repo.record_success(self.db, health_repo.WS_FEED_SOURCE, datetime.now(UTC))
         self._feed_last_at = time.monotonic()
         self._feed_persist_at = self._feed_last_at
 
     async def handle_ws_message(self, message: dict) -> None:
-        """Cualquier mensaje del servidor (pong incluido) es latido de conexion; los
-        `tickers` alimentan la evaluacion de posiciones."""
+        """Procesa un mensaje del WebSocket: todo es latido; los `tickers` se evaluan.
+
+        Args:
+            message: mensaje JSON ya decodificado del servidor.
+
+        Efectos:
+            Escribe `data_source_health` (`ws_feed`, como mucho cada 5 s). Un tick con precio
+            valido llama a `on_tick`, que puede cerrar posiciones.
+        """
         await self._note_feed_activity()
         if message.get("ch") != "tickers":
             return
@@ -201,6 +223,16 @@ class PositionMonitor:
     # --- evaluacion en vivo (modo tick) -------------------------------------
 
     async def on_tick(self, symbol: str, price: float) -> None:
+        """Evalua las posiciones abiertas de un simbolo contra el precio de un tick.
+
+        Args:
+            symbol: simbolo del tick.
+            price: ultimo precio.
+
+        Efectos:
+            Puede cerrar posiciones (`trades` o `shadow_trades`), y actualiza `system_state` y
+            el riesgo a traves del cierre. Ver `_evaluate` y `_close`.
+        """
         self.ticks_received += 1
         self._last_tick_at[symbol] = time.monotonic()
         self._tick_alerted.discard(symbol)
@@ -323,6 +355,20 @@ class PositionMonitor:
     # --- ciclo periodico ----------------------------------------------------
 
     async def tick_periodic(self, now_ms: int | None = None) -> None:
+        """El ciclo periodico: persiste el trailing, recarga posiciones y refresca todo lo demas.
+
+        En orden: guarda el trailing pendiente, recarga las posiciones abiertas, reintenta
+        reconciliaciones fallidas, consulta por REST los simbolos sin ticks recientes, refresca
+        marcas, aplica el funding pendiente, actualiza el equity del riesgo, marca
+        `monitor_last_seen_ms` y registra si el feed perdio o recupero el latido.
+
+        Args:
+            now_ms: instante en ms Unix; por defecto, el reloj real (para pruebas).
+
+        Efectos:
+            Lee `trades`, `shadow_trades`, `funding_cache`. Red: GET `tickers` y funding.
+            Escribe `trades`, `shadow_trades` y `system_state`.
+        """
         now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
         await self._flush_dirty()
         await self._reload_trades()
@@ -335,6 +381,10 @@ class PositionMonitor:
         self._check_feed_transition()
 
     async def run_forever(self) -> None:
+        """Ejecuta `tick_periodic` cada `MONITOR_TICK_SECONDS` hasta `stop()`.
+
+        Un ciclo fallido se registra y no tumba el monitor.
+        """
         while not self._stop.is_set():
             try:
                 await self.tick_periodic()
@@ -348,6 +398,11 @@ class PositionMonitor:
                 pass
 
     async def shutdown(self) -> None:
+        """Cierre limpio: guarda el trailing pendiente y la ultima hora vista.
+
+        Efectos:
+            Escribe `trades`, `shadow_trades` y `system_state` (`monitor_last_seen_ms`).
+        """
         await self._flush_dirty()
         await system_state_repo.set_state(
             self.db, MONITOR_LAST_SEEN_KEY, str(int(time.time() * 1000))
@@ -484,12 +539,26 @@ class PositionMonitor:
     # --- reconciliacion al reiniciar (modo vela, velas 1m) -------------------
 
     async def reconcile_on_startup(self, now_ms: int | None = None) -> list[tuple[int, str]]:
-        """Reproduce con velas 1m el periodo en que el proceso estuvo caido, para cada
-        posicion abierta: SL, TP, trailing, liquidacion y funding que habrian ocurrido.
-        Si no se pueden obtener velas completas, la posicion queda MARCADA (Etapa 2c:
-        `reconciliation_failed`) en vez de cerrarse a ciegas; los ticks en vivo toman
-        el control mientras tanto (sombras: congeladas, ver `_evaluate`) y se reintenta
-        periodicamente (`_retry_failed_reconciliations`)."""
+        """Reproduce con velas de 1 minuto el periodo en que el proceso estuvo caido.
+
+        Para cada posicion abierta (real o sombra) aplica el SL, TP, trailing, liquidacion y
+        funding que habrian ocurrido desde `monitor_last_seen_ms`. Si no se pueden obtener
+        velas completas la posicion queda MARCADA (`reconciliation_failed`) en vez de cerrarse
+        a ciegas: los ticks en vivo toman el control (las sombras quedan congeladas) y se
+        reintenta cada 5 minutos. Una sombra solo se cierra sin PnL tras 3 intentos y 6 horas
+        de racha; una posicion de la cuenta paper nunca se cierra sola.
+
+        Args:
+            now_ms: instante en ms Unix; por defecto, el reloj real (para pruebas).
+
+        Returns:
+            Lista de `(id de la posicion, resultado)`, p. ej. `ABIERTA`, `CERRADA_SL`,
+            `SIN_VENTANA` o `ERROR`.
+
+        Efectos:
+            Lee `system_state`, `ohlcv_cache`, `funding_cache`. Red: velas de 1 minuto de
+            Bitunix. Escribe `ohlcv_cache`, `trades`, `shadow_trades` y `system_state`.
+        """
         now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
         raw = await system_state_repo.get_state(self.db, MONITOR_LAST_SEEN_KEY)
         last_seen_ms = int(raw) if raw else None

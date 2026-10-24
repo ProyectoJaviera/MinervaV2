@@ -16,7 +16,11 @@ from app.trading.sl_calc import fallback_sl_tp_prices
 
 @dataclass(frozen=True)
 class StrategyLevels:
-    """Lo que la estrategia devuelve tal cual: precios absolutos o None."""
+    """Lo que la estrategia devuelve tal cual, sin completar con el respaldo.
+
+    Precio absoluto del SL, precio absoluto del TP y distancia del trailing; cada uno puede
+    ser `None`.
+    """
 
     stop_price: float | None = None
     take_profit_price: float | None = None
@@ -25,6 +29,10 @@ class StrategyLevels:
 
 @dataclass(frozen=True)
 class TradeLevels:
+    """Niveles de riesgo ya resueltos de una posicion, listos para guardarse.
+
+    La liquidacion siempre existe; el SL, el TP y el trailing pueden ser `None`.
+    """
     sl_price: float | None
     tp_price: float | None
     trailing_distance: float | None
@@ -40,10 +48,28 @@ def resolve_trade_levels(
     planned: StrategyLevels | None,
     settings: Settings,
 ) -> TradeLevels:
-    """`planned=None` (entrada manual, sin estrategia) no tiene SL ni TP; la
-    liquidacion se calcula siempre. Un SL o TP planeado del lado equivocado
-    respecto al llenado se rechaza: la posicion se cerraria en el primer tick
-    sin haber existido."""
+    """Resuelve SL, TP, trailing y liquidacion de una posicion al precio REAL de llenado.
+
+    Los niveles absolutos de la estrategia se respetan; los que faltan se completan con el
+    SL y TP porcentuales de respaldo (igual que el backtest). `planned=None` (entrada
+    manual, sin estrategia) no tiene SL ni TP; la liquidacion se calcula siempre.
+
+    Args:
+        side: direccion.
+        fill_price: precio de llenado.
+        leverage: apalancamiento.
+        notional_usdt: nocional, en USDT (elige el tramo de margen de mantenimiento).
+        margin_tiers_json: tramos de margen del contrato, o `None`.
+        planned: niveles crudos de la estrategia, o `None`.
+        settings: configuracion (SL y TP de respaldo).
+
+    Returns:
+        Los `TradeLevels`.
+
+    Raises:
+        ValueError: si el SL ya fue superado al llenar, o el TP esta del lado equivocado:
+            la posicion se cerraria en el primer tick sin haber existido.
+    """
     liq = compute_liquidation_price(side, fill_price, leverage, notional_usdt, margin_tiers_json)
     if planned is None:
         return TradeLevels(sl_price=None, tp_price=None, trailing_distance=None, liq_price=liq)

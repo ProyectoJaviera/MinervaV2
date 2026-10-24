@@ -73,6 +73,20 @@ MAX_LABELING_DELAY_SECONDS = 1800.0
 
 
 class ShadowLiveLabeler:
+    """Etiquetado en vivo de sombras durante la medicion: pide al LLM su decision y la guarda.
+
+    Por cada sombra que abre el scheduler dispara una tarea en segundo plano (fuego y
+    olvido) que llama a `LlmDecisionService.decide_group` con el prompt congelado, si el
+    flag esta encendido y el hash coincide con el congelado. NUNCA toca la cuenta paper:
+    solo avisa, despues de persistir la etiqueta, a un gancho opcional (`on_decision`, el
+    `submit` del brazo ejecutado), cuyo fallo no afecta al etiquetado.
+
+    Attributes:
+        db: conexion a la base.
+        settings: configuracion.
+        decision_service: servicio que llama al LLM y persiste.
+        on_decision: gancho `(sombra, resultado, candidato)` llamado tras persistir.
+    """
     def __init__(
         self, db: Database, settings: Settings, decision_service: LlmDecisionService,
         on_decision: Callable[[ShadowTrade, Any, Any], None] | None = None,
@@ -93,10 +107,11 @@ class ShadowLiveLabeler:
         return PROMPT_SHA256 == FROZEN_PROMPT_SHA256
 
     def note_cycle_start(self) -> None:
-        """Llamado UNA vez por ciclo de `Scheduler.run_cycle` (no una vez por
-        candidato): deja en cache si el hash coincide para este ciclo, y si
-        no, un WARNING -- se repite en cada ciclo mientras el desajuste dure,
-        a proposito, para que no pase desapercibido."""
+        """Comprueba el hash congelado UNA vez por ciclo del scheduler y deja el resultado en cache.
+
+        Si no coincide registra un WARNING en cada ciclo mientras el desajuste dure (a
+        proposito, para que no pase desapercibido) y el etiquetado de ese ciclo no corre.
+        """
         self._frozen_hash_ok_this_cycle = self.frozen_hash_ok
         if not self._frozen_hash_ok_this_cycle:
             logger.warning(
@@ -107,11 +122,23 @@ class ShadowLiveLabeler:
             )
 
     def maybe_label(self, trade: ShadowTrade, candidate: Any = None) -> None:
-        """Dispara (fuego y olvido) el etiquetado de `trade` si el flag esta
-        en `true` Y el hash de este ciclo coincide con el congelado. Nunca
-        bloquea al llamador (`Scheduler.run_cycle`). `candidate` (la senal agrupada
-        de la que salio la sombra) solo viaja hasta el gancho `on_decision`; el
-        etiquetado no lo usa."""
+        """Dispara (fuego y olvido) el etiquetado de una sombra si el flag y el hash lo permiten.
+
+        Nunca bloquea al scheduler. En la tarea, solo se etiqueta si la sombra SIGUE abierta y
+        su `decision_delay_s` es <= `MAX_LABELING_DELAY_SECONDS` (1800 s) en el momento en que
+        la tarea corre, no cuando se encola; si no, queda `SIN_LLM` sin fila nueva en
+        `llm_logs`.
+
+        Args:
+            trade: la sombra recien abierta.
+            candidate: la senal agrupada de la que salio; solo viaja hasta el gancho
+                `on_decision`, el etiquetado no la usa.
+
+        Efectos:
+            Crea una tarea asyncio. La tarea lee `shadow_trades`, `signals`, `ohlcv_cache`,
+            `trades` y `llm_logs`; red: API de Anthropic; escribe `llm_logs` y
+            `shadow_trades.llm_decision` (una sola vez, inmutable).
+        """
         if not self.settings.llm_live_labeling_enabled:
             return
         if not self._frozen_hash_ok_this_cycle:
@@ -170,12 +197,11 @@ class ShadowLiveLabeler:
         self._dispatch_decision(current, result, candidate)
 
     async def shutdown(self) -> None:
-        """Cancela toda tarea pendiente (cierre limpio del bot, punto 4 del
-        plan) y espera a que terminen de cancelarse antes de volver. Quita
-        estas tareas de `self._tasks` de forma explicita en vez de confiar en
-        `_on_task_done`: ese callback lo agenda `call_soon` al terminar la
-        tarea, y un `await task` ya resuelto no cede el control al loop, asi
-        que podria no haber corrido todavia cuando `shutdown` retorna."""
+        """Cancela las tareas de etiquetado pendientes y espera a que terminen de cancelarse.
+
+        Es el cierre limpio del bot: una etiqueta cancelada a medias deja la sombra en
+        `SIN_LLM`, sin fila nueva.
+        """
         tasks = list(self._tasks)
         for task in tasks:
             task.cancel()
@@ -190,7 +216,16 @@ class ShadowLiveLabeler:
 
 
 def build_decision_service(db: Database, settings: Settings) -> LlmDecisionService:
-    """Instancia compartida de `LlmDecisionService` para el etiquetado en
-    vivo (`fase='MEDICION'`) -- UNA sola, para que el semaforo(4) y el
-    `LlmBudgetTracker` sean los mismos para todas las sombras del proceso."""
+    """La instancia compartida de `LlmDecisionService` para el etiquetado en vivo (`MEDICION`).
+
+    UNA sola, para que el semaforo de concurrencia y el presupuesto diario sean los mismos
+    para todas las sombras del proceso.
+
+    Args:
+        db: conexion a la base.
+        settings: configuracion.
+
+    Returns:
+        El servicio de decision de la fase `MEDICION`.
+    """
     return LlmDecisionService(db, settings, fase=MEDICION)

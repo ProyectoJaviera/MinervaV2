@@ -33,6 +33,10 @@ logger = get_logger(__name__)
 
 @dataclass
 class StrategyResult:
+    """Resultado de una estrategia en una corrida completa.
+
+    Reune su veredicto y cuantas operaciones cayeron en IS y en OOS.
+    """
     strategy_name: str
     verdict: BacktestVerdict
     is_trades: int
@@ -311,6 +315,37 @@ async def run_full_backtest(
     start_ms: int,
     end_ms: int,
 ) -> list[StrategyResult]:
+    """Corre todas las estrategias sobre todos los simbolos y timeframes y calcula sus veredictos.
+
+    Primero BORRA los resultados de corridas anteriores (`backtest_repo.clear_results`), de
+    modo que reintentar tras una interrupcion es idempotente. Cada celda (estrategia,
+    simbolo, timeframe) se simula, se parte en IS y OOS (el OOS es el ultimo
+    `BACKTEST_OOS_SPLIT_PCT` del rango) y se persiste con su benchmark de comprar y mantener.
+    El veredicto de cada estrategia descarta si el profit factor OOS, el porcentaje de
+    simbolos con ventaja, el de folds positivos, el PF estresado, el drawdown o la
+    concentracion incumplen los umbrales; las experimentales y las de evidencia insuficiente
+    nunca se descartan. Los parametros y criterios deben estar commiteados ANTES de ejecutar
+    esto (`docs/historial/FASE2_CRITERIOS.md`).
+
+    Args:
+        db: conexion a la base.
+        settings: configuracion (umbrales, capital, simulaciones).
+        symbols: simbolos del universo; se les suman los de control (`BACKTEST_CONTROL_SYMBOLS`).
+        start_ms: inicio del rango, en ms Unix.
+        end_ms: fin del rango, en ms Unix.
+
+    Returns:
+        Un `StrategyResult` por estrategia.
+
+    Raises:
+        MissingHistoricalDataError: si faltan velas en cache (se detiene con un mensaje
+            claro en vez de reportar "0 operaciones").
+
+    Efectos:
+        Lee `ohlcv_cache`, `funding_cache` y `contract_specs_cache`. Escribe (tras borrar)
+        `backtest_trades`, `backtest_skipped_entries`, `backtest_runs` y `backtest_verdicts`.
+        Sin red.
+    """
     oos_boundary_ms = start_ms + int((end_ms - start_ms) * (1 - settings.backtest_oos_split_pct))
     control_symbols = set(settings.backtest_control_symbols_list)
     all_symbols = sorted(set(symbols) | control_symbols)
