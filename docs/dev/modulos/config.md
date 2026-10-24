@@ -72,7 +72,8 @@ propiedades derivadas (listas separadas por comas, fecha final del backtest en m
   `ACTIVE_STRATEGY`, `MARGIN_MODE`, `ANTHROPIC_HAIKU_MODEL`, `CONFLUENCE_SCORE_THRESHOLD`). Un `.env` que aún los tenga no
   falla (`extra="ignore"`), pero no hacen nada.
 - Algunos comentarios de este archivo citan documentos con su ruta anterior a la reorganización de `docs/` (por
-  ejemplo `docs/FASE3_PLAN.md`, hoy en `docs/historial/`); la información es correcta, la ruta no.
+  ejemplo `FASE3_PLAN.md` sin carpeta, que hoy está en `docs/historial/FASE3_PLAN.md`); la información es
+  correcta, la ruta no.
 - La receta para agregar una variable está en [RECETAS](../RECETAS.md#agregar-una-variable-de-configuración).
 
 <!-- hechos:app/config.py -->

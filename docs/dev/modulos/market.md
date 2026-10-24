@@ -143,7 +143,7 @@ y reintentos con backoff.
 **Responsabilidad.** El cliente de CoinGecko (plan Demo gratuito) con reintentos y backoff.
 
 **Funciones y clases clave.**
-- `CoinGeckoClient.get_markets()` — ranking por capitalización (`GET /coins/markets`, `market_cap_desc`), con filtro opcional
+- `CoinGeckoClient.get_markets()` — ranking por capitalización (`/coins/markets` de CoinGecko, `market_cap_desc`), con filtro opcional
   por `category`; `get_categories_list()`; `CoinGeckoApiError`.
 
 **Invariantes — no romper.**
@@ -152,7 +152,7 @@ y reintentos con backoff.
   el universo pide cada categoría a excluir y resta.
 - Respetar los límites del plan gratuito y la atribución (ver `attribution.py`).
 
-**Trampas conocidas.** `GET /coins/categories/list` respondió 200 sin API key en las pruebas, pero el plan Demo formal exige una
+**Trampas conocidas.** El endpoint `/coins/categories/list` de CoinGecko respondió 200 sin API key en las pruebas, pero el plan Demo formal exige una
 key gratuita: no depender de ese comportamiento.
 
 <!-- hechos:app/market/coingecko_client.py -->

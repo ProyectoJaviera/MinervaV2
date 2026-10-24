@@ -198,7 +198,7 @@ con `. (Join-Path $PSScriptRoot "docker_common.ps1")`.
 - **Tablas que lee:** ninguno
 - **Tablas que escribe:** ninguno
 - **Tablas que crea o altera:** ninguno
-- **Pruebas que lo importan o citan:** `tests/unit/test_build_dev_docs.py`, `tests/unit/test_docstrings.py`
+- **Pruebas que lo importan o citan:** `tests/unit/test_build_dev_docs.py`, `tests/unit/test_dev_docs.py`, `tests/unit/test_docstrings.py`
 <!-- /hechos:scripts/build_dev_docs.py -->
 
 ### `scripts/check_health.py`
@@ -294,7 +294,7 @@ con `. (Join-Path $PSScriptRoot "docker_common.ps1")`.
 - **Tablas que lee:** ninguno
 - **Tablas que escribe:** ninguno
 - **Tablas que crea o altera:** ninguno
-- **Pruebas que lo importan o citan:** `tests/unit/test_dev_docs_facts.py`
+- **Pruebas que lo importan o citan:** `tests/unit/test_dev_docs.py`, `tests/unit/test_dev_docs_facts.py`
 <!-- /hechos:scripts/dev_docs_facts.py -->
 
 ### `scripts/docker_db.py`
