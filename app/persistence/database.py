@@ -782,8 +782,9 @@ class Database:
         """Ejecuta `SCHEMA` y aplica las migraciones de columnas, bajo el candado de escritura.
 
         Es seguro correrlo sobre una base ya poblada: nada se borra ni se reescribe. Para
-        agregar una columna a una tabla existente hay que declararla en `SCHEMA` Y en el
-        diccionario `_*_MIGRATED_COLUMNS` de esa tabla (ver `docs/dev/MODELO_DATOS.md`).
+        agregar una columna a una tabla que ya existe en bases viejas hay que declararla en el
+        diccionario `_*_MIGRATED_COLUMNS` de esa tabla: eso es lo que la agrega (declararla
+        tambien en `SCHEMA` es opcional, ver `docs/dev/MODELO_DATOS.md`).
 
         Efectos:
             Escribe el esquema (CREATE ... IF NOT EXISTS) y `ALTER TABLE ADD COLUMN` para las

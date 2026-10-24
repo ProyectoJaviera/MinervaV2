@@ -247,8 +247,9 @@ las ultimas transacciones en un corte de energia, no la integridad) y llama a
             <div class="docstring"><p>Ejecuta <code><a href="#SCHEMA">SCHEMA</a></code> y aplica las migraciones de columnas, bajo el candado de escritura.</p>
 
 <p>Es seguro correrlo sobre una base ya poblada: nada se borra ni se reescribe. Para
-agregar una columna a una tabla existente hay que declararla en <code><a href="#SCHEMA">SCHEMA</a></code> Y en el
-diccionario <code>_*_MIGRATED_COLUMNS</code> de esa tabla (ver <code>docs/dev/MODELO_DATOS.md</code>).</p>
+agregar una columna a una tabla que ya existe en bases viejas hay que declararla en el
+diccionario <code>_*_MIGRATED_COLUMNS</code> de esa tabla: eso es lo que la agrega (declararla
+tambien en <code><a href="#SCHEMA">SCHEMA</a></code> es opcional, ver <code>docs/dev/MODELO_DATOS.md</code>).</p>
 
 <h6 id="efectos">Efectos:</h6>
 
