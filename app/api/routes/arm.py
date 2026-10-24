@@ -54,6 +54,21 @@ async def arm(
     settings: Settings = Depends(get_settings),
     paper_arm: PaperExecutionArm | None = Depends(get_paper_arm),
 ) -> dict:
+    """`GET /api/arm`: el registro del brazo ejecutado, con sus motivos de omision. Nunca PnL.
+
+    Args:
+        limit: cuantas filas recientes devolver (1-200).
+        db: base (inyectada).
+        settings: configuracion (inyectada).
+        paper_arm: brazo ejecutado (inyectado), o `None`.
+
+    Returns:
+        Estado, configuracion, totales, omitidas por motivo, leyenda de motivos y las
+        entradas recientes.
+
+    Efectos:
+        Lee `paper_execution_log` y `system_state`.
+    """
     epoch = datetime(2000, 1, 1, tzinfo=UTC)
     totals = await log_repo.count_outcomes_since(db, epoch)
     entries = await log_repo.get_recent(db, limit=limit)

@@ -27,6 +27,7 @@ router = APIRouter(prefix="/api/auth")
 
 
 class LoginRequest(BaseModel):
+    """Cuerpo de `POST /api/auth/login`: usuario y contrasena (hasta 128 caracteres cada uno)."""
     username: str = Field(max_length=MAX_CREDENTIAL_LENGTH)
     password: str = Field(max_length=MAX_CREDENTIAL_LENGTH)
 
@@ -35,6 +36,23 @@ class LoginRequest(BaseModel):
 async def login(
     body: LoginRequest, response: Response, settings: Settings = Depends(get_settings)
 ) -> dict:
+    """`POST /api/auth/login`: abre una sesion con una cookie `httpOnly` `SameSite=Strict`.
+
+    El error es generico a proposito: no distingue un usuario inexistente de una contrasena
+    incorrecta. Nunca firma con un `JWT_SECRET` inseguro.
+
+    Args:
+        body: usuario y contrasena.
+        response: respuesta donde se pone la cookie.
+        settings: configuracion (inyectada).
+
+    Returns:
+        `{"ok": True}`.
+
+    Raises:
+        HTTPException: 503 si `JWT_SECRET` es corto o invalido; 401 si las credenciales no
+            coinciden.
+    """
     if not jwt_secret_is_safe(settings.jwt_secret):
         # JWT_SECRET vacio o corto: nunca se firma un token con una clave
         # insegura -- un atacante que la adivine (vacio es adivinable al
@@ -73,10 +91,26 @@ async def login(
 
 @router.post("/logout")
 async def logout(response: Response) -> dict:
+    """`POST /api/auth/logout`: borra la cookie de sesion.
+
+    Args:
+        response: respuesta donde se borra la cookie.
+
+    Returns:
+        `{"ok": True}`.
+    """
     response.delete_cookie(COOKIE_NAME)
     return {"ok": True}
 
 
 @router.get("/me")
 async def me(username: str = Depends(require_auth)) -> dict:
+    """`GET /api/auth/me`: el usuario de la sesion actual.
+
+    Args:
+        username: usuario autenticado (inyectado por `require_auth`).
+
+    Returns:
+        `{"username": ...}`.
+    """
     return {"username": username}

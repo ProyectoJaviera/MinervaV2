@@ -25,6 +25,22 @@ async def recent_decisions(
     fase: str | None = None,
     db: Database = Depends(get_db),
 ) -> list[dict]:
+    """`GET /api/llm/decisions/recent`: decisiones recientes del LLM con su razonamiento.
+
+    Nunca devuelve el `prompt` ni el `response_raw` crudo. Sin regla de velado: la decision y
+    su razonamiento no son un resultado de la operacion.
+
+    Args:
+        limit: cuantas devolver (1-200).
+        fase: si se da, solo `PILOTO` o `MEDICION`.
+        db: base (inyectada).
+
+    Returns:
+        Lista de decisiones con confianza, razonamiento, costo y latencia.
+
+    Efectos:
+        Lee `llm_logs` y `shadow_trades`.
+    """
     rows = await llm_logs_repo.get_recent(db, limit=limit, fase=fase)
     result = []
     for row in rows:

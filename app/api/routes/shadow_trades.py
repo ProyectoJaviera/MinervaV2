@@ -24,6 +24,18 @@ router = APIRouter(prefix="/api/shadow-trades", dependencies=[Depends(require_au
 async def recent(
     limit: int = Query(default=50, ge=1, le=200), db: Database = Depends(get_db),
 ) -> list[dict]:
+    """`GET /api/shadow-trades/recent`: sombras recientes; el resultado solo con la puerta abierta.
+
+    Args:
+        limit: cuantas devolver (1-200).
+        db: base (inyectada).
+
+    Returns:
+        Lista de sombras por lista blanca.
+
+    Efectos:
+        Lee `shadow_trades`, `llm_logs` y `signals`.
+    """
     status = await compute_status_async(db)
     # Gate abierto Y registro oficial del veredicto (no basta con abrir el gate).
     reveal_outcome = is_outcome_reveal_allowed(status)

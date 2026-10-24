@@ -25,8 +25,23 @@ async def results_summary(
     db: Database, settings: Settings, paper_backend, marks: dict[str, float],
     open_positions: list[Trade],
 ) -> dict:
-    """Saldo, PnL realizado y flotante, equity y rendimiento de las operaciones cerradas. **Solo
-    se llama con la puerta abierta**: lee `pnl_net_usdt`."""
+    """Saldo, PnL realizado y flotante, equity y rendimiento de las operaciones cerradas.
+
+    Solo se llama con la puerta abierta: lee `pnl_net_usdt`.
+
+    Args:
+        db: conexion a la base.
+        settings: configuracion.
+        paper_backend: la cuenta paper (para el PnL flotante), o `None`.
+        marks: precios de marca por simbolo.
+        open_positions: posiciones abiertas.
+
+    Returns:
+        Diccionario con balance, PnL, equity, conteos y profit factor.
+
+    Efectos:
+        Lee `trades` (incluido PnL).
+    """
     row = await db.fetch_one(
         "SELECT COUNT(*) AS closed, COALESCE(SUM(pnl_net_usdt), 0) AS realized, "
         "COALESCE(SUM(CASE WHEN pnl_net_usdt > 0 THEN 1 ELSE 0 END), 0) AS wins, "
@@ -68,6 +83,24 @@ async def account(
     paper_backend=Depends(get_paper_backend),
     monitor=Depends(get_monitor),
 ) -> dict:
+    """`GET /api/account`: posiciones abiertas y cerradas de la cuenta paper para el dashboard.
+
+    Con la puerta cerrada ni siquiera se ejecuta la consulta que lee el PnL.
+
+    Args:
+        limit: cuantas cerradas devolver (1-500).
+        db: base (inyectada).
+        settings: configuracion (inyectada).
+        paper_backend: cuenta paper (inyectada), o `None`.
+        monitor: monitor de posiciones (inyectado), o `None`.
+
+    Returns:
+        Diccionario con `reveal_allowed`, el resumen, las listas `open` y `closed` y,
+        solo con la puerta abierta, `results`.
+
+    Efectos:
+        Lee `trades` y la puerta de resultados.
+    """
     reveal = await reveal_allowed(db)
     open_positions = await trades_repo.get_open_positions(db)
     closed = await trades_repo.get_closed_trades(db, limit=limit)

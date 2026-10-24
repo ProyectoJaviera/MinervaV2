@@ -87,6 +87,29 @@ async def health(
     news_collector: NewsCollector | None = Depends(get_news_collector),
     push_notifier: PushNotifier | None = Depends(get_push_notifier),
 ) -> dict:
+    """`GET /health` (sin login): vivo, ciclo de senales, control y bloques por pieza.
+
+    Los bloques son el etiquetado, el brazo ejecutado, las noticias y el push. `status` es
+    `stale` si el ultimo ciclo COMPLETO de senales tiene mas de 90 minutos (o no hubo
+    ninguno), distinto del latido del event loop. Nunca trae PnL ni resultados.
+
+    Args:
+        heartbeat: latido (inyectado).
+        scheduler: scheduler (inyectado).
+        live_labeler: etiquetador en vivo (inyectado).
+        db: base (inyectada).
+        paper_arm: brazo ejecutado (inyectado), o `None`.
+        news_collector: colector de noticias (inyectado), o `None`.
+        push_notifier: notificador push (inyectado), o `None`.
+
+    Returns:
+        Diccionario con `status`, `mode`, `control`, `last_beat_at`, `last_cycle_at`,
+        `log_dropped_count`, `llm_labeling`, `paper_execution`, `news` y `telegram_push`.
+
+    Efectos:
+        Lee `llm_logs`, `system_state`, `paper_execution_log`, `data_source_health` y
+        `news_items`.
+    """
     last_cycle_at = scheduler.last_cycle_at
     stale = (
         last_cycle_at is None

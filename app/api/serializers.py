@@ -49,6 +49,19 @@ _OUTCOME_FIELDS = ("pnl_gross_usdt", "pnl_net_usdt", "exit_price", "close_reason
 
 
 def shadow_trade_to_public_dict(trade: ShadowTrade, *, reveal_outcome: bool) -> dict:
+    """Una sombra para la API, por lista BLANCA; el resultado solo con `reveal_outcome`.
+
+    Es el UNICO punto de paso para revelar un resultado de sombra etiquetada. Si
+    `ShadowTrade` gana un campo nuevo, NO sale hasta agregarlo aqui a mano.
+
+    Args:
+        trade: la sombra.
+        reveal_outcome: True si `is_outcome_reveal_allowed` lo permite.
+
+    Returns:
+        Diccionario con los campos siempre visibles; con `reveal_outcome`, ademas PnL, precio
+        de salida, motivo de cierre y hora de cierre.
+    """
     data = {field: _serialize_value(getattr(trade, field)) for field in _ALWAYS_VISIBLE_FIELDS}
     if reveal_outcome:
         data.update(
@@ -77,6 +90,18 @@ _TRADE_OUTCOME_FIELDS = (
 
 
 def trade_to_public_dict(trade: Trade, *, reveal_outcome: bool) -> dict:
+    """Una operacion de la cuenta paper para `GET /trades` y `GET /positions`, por lista BLANCA.
+
+    Con `reveal_outcome` agrega PnL, costos, motivo de cierre y trailing; sin el, ninguno
+    viaja en el JSON.
+
+    Args:
+        trade: la operacion.
+        reveal_outcome: True si `is_outcome_reveal_allowed` lo permite.
+
+    Returns:
+        El diccionario serializable.
+    """
     data = {
         field: _serialize_value(getattr(trade, field)) for field in _TRADE_ALWAYS_VISIBLE_FIELDS
     }
@@ -99,6 +124,15 @@ _ACCOUNT_TRADE_OUTCOME_FIELDS = tuple(f for f in _TRADE_OUTCOME_FIELDS if f != "
 
 
 def account_trade_to_dict(trade: Trade, *, reveal_outcome: bool) -> dict:
+    """Una operacion para el dashboard (`/api/account`): como la publica, pero `closed_at` siempre.
+
+    Args:
+        trade: la operacion.
+        reveal_outcome: True si `is_outcome_reveal_allowed` lo permite.
+
+    Returns:
+        El diccionario serializable.
+    """
     data = {
         field: _serialize_value(getattr(trade, field)) for field in _ACCOUNT_TRADE_VISIBLE_FIELDS
     }
@@ -138,7 +172,14 @@ def _safe_detail_value(value):
 
 
 def safe_arm_details(details: dict | None) -> dict:
-    """Solo las claves de la lista blanca, con valores simples (nunca estructuras anidadas)."""
+    """Solo las claves de la lista blanca, con valores simples (nunca estructuras anidadas).
+
+    Args:
+        details: detalles de `paper_execution_log.details_json`.
+
+    Returns:
+        Los detalles filtrados (vacio si no era un diccionario).
+    """
     if not isinstance(details, dict):
         return {}
     return {
@@ -147,7 +188,14 @@ def safe_arm_details(details: dict | None) -> dict:
 
 
 def arm_entry_to_dict(entry) -> dict:
-    """Una fila de `paper_execution_log` (`PaperExecutionEntry`) para el dashboard."""
+    """Una fila de `paper_execution_log` para el dashboard, sin PnL y con detalles filtrados.
+
+    Args:
+        entry: la `PaperExecutionEntry`.
+
+    Returns:
+        El diccionario serializable.
+    """
     return {
         "id": entry.id,
         "created_at": _serialize_value(entry.created_at),
@@ -164,7 +212,14 @@ def arm_entry_to_dict(entry) -> dict:
 
 
 def rejection_to_dict(rejection) -> dict:
-    """Un rechazo del motor de riesgo SIN sus detalles (pueden traer el equity)."""
+    """Un rechazo del motor de riesgo SIN sus detalles (pueden traer el equity).
+
+    Args:
+        rejection: el `RiskRejection`.
+
+    Returns:
+        El diccionario serializable.
+    """
     return {
         "id": rejection.id,
         "created_at": _serialize_value(rejection.created_at),

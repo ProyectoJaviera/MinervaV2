@@ -34,6 +34,25 @@ async def risk(
     settings: Settings = Depends(get_settings),
     scheduler: Scheduler | None = Depends(get_scheduler_or_none),
 ) -> dict:
+    """`GET /api/risk`: estado de riesgo, cupos y rechazos recientes.
+
+    Los resultados van detras de la puerta. Solo estados y estructura; la racha de
+    perdidas y el contador de cruces del drawdown van en `numbers`, que es `null` con la
+    puerta cerrada. Los detalles de los rechazos nunca salen (pueden traer el equity).
+
+    Args:
+        limit: cuantos rechazos devolver (1-100).
+        db: base (inyectada).
+        settings: configuracion (inyectada).
+        scheduler: scheduler (inyectado), o `None`.
+
+    Returns:
+        Diccionario con pausa, kill switch, circuit breaker, stop por drawdown, perdida
+        diaria, cupos, scheduler y rechazos.
+
+    Efectos:
+        Lee `system_state`, `trades` y `risk_rejections`, ademas de la puerta de resultados.
+    """
     reveal = await reveal_allowed(db)
     now = datetime.now(UTC)
     paused = await control_state.is_scheduler_paused(db)

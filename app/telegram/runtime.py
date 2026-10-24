@@ -57,6 +57,13 @@ def build_telegram_bot(
 
 
 async def run_isolated(bot: TelegramBot) -> None:
+    """Corre el bot capturando cualquier `Exception` que escape de `run_forever`.
+
+    Asi la tarea nunca termina con una excepcion que el cierre ordenado tendria que propagar.
+
+    Args:
+        bot: el bot.
+    """
     try:
         await bot.run_forever()
     except asyncio.CancelledError:

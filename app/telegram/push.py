@@ -93,6 +93,14 @@ def _utc(value: datetime | None) -> str:
 
 
 def format_open(trade: Trade) -> str:
+    """El texto de aviso de una posicion abierta (simbolo, lado, niveles, origen).
+
+    Args:
+        trade: la posicion.
+
+    Returns:
+        El texto plano.
+    """
     sl = f"SL {_num(trade.sl_price)}" if trade.sl_price is not None else "sin SL"
     tp = f"TP {_num(trade.tp_price)}" if trade.tp_price is not None else "sin TP"
     liq = (
@@ -112,7 +120,17 @@ def format_open(trade: Trade) -> str:
 
 
 def format_close(trade: Trade, *, reveal: bool) -> str:
-    """Con la puerta cerrada NO toca ningun campo de resultado (PnL, salida, motivo, costos)."""
+    """El texto de aviso de una posicion cerrada.
+
+    Con la puerta cerrada NO toca ningun campo de resultado (PnL, salida, motivo, costos).
+
+    Args:
+        trade: la posicion cerrada.
+        reveal: si se pueden mostrar resultados.
+
+    Returns:
+        El texto plano.
+    """
     lines = [
         HEADER,
         f"Posicion cerrada: {trade.symbol} {trade.side.value} "
@@ -134,6 +152,17 @@ def format_close(trade: Trade, *, reveal: bool) -> str:
 
 def format_universe(at: datetime, added: tuple[str, ...], removed: tuple[str, ...],
                     included: frozenset[str]) -> str:
+    """El texto de aviso de un cambio del universo, con la atribucion de CoinGecko.
+
+    Args:
+        at: instante del refresco.
+        added: simbolos que entran.
+        removed: simbolos que salen.
+        included: universo vigente.
+
+    Returns:
+        El texto plano.
+    """
     return "\n".join([
         HEADER,
         f"Universo ACTUALIZADO ({_utc(at)})",
@@ -167,6 +196,17 @@ def _valid_state(state) -> bool:
 
 
 async def risk_snapshot(db: Database) -> dict:
+    """La foto del estado de riesgo: pausa, kill, circuit breaker, stop, perdida diaria y contador.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        Diccionario con las claves de `RISK_KEYS`.
+
+    Efectos:
+        Lee `system_state`.
+    """
     until = await risk_engine.get_active_circuit_breaker_until(db)
     return {
         "paused": await control_state.is_scheduler_paused(db),
@@ -179,7 +219,17 @@ async def risk_snapshot(db: Database) -> dict:
 
 
 async def baseline_state(db: Database) -> dict:
-    """El estado ACTUAL como linea base: lo que ya paso no se notifica."""
+    """El estado ACTUAL como linea base: lo que ya paso no se notifica.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        El diccionario de estado de las notificaciones.
+
+    Efectos:
+        Lee `trades`, `asset_universe` y `system_state`.
+    """
     row = await db.fetch_one("SELECT COALESCE(MAX(id), 0) AS max_id FROM trades")
     open_rows = await db.fetch_all("SELECT id FROM trades WHERE status = 'OPEN' ORDER BY id")
     history = await universe_repo.get_included_history(db, limit_snapshots=1)
@@ -225,6 +275,24 @@ def _apply_universe(included: frozenset[str]) -> Callable[[dict], None]:
 
 
 class PushNotifier:
+    """Notificaciones push: avisa al chat permitido de posiciones, universo y riesgo.
+
+    SONDEA la base de solo lectura cada `TELEGRAM_PUSH_POLL_SECONDS` y compara con el
+    ultimo estado notificado; nada del nucleo sabe que existe. Lo unico que escribe es la
+    clave `push_state` de `system_state`. Al primer arranque toma la linea base SIN avisar
+    el historial; despues avanza evento por evento, solo tras un envio correcto o un error
+    permanente. Mientras la puerta de resultados este cerrada, el aviso de cierre no lleva
+    cifras.
+
+    Attributes:
+        active: True una vez que el estado quedo listo y el bucle corre.
+        sent_total: mensajes enviados.
+        failed_total: intentos fallidos.
+        dropped_total: mensajes descartados por error permanente.
+        consecutive_failures: fallos de envio seguidos.
+        last_sent_at: hora del ultimo envio, o `None`.
+        last_error: tipo del ultimo error (nunca el token), o `None`.
+    """
     def __init__(
         self, db: Database, settings: Settings, client, *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -255,19 +323,30 @@ class PushNotifier:
     # --- ciclo de vida ---------------------------------------------------------------------------
 
     def stop(self) -> None:
+        """Pide que `run_forever` termine despues de su espera actual."""
         self._stop.set()
 
     async def aclose(self) -> None:
+        """Cierra el cliente de Telegram.
+
+        Efectos:
+            Cierra las conexiones de red.
+        """
         aclose = getattr(self.client, "aclose", None)
         if aclose is not None:
             await aclose()
 
     @property
     def poll_seconds(self) -> float:
+        """Segundos entre sondeos: `TELEGRAM_PUSH_POLL_SECONDS` con un minimo de 2."""
         return max(MIN_POLL_SECONDS, float(self.settings.telegram_push_poll_seconds))
 
     def health_block(self) -> dict:
-        """Solo conteos y el TIPO del ultimo error: nunca el token, el chat ni el texto enviado."""
+        """El bloque `telegram_push` de `GET /health`: solo conteos y el TIPO del ultimo error.
+
+        Returns:
+            Diccionario sin el token, el chat ni el texto enviado.
+        """
         return {
             "enabled": self.settings.telegram_push_enabled,
             "active": self.active,
@@ -280,6 +359,17 @@ class PushNotifier:
         }
 
     async def run_forever(self, startup_delay_s: float = STARTUP_DELAY_S) -> None:
+        """Espera el arranque, toma la linea base y sondea cada `poll_seconds` hasta `stop()`.
+
+        Ante fallos de sondeo o de envio seguidos la espera crece (tope 5 minutos).
+
+        Args:
+            startup_delay_s: espera inicial, para no competir con el arranque del bot.
+
+        Efectos:
+            Lee `trades`, `asset_universe` y `system_state`; escribe `system_state`
+            (`push_state`). Red: `sendMessage` a Telegram.
+        """
         try:
             await asyncio.wait_for(self._stop.wait(), timeout=startup_delay_s)
             return
@@ -500,8 +590,18 @@ class PushNotifier:
     # --- sondeo y envio --------------------------------------------------------------------------
 
     async def poll_once(self) -> int:
-        """Un sondeo: detecta eventos y los envia en orden. Devuelve cuantos mensajes se enviaron.
-        La primera vez (sin estado guardado) solo toma la linea base."""
+        """Un sondeo: detecta eventos y los envia en orden (maximo 10 por sondeo).
+
+        La primera vez, sin estado guardado, solo toma la linea base. Cada evento avanza el
+        estado y lo guarda solo si se entrego o se descarto; si hay que reintentar, corta.
+
+        Returns:
+            Cuantos mensajes se enviaron.
+
+        Efectos:
+            Lee `trades`, `asset_universe`, `system_state`, `control_audit`; escribe
+            `system_state` (`push_state`). Red: `sendMessage` a Telegram.
+        """
         if self._state is None:
             if await self._ensure_state():
                 return 0
@@ -524,6 +624,14 @@ class PushNotifier:
         return sent
 
     async def send_startup(self, fresh_baseline: bool) -> None:
+        """Envia el mensaje de arranque con el estado de riesgo.
+
+        Args:
+            fresh_baseline: True si la linea base se tomo ahora (no se avisan eventos previos).
+
+        Efectos:
+            Red: `sendMessage` a Telegram.
+        """
         state = self._state or await baseline_state(self.db)
         risk = state["risk"]
         lines = [

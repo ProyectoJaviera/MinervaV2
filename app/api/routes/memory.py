@@ -52,6 +52,19 @@ async def lessons(
     status: Literal["ACTIVE", "INSUFFICIENT", "UNSTABLE", "NOT_SIGNIFICANT", "ALL"] = ACTIVE,
     db: Database = Depends(get_db), settings: Settings = Depends(get_settings),
 ) -> dict:
+    """`GET /api/memory/lessons`: las lecciones, vacio salvo que los resultados sean visibles.
+
+    Args:
+        status: filtro de estado (por defecto `ACTIVE`).
+        db: base (inyectada).
+        settings: configuracion (inyectada).
+
+    Returns:
+        Las lecciones de la ultima reconstruccion, o una lista vacia con el motivo.
+
+    Efectos:
+        Lee `lessons` y la puerta de resultados.
+    """
     if not await results_visible(db):
         return {
             "results_visible": False, "lessons": [],
@@ -79,6 +92,21 @@ async def reports(
     kind: Literal["POSTMORTEM", "CALIBRATION"], limit: int = Query(default=5, ge=1, le=50),
     db: Database = Depends(get_db),
 ) -> dict:
+    """`GET /api/memory/reports`: informes de post-mortem o calibracion.
+
+    Vacio mientras los resultados esten ocultos.
+
+    Args:
+        kind: `POSTMORTEM` o `CALIBRATION`.
+        limit: cuantos devolver (1-50).
+        db: base (inyectada).
+
+    Returns:
+        Los informes, o una lista vacia con el motivo.
+
+    Efectos:
+        Lee `lessons_reports` y la puerta de resultados.
+    """
     if not await results_visible(db):
         return {
             "results_visible": False, "reports": [],

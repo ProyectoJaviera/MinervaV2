@@ -51,6 +51,11 @@ def build_push_notifier(
 
 
 async def run_isolated(notifier: PushNotifier) -> None:
+    """Corre el notificador capturando cualquier `Exception` que escape.
+
+    Args:
+        notifier: el notificador.
+    """
     try:
         await notifier.run_forever()
     except asyncio.CancelledError:

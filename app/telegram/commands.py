@@ -75,6 +75,11 @@ class BotContext:
     now: Callable[[], datetime] = lambda: datetime.now(UTC)  # noqa: E731
 
     def marks(self) -> dict[str, float]:
+        """Los precios de marca que ya mantiene el monitor, sin llamar a la red.
+
+        Returns:
+            Copia del diccionario `simbolo -> precio` (vacio si no hay monitor).
+        """
         return dict(getattr(self.monitor, "marks", {}) or {})
 
 
@@ -83,7 +88,14 @@ def _usd(value: float) -> str:
 
 
 def parse_command(text: str) -> tuple[str, list[str]] | None:
-    """('/status', args) o None si no es un comando. Acepta `/status@NombreDelBot`."""
+    """Separa un comando y sus argumentos. Acepta `/status@NombreDelBot`.
+
+    Args:
+        text: texto del mensaje.
+
+    Returns:
+        La tupla `(comando en minusculas, argumentos)`, o `None` si no es un comando.
+    """
     parts = text.strip().split()
     if not parts or not parts[0].startswith("/"):
         return None
@@ -92,6 +104,11 @@ def parse_command(text: str) -> tuple[str, list[str]] | None:
 
 
 def help_text() -> str:
+    """La lista de comandos disponibles.
+
+    Returns:
+        El texto de ayuda (primera linea `MODO PAPER TRADING`).
+    """
     return "\n".join([
         HEADER,
         "Comandos: " + ", ".join(COMMANDS),
@@ -126,6 +143,22 @@ def _measurement_line(status: MeasurementStatus) -> str:
 
 
 async def cmd_status(ctx: BotContext) -> str:
+    """`/status`: estado del bot, del riesgo, del gasto del LLM y de la medicion.
+
+    El balance y el equity de la cuenta paper solo se muestran con
+    `is_outcome_reveal_allowed`; antes dice que estan ocultos. Nunca muestra resultados de
+    las sombras ni la comparacion APROBADA/RECHAZADA.
+
+    Args:
+        ctx: dependencias del bot.
+
+    Returns:
+        El texto de la respuesta.
+
+    Efectos:
+        Lee `system_state`, `trades`, `llm_logs`, `shadow_trades`, `signals`,
+        `paper_execution_log`. No usa la red.
+    """
     now = ctx.now()
     paused = await control_state.is_scheduler_paused(ctx.db)
     kill = await risk_engine.is_kill_switch_active(ctx.db)
@@ -197,6 +230,19 @@ async def _results_visible(ctx: BotContext) -> bool:
 
 
 async def cmd_positions(ctx: BotContext) -> str:
+    """`/positions`: las posiciones abiertas de la cuenta paper (nunca las sombras).
+
+    El PnL flotante solo se muestra con `is_outcome_reveal_allowed`.
+
+    Args:
+        ctx: dependencias del bot.
+
+    Returns:
+        El texto de la respuesta.
+
+    Efectos:
+        Lee `trades`, `llm_logs`, `shadow_trades` y `signals` (la puerta). No usa la red.
+    """
     positions = await trades_repo.get_open_positions(ctx.db)
     if not positions:
         return f"{HEADER}\nSin posiciones abiertas (cuenta real simulada)."
@@ -221,6 +267,17 @@ async def cmd_positions(ctx: BotContext) -> str:
 
 
 async def cmd_balance(ctx: BotContext) -> str:
+    """`/balance`: capital inicial, y balance y equity solo con `is_outcome_reveal_allowed`.
+
+    Args:
+        ctx: dependencias del bot.
+
+    Returns:
+        El texto de la respuesta.
+
+    Efectos:
+        Lee `trades` y la puerta de resultados. No usa la red.
+    """
     initial = ctx.settings.initial_capital_usdt
     if not await _results_visible(ctx):
         positions = await trades_repo.get_open_positions(ctx.db)
@@ -281,9 +338,21 @@ async def _real_account_metrics(ctx: BotContext, *, reveal: bool) -> list[str]:
 
 
 async def cmd_metrics(ctx: BotContext) -> str:
-    """SOLO AVANCE de la medicion (igual que el dashboard) con el gate cerrado Y
-    abierto -- decision del 2026-10-17: Telegram nunca muestra la comparacion
-    APROBADA/RECHAZADA ni PnL de sombras; el veredicto sale de ai_value_report.py."""
+    """`/metrics`: SOLO avance de la medicion, con el gate cerrado y abierto.
+
+    Decision del 2026-10-17: Telegram nunca muestra la comparacion APROBADA/RECHAZADA ni
+    PnL de sombras; el veredicto sale de `scripts/ai_value_report.py`. De la cuenta paper
+    solo muestra PF y esperanza con `is_outcome_reveal_allowed`.
+
+    Args:
+        ctx: dependencias del bot.
+
+    Returns:
+        El texto de la respuesta.
+
+    Efectos:
+        Lee `llm_logs`, `shadow_trades`, `signals` y `trades` (solo un conteo sin la puerta).
+    """
     status = await compute_status_async(ctx.db)
     gate_open = is_measurement_gate_open(status)
     lines = [HEADER, "Avance de la medicion (hash congelado):"]
@@ -352,6 +421,21 @@ async def _record_control(ctx: BotContext, command: str) -> None:
 
 
 async def execute_control(ctx: BotContext, command: str) -> str:
+    """Ejecuta `/pause`, `/resume` o `/kill` ya confirmado y devuelve el texto de respuesta.
+
+    La logica y el rastro (`control_audit`) son los mismos que usa el dashboard.
+
+    Args:
+        ctx: dependencias del bot.
+        command: `/pause`, `/resume` o `/kill`.
+
+    Returns:
+        El texto de la respuesta (avisa si el stop por drawdown sigue activo).
+
+    Efectos:
+        Escribe `system_state` (pausa, kill switch y `telegram_last_control_action`) y
+        `control_audit`.
+    """
     # La logica (y el registro en `control_audit`) es la misma que usa el dashboard.
     await apply_control(
         ctx.db, ACTION_OF_COMMAND[command], channel=CHANNEL_TELEGRAM, actor="telegram",
@@ -382,6 +466,24 @@ async def execute_control(ctx: BotContext, command: str) -> str:
 async def cmd_control(
     ctx: BotContext, command: str, args: list[str], confirmations: ConfirmationManager,
 ) -> str:
+    """Maneja `/pause`, `/resume` y `/kill` con confirmacion de dos pasos.
+
+    Sin argumentos advierte (que pausar DETIENE la medicion) y registra una solicitud
+    pendiente; con `SI` dentro de la ventana ejecuta. Un `SI` sin solicitud vigente del
+    mismo comando no hace nada.
+
+    Args:
+        ctx: dependencias del bot.
+        command: `/pause`, `/resume` o `/kill`.
+        args: argumentos del comando.
+        confirmations: administrador de solicitudes pendientes.
+
+    Returns:
+        El texto de la respuesta.
+
+    Efectos:
+        Con la confirmacion, ver `execute_control`.
+    """
     if not args:
         confirmations.request(command)
         window = int(confirmations.window_seconds)
@@ -412,8 +514,11 @@ READ_ONLY: dict[str, Handler] = {
 
 
 class CommandRouter:
-    """Callable `texto -> respuesta` para `TelegramBot`. Comando desconocido, `/start`
-    y `/help`: la lista de comandos. Texto que no es un comando: sin respuesta."""
+    """Enruta el texto de un mensaje al comando correspondiente; es el `handler` de `TelegramBot`.
+
+    Un comando desconocido, `/start` y `/help` devuelven la lista de comandos; un texto que
+    no es un comando no tiene respuesta. Cada comando tiene un tope de 20 segundos.
+    """
 
     def __init__(
         self, ctx: BotContext, confirmations: ConfirmationManager | None = None,

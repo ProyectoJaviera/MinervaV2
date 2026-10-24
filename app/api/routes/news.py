@@ -25,6 +25,14 @@ router = APIRouter(prefix="/api/news", dependencies=[Depends(require_auth)])
 
 
 def news_item_to_public_dict(item: NewsRecord) -> dict:
+    """Un titular para la API: saneado de nuevo y con el enlace solo si es http(s).
+
+    Args:
+        item: el titular.
+
+    Returns:
+        El diccionario serializable (nunca el cuerpo del articulo).
+    """
     return {
         "id": item.id,
         "source": item.source,

@@ -17,6 +17,19 @@ router = APIRouter()
 
 @router.get("/positions")
 async def list_positions(db: Database = Depends(get_db)) -> list[dict]:
+    """`GET /positions` (sin login): posiciones abiertas de la cuenta paper.
+
+    Sin el registro oficial del veredicto no trae PnL, costos ni trailing.
+
+    Args:
+        db: base (inyectada).
+
+    Returns:
+        Lista de posiciones por lista blanca.
+
+    Efectos:
+        Lee `trades` y la puerta de resultados.
+    """
     reveal = is_outcome_reveal_allowed(await compute_status_async(db))
     positions = await trades_repo.get_open_positions(db)
     return [trade_to_public_dict(t, reveal_outcome=reveal) for t in positions]

@@ -23,6 +23,18 @@ router = APIRouter(prefix="/api/measurement", dependencies=[Depends(require_auth
 
 @router.get("/status")
 async def status(db: Database = Depends(get_db)) -> dict:
+    """`GET /api/measurement/status`: avance de la medicion bajo el hash congelado. Nunca PnL.
+
+    Args:
+        db: base (inyectada).
+
+    Returns:
+        Conteos, tasa de aprobacion, N efectivo, ritmos, `gate_open` y
+        `outcome_reveal_allowed`.
+
+    Efectos:
+        Lee `llm_logs`, `shadow_trades` y `signals`.
+    """
     s = await compute_status_async(db)
     return {
         "frozen_hash": s.frozen_hash,

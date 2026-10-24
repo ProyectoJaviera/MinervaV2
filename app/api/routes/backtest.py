@@ -33,6 +33,14 @@ def round_reason(text: str) -> str:
 
 
 def parse_reasons(raw: str | None) -> list[str]:
+    """Los motivos de descarte de un veredicto como lista de textos, con los decimales acotados.
+
+    Args:
+        raw: el JSON guardado en `discard_reasons_json`, o `None`.
+
+    Returns:
+        Lista de textos (vacia si falta o no es valido).
+    """
     if not raw:
         return []
     try:
@@ -45,6 +53,15 @@ def parse_reasons(raw: str | None) -> list[str]:
 
 
 def verdict_to_dict(v: BacktestVerdict, eligible: list[str]) -> dict:
+    """Un veredicto de backtest para el dashboard, con si la estrategia es elegible hoy.
+
+    Args:
+        v: el veredicto.
+        eligible: estrategias elegibles de la cuenta (vacio = todas).
+
+    Returns:
+        El diccionario serializable.
+    """
     return {
         "strategy": v.strategy,
         "experimental": v.is_experimental,
@@ -68,6 +85,20 @@ def verdict_to_dict(v: BacktestVerdict, eligible: list[str]) -> dict:
 async def verdicts(
     db: Database = Depends(get_db), settings: Settings = Depends(get_settings),
 ) -> dict:
+    """`GET /api/backtest/verdicts`: lo que decidio el backtest de la Fase 2, por estrategia.
+
+    Es historico de backtest, NO la medicion en vivo: no pasa por la puerta de resultados.
+
+    Args:
+        db: base (inyectada).
+        settings: configuracion (inyectada).
+
+    Returns:
+        Nota, estrategias elegibles, fecha de la corrida y los veredictos.
+
+    Efectos:
+        Lee `backtest_verdicts`.
+    """
     eligible = settings.real_account_eligible_strategies_list
     rows = await backtest_repo.get_verdicts(db)
     latest = max((v.run_at for v in rows), default=None)

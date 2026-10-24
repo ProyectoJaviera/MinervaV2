@@ -51,6 +51,19 @@ async def universe(
     settings: Settings = Depends(get_settings),
     monitor=Depends(get_monitor),
 ) -> dict:
+    """`GET /api/universe`: el universo vigente con el motivo de cada exclusion, y su atribucion.
+
+    Args:
+        db: base (inyectada).
+        settings: configuracion (inyectada).
+        monitor: monitor de posiciones (inyectado), para el ultimo precio de cada incluido.
+
+    Returns:
+        Snapshot, antiguedad, cambios recientes, candidatos y la atribucion de CoinGecko.
+
+    Efectos:
+        Lee `asset_universe` y `system_state`.
+    """
     snapshot = await universe_repo.get_latest_snapshot(db)
     refreshed_at = snapshot[0].refreshed_at if snapshot else None
     age_hours = (

@@ -53,6 +53,17 @@ MAX_CREDENTIAL_LENGTH = 128
 
 
 def jwt_secret_is_safe(secret: str) -> bool:
+    """Dice si `JWT_SECRET` cumple el minimo de 32 caracteres (256 bits para HS256).
+
+    Con un secreto vacio o corto un atacante podria forjar un token valido: por eso se
+    corta el camino ANTES de firmar o verificar nada.
+
+    Args:
+        secret: el secreto configurado.
+
+    Returns:
+        True si es suficientemente largo.
+    """
     return len(secret) >= MIN_SECRET_LENGTH
 
 
@@ -70,6 +81,14 @@ def warn_if_jwt_secret_is_unsafe(logger: logging.Logger, settings: Settings) -> 
 
 
 def hash_password(password: str) -> str:
+    """Hash bcrypt de una contrasena (para `AUTH_PASSWORD_HASH`).
+
+    Args:
+        password: la contrasena en claro.
+
+    Returns:
+        El hash bcrypt como texto.
+    """
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
@@ -98,6 +117,19 @@ def verify_username(username: str, expected_username: str) -> bool:
 
 
 def create_session_token(username: str, *, secret: str, now: datetime | None = None) -> str:
+    """Crea el JWT de sesion (HS256) con `sub`, `iat` y `exp` (24 horas despues).
+
+    Args:
+        username: usuario autenticado.
+        secret: `JWT_SECRET`.
+        now: instante de emision; por defecto, ahora (UTC).
+
+    Returns:
+        El token firmado.
+
+    Raises:
+        jwt.PyJWTError: si el secreto tiene una forma que la libreria rechaza.
+    """
     now = now or datetime.now(UTC)
     payload = {"sub": username, "iat": now, "exp": now + SESSION_DURATION}
     return jwt.encode(payload, secret, algorithm=JWT_ALGORITHM)

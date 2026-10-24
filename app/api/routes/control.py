@@ -65,10 +65,19 @@ DRAWDOWN_NOTE = (
 
 
 class ControlRequest(BaseModel):
+    """Cuerpo de `POST /api/control/{action}`: la palabra de confirmacion exacta de la accion."""
     confirm: str = Field(max_length=32)
 
 
 def require_controls_enabled(settings: Settings = Depends(get_settings)) -> None:
+    """Dependencia: rechaza con 403 si `DASHBOARD_CONTROLS_ENABLED` es false.
+
+    Args:
+        settings: configuracion (inyectada).
+
+    Raises:
+        HTTPException: 403 con los controles apagados.
+    """
     if not settings.dashboard_controls_enabled:
         raise HTTPException(
             status_code=403,
@@ -77,9 +86,18 @@ def require_controls_enabled(settings: Settings = Depends(get_settings)) -> None
 
 
 def require_same_origin(request: Request) -> None:
-    """Rechaza una peticion que un navegador haya originado desde otro sitio: el `Origin` debe
-    ser exactamente este servidor (esquema, host y puerto). `curl` y otras herramientas locales
-    no mandan `Origin` y siguen necesitando la cookie de sesion."""
+    """Rechaza una peticion que un navegador haya originado desde otro sitio.
+
+    El `Origin` debe ser exactamente este servidor (esquema, host y puerto) y `Sec-Fetch-Site`
+    debe ser `same-origin` o `none`. `curl` y otras herramientas locales no mandan `Origin` y
+    siguen necesitando la cookie de sesion.
+
+    Args:
+        request: la peticion.
+
+    Raises:
+        HTTPException: 403 si el origen no es el propio servidor.
+    """
     fetch_site = request.headers.get("sec-fetch-site")
     if fetch_site is not None and fetch_site not in ("same-origin", "none"):
         raise HTTPException(status_code=403, detail="Origen no permitido")
@@ -93,6 +111,14 @@ def require_same_origin(request: Request) -> None:
 
 
 def require_json(request: Request) -> None:
+    """Dependencia: exige `Content-Type: application/json`.
+
+    Args:
+        request: la peticion.
+
+    Raises:
+        HTTPException: 415 si el tipo de contenido es otro.
+    """
     content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if content_type != "application/json":
         raise HTTPException(status_code=415, detail="Se espera application/json")
@@ -106,7 +132,20 @@ def _state(state) -> dict:
 async def info(
     db: Database = Depends(get_db), settings: Settings = Depends(get_settings),
 ) -> dict:
-    """Advertencias y palabras de confirmacion de cada accion (la fuente de verdad es Python)."""
+    """`GET /api/control/info`: advertencias y palabras de confirmacion de cada accion.
+
+    La fuente de verdad es Python; el dashboard solo muestra lo que devuelve esto.
+
+    Args:
+        db: base (inyectada).
+        settings: configuracion (inyectada).
+
+    Returns:
+        Si los controles estan habilitados, el estado actual y los datos de cada accion.
+
+    Efectos:
+        Lee `system_state`.
+    """
     return {
         "enabled": settings.dashboard_controls_enabled,
         "state": _state(await read_state(db)),
@@ -126,6 +165,18 @@ async def info(
 async def audit(
     limit: int = Query(default=20, ge=1, le=100), db: Database = Depends(get_db),
 ) -> dict:
+    """`GET /api/control/audit`: las acciones de control mas recientes.
+
+    Args:
+        limit: cuantas devolver (1-100).
+        db: base (inyectada).
+
+    Returns:
+        Diccionario con la lista `entries`.
+
+    Efectos:
+        Lee `control_audit`.
+    """
     entries = await control_audit_repo.get_recent(db, limit=limit)
     return {
         "entries": [
@@ -161,6 +212,28 @@ async def execute(
     username: str = Depends(require_auth),
     db: Database = Depends(get_db),
 ) -> dict:
+    """`POST /api/control/{action}`: pausar, reanudar o kill switch, con confirmacion.
+
+    Defensas en orden (todas dependencias de la ruta, asi se comprueban antes del cuerpo):
+    login, interruptor `DASHBOARD_CONTROLS_ENABLED`, mismo origen, solo JSON y la palabra de
+    confirmacion exacta (`PAUSAR`, `REANUDAR` o `KILL`). Pausar o activar el kill switch
+    DETIENE LA MEDICION. No abre ni cierra posiciones.
+
+    Args:
+        action: `pause`, `resume` o `kill`.
+        body: la palabra de confirmacion.
+        username: usuario autenticado (inyectado).
+        db: base (inyectada).
+
+    Returns:
+        Resultado con el estado antes y despues, el actor, el id de auditoria y un mensaje.
+
+    Raises:
+        HTTPException: 422 si la palabra de confirmacion no coincide (no se cambia nada).
+
+    Efectos:
+        Escribe `system_state` (pausa y kill switch) y `control_audit`.
+    """
     if body.confirm != CONFIRM_PHRASES[action]:
         raise HTTPException(
             status_code=422,

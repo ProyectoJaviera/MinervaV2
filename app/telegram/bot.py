@@ -43,7 +43,18 @@ CommandHandler = Callable[[str], Awaitable[str | None]]
 
 
 def is_allowed_update(update: dict, allowed_chat_id: str | int) -> bool:
-    """True solo para un mensaje de texto de un chat PRIVADO con el id exacto."""
+    """True solo para un mensaje de texto de un chat PRIVADO con el id exacto permitido.
+
+    Cualquier otro chat, usuario o tipo de chat (un grupo con el mismo id incluido) se
+    ignora en silencio, para no confirmarle a un tercero que el bot existe.
+
+    Args:
+        update: el update de la Bot API.
+        allowed_chat_id: `TELEGRAM_CHAT_ID`.
+
+    Returns:
+        True si hay que procesarlo.
+    """
     message = update.get("message")
     if not isinstance(message, dict) or not isinstance(message.get("text"), str):
         return False
@@ -54,6 +65,19 @@ def is_allowed_update(update: dict, allowed_chat_id: str | int) -> bool:
 
 
 class TelegramBot:
+    """Bucle de long-polling del bot de Telegram, aislado y con lista de permitidos estricta.
+
+    Corre como una tarea aparte y nunca puede tumbar ni frenar el scheduler, el etiquetado
+    ni el monitor: toda excepcion de una iteracion se captura, se registra SOLO por tipo
+    (jamas la URL ni el token) y se reintenta con backoff exponencial con tope. Al arrancar
+    descarta lo pendiente (no ejecuta nada acumulado durante una caida) y descarta mensajes
+    de mas de `max_message_age_seconds`. El offset avanza ANTES de procesar: un update roto
+    no se repite en bucle.
+
+    Attributes:
+        allowed_chat_id: el unico chat al que se atiende.
+        ignored_count: updates ignorados (solo un contador; nunca se registra su contenido).
+    """
     def __init__(
         self,
         *,
@@ -79,9 +103,22 @@ class TelegramBot:
         self.ignored_count = 0  # solo un contador: nunca se registra el contenido
 
     def stop(self) -> None:
+        """Pide que `run_forever` termine despues de su espera actual."""
         self._stop.set()
 
     async def process_update(self, update: dict) -> None:
+        """Procesa un update: filtra, responde y nunca propaga una excepcion del comando.
+
+        Un comando que falla se responde con "error interno" (solo al chat permitido) y el
+        bucle sigue.
+
+        Args:
+            update: el update de la Bot API.
+
+        Efectos:
+            Red: `sendMessage` a Telegram. Lo que haga el manejador del comando (lecturas de la
+            base; `/pause`, `/resume` y `/kill` escriben `system_state` y `control_audit`).
+        """
         if not is_allowed_update(update, self.allowed_chat_id):
             self.ignored_count += 1
             return
@@ -127,6 +164,13 @@ class TelegramBot:
         return min(BACKOFF_MAX_SECONDS, BACKOFF_BASE_SECONDS * 2**exponent)
 
     async def run_forever(self) -> None:
+        """Bucle de long-polling hasta `stop()`, con backoff exponencial ante fallos.
+
+        Registra un WARNING por racha de fallos (no uno por intento) y cierra el cliente al salir.
+
+        Efectos:
+            Red: `getUpdates` y `sendMessage` a la Bot API de Telegram.
+        """
         try:
             while not self._stop.is_set():
                 try:

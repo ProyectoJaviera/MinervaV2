@@ -23,10 +23,23 @@ YES_WORDS = frozenset({"si", "sí"})
 
 
 def is_yes(args: list[str]) -> bool:
+    """True si los argumentos son exactamente `SI` (con o sin tilde).
+
+    Args:
+        args: argumentos del comando.
+
+    Returns:
+        True si es una confirmacion.
+    """
     return len(args) == 1 and args[0].lower() in YES_WORDS
 
 
 class ConfirmationManager:
+    """Administra UNA solicitud pendiente de confirmacion, con ventana de 60 segundos.
+
+    Pedir otro comando cancela la anterior; confirmar la consume. Vive en memoria: un
+    reinicio la descarta a proposito. El reloj es inyectable para las pruebas.
+    """
     def __init__(
         self, *, window_seconds: float = CONFIRM_WINDOW_SECONDS,
         now: Callable[[], float] = time.monotonic,
@@ -36,10 +49,22 @@ class ConfirmationManager:
         self._pending: tuple[str, float] | None = None  # (comando, vence en)
 
     def request(self, command: str) -> None:
+        """Registra una solicitud pendiente del comando, que reemplaza a la anterior.
+
+        Args:
+            command: el comando (`/pause`, `/resume` o `/kill`).
+        """
         self._pending = (command, self._now() + self.window_seconds)
 
     def confirm(self, command: str) -> bool:
-        """True (y consume la solicitud) solo si hay una vigente del MISMO comando."""
+        """Confirma y consume la solicitud solo si hay una vigente del MISMO comando.
+
+        Args:
+            command: el comando que se quiere confirmar.
+
+        Returns:
+            True si se confirmo (la solicitud se consume).
+        """
         pending = self._pending
         if pending is None:
             return False
