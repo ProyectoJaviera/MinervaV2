@@ -273,5 +273,9 @@ La medición del valor del LLM depende de que no cambien el prompt, las *feature
 - Los parámetros de simulación y de universo (margen, apalancamiento, comisiones, deslizamiento, SL/TP de respaldo,
   tamaño del universo, estrategias elegibles) cambian *qué población de señales se mide y cómo se simula*. **Recomendación:**
   cámbialos solo al empezar una medición nueva.
-- Los de riesgo y de vigencia de datos (topes de pérdida, *circuit breaker*, cupos) solo afectan a la cuenta paper
-  del brazo ejecutado, no a las sombras con las que se calcula el veredicto.
+- Los de riesgo (topes de pérdida, *circuit breaker*, cupos) y los tiempos del monitor solo afectan a la cuenta paper
+  del brazo ejecutado, no a las sombras con las que se calcula el veredicto. **Excepción:** `CANDLE_STALE_TOLERANCE_SECONDS`
+  y `FUNDING_STALE_MARGIN_HOURS` deciden cuándo una vela o un *funding* están obsoletos y, con ello, qué señales llegan a
+  ser sombra: cuentan como los de arriba.
+- La lista completa de lo que no se puede cambiar, con el porqué de cada cosa, está en
+  [`dev/ZONAS_PROTEGIDAS.md`](dev/ZONAS_PROTEGIDAS.md#parámetros-de-configuración-protegidos).

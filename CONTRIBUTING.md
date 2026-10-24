@@ -20,6 +20,11 @@ tocar nada, lee las tres de abajo.
    `is_outcome_reveal_allowed` (`app/trading/measurement_status.py`) y fallar *cerrado*. Hay un barrido de
    punta a punta (`tests/e2e/`) que lo vigila.
 
+> **Si vas a cambiar código, lee primero la [documentación técnica](docs/dev/README.md)** y, en particular,
+> [`docs/dev/ZONAS_PROTEGIDAS.md`](docs/dev/ZONAS_PROTEGIDAS.md): qué partes del código, de la configuración y de
+> la base no se pueden tocar mientras la medición está en curso, y por qué. `python scripts/check_measurement_safety.py`
+> compara tus cambios con esa lista y avisa si tocaste algo protegido.
+
 ## Preparar el entorno
 
 Necesitas Python 3.11 o 3.12 (`requires-python = ">=3.11,<3.13"`; con 3.13 o superior `pip install` se niega a
@@ -51,10 +56,11 @@ correr las pruebas, igual que al ejecutar el bot.
 Todo esto debe estar en verde:
 
 ```bash
-pytest                              # unas 2.200 pruebas (unitarias, de integración y de punta a punta; unos 11 min)
+pytest                              # unas 2.400 pruebas (unitarias, de integración y de punta a punta; unos 12 min)
 ruff check .
 npm --prefix frontend run test      # Vitest
 npm --prefix frontend run build     # tsc + vite build
+python scripts/check_measurement_safety.py   # ¿tocaste algo protegido de la medición?
 ```
 
 - La suite completa tarda; mientras desarrollas corre solo lo que tocas (`pytest tests/unit/test_risk_engine.py`).
@@ -66,6 +72,10 @@ npm --prefix frontend run build     # tsc + vite build
   `python scripts/export_schema_doc.py --check` para verificar que está al día).
 - Si cambias las dependencias de ejecución de `pyproject.toml`, regenera las versiones exactas de la imagen:
   `python scripts/export_docker_requirements.py` (con `--check` verifica).
+- Todo módulo, clase y función pública de `app/` y `scripts/` lleva un docstring con sus secciones (`Args`,
+  `Returns`, `Raises` y `Efectos:`); una prueba lo exige. Si cambias firmas o docstrings, regenera la referencia
+  con `python scripts/build_dev_docs.py` (formato y detalle en
+  [`docs/dev/ENTORNO_DESARROLLO.md`](docs/dev/ENTORNO_DESARROLLO.md#documentación-técnica)).
 - Si cambias variables de configuración, documentos o comandos, la documentación tiene pruebas que lo exigen
   (`tests/unit/test_public_docs.py`): enlaces y anclas que resuelven, todas las variables de `.env.example`
   descritas en [`docs/CONFIGURACION.md`](docs/CONFIGURACION.md), scripts y opciones que existen de verdad.

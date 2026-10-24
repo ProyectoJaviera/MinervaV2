@@ -15,6 +15,7 @@ qué problema investiga) y sigue por la columna que te corresponda.
 | **Operarlo día a día** | [Uso diario](USO.md) → [Solución de problemas](SOLUCION_PROBLEMAS.md) → [Seguridad](SEGURIDAD.md) |
 | **Saber cuánto cuesta y qué no está verificado** | [Costos y límites](COSTOS_Y_LIMITES.md) |
 | **Contribuir al código** | [CONTRIBUTING](../CONTRIBUTING.md) → [Arquitectura](ARQUITECTURA.md) → [Esquema de la base](ESQUEMA_BD.md) |
+| **Modificar el código sin estropear la medición** | [Documentación técnica](dev/README.md) → [Zonas protegidas](dev/ZONAS_PROTEGIDAS.md) → [Recetas](dev/RECETAS.md) |
 | **Ver cómo se construyó** | [Historial de desarrollo](historial/README.md) |
 
 ## Guías
@@ -46,6 +47,23 @@ qué problema investiga) y sigue por la columna que te corresponda.
 | [VEREDICTO_3_6.md](VEREDICTO_3_6.md) | El procedimiento del veredicto, paso a paso, con los códigos de salida de cada herramienta |
 | [PASO_DINERO_REAL.md](PASO_DINERO_REAL.md) | Criterios y riesgos de un eventual paso a dinero real (el reporte solo recomienda) y los puntos de Bitunix sin verificar |
 | [INFORME_FINAL.md](INFORME_FINAL.md) | Qué se construyó por fase, el cumplimiento de la especificación, las decisiones clave, lo verificado y lo no verificado, los riesgos y los próximos pasos (fotografía del 2026-10-18) |
+
+## Documentación técnica para desarrolladores
+
+Para quien **modifica el código**: qué hace cada archivo y cada función, cómo se conectan y qué no se puede tocar
+mientras la medición está en curso. Empieza por [dev/README.md](dev/README.md).
+
+| Documento | Qué contiene |
+|---|---|
+| [dev/README.md](dev/README.md) | Índice, mapa del código y diagrama de dependencias entre paquetes |
+| [dev/ZONAS_PROTEGIDAS.md](dev/ZONAS_PROTEGIDAS.md) | **Lo más importante:** qué archivos, funciones, tablas y parámetros no se pueden cambiar durante la medición y por qué; qué sí se puede; qué hacer si de verdad hay que cambiar algo; y `scripts/check_measurement_safety.py`, que lo comprueba |
+| [dev/FLUJO_EJECUCION.md](dev/FLUJO_EJECUCION.md) | El arranque paso a paso, cada tarea asíncrona, un cierre de vela de punta a punta, un reinicio y una parada |
+| [dev/MODELO_DATOS.md](dev/MODELO_DATOS.md) | Las tablas: quién las escribe y quién las lee, inmutabilidad, migraciones y cómo agregar una columna o una tabla sin romper una base existente |
+| [dev/ENTORNO_DESARROLLO.md](dev/ENTORNO_DESARROLLO.md) | Preparar el entorno, el bot de desarrollo en el puerto 8001 sobre una copia, depurar, logs, pruebas por partes y cómo se genera esta documentación |
+| [dev/PRUEBAS.md](dev/PRUEBAS.md) | Organización de las pruebas, fixtures y falsos, cómo escribir una nueva y qué protege cada prueba guardiana |
+| [dev/RECETAS.md](dev/RECETAS.md) | Paso a paso: estrategia, indicador, comando de Telegram, endpoint, pestaña del dashboard, variable de configuración, fuente de noticias, parámetro de riesgo, y desplegar al contenedor |
+| [dev/modulos/](dev/README.md#mapa-del-código) | Una guía por paquete de `app/`, una para `scripts/` y una para `frontend/src`, con cada archivo |
+| [dev/api/](dev/api/index.html) | Referencia automática (pdoc) de todos los módulos de `app/` y `scripts/` |
 
 ## Registro del desarrollo
 
