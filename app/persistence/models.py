@@ -1,4 +1,11 @@
-"""Modelos pydantic que reflejan las filas de la base de datos."""
+"""Modelos pydantic que reflejan las filas de la base de datos.
+
+Cada modelo corresponde a una tabla (o a una vista de ella): `Trade` y `ShadowTrade` a
+`trades` y `shadow_trades`, `SignalRecord` a `signals`, `RiskRejection` a
+`risk_rejections`, `OHLCVBar` a `ohlcv_cache`, y los `Backtest*` a las tablas del
+backtest de la Fase 2. Los repositorios convierten filas SQLite en estos modelos; el
+resto del codigo trabaja con ellos y no con filas crudas.
+"""
 
 from __future__ import annotations
 
@@ -9,16 +16,33 @@ from pydantic import BaseModel, Field
 
 
 class Side(StrEnum):
+    """Direccion de una operacion: `LONG` (compra) o `SHORT` (venta).
+
+    Coincide con el `CHECK` de las tablas.
+    """
     LONG = "LONG"
     SHORT = "SHORT"
 
 
 class TradeStatus(StrEnum):
+    """Estado de una operacion: `OPEN` (abierta) o `CLOSED` (cerrada).
+
+    Coincide con el `CHECK` de las tablas.
+    """
     OPEN = "OPEN"
     CLOSED = "CLOSED"
 
 
 class Trade(BaseModel):
+    """Una operacion de la cuenta paper (fila de `trades`).
+
+    Los campos opcionales son `None` mientras no aplican (una posicion abierta no tiene
+    `exit_price` ni PnL). Los niveles `sl_price`, `tp_price`, `trailing_distance`,
+    `effective_stop`, `best_price` y `liq_price` son los que el monitor de posiciones evalua
+    en vivo; si falta uno, el monitor evalua solo los que existen. Los campos
+    `reconciliation_*` marcan una reconciliacion fallida tras un reinicio (ver
+    `app/trading/position_monitor.py`). `ShadowTrade` extiende este modelo.
+    """
     id: int | None = None
     symbol: str
     side: Side
@@ -159,6 +183,11 @@ class SignalDiscardedBySLCap(BaseModel):
 
 
 class OHLCVBar(BaseModel):
+    """Una vela OHLCV (fila de `ohlcv_cache`).
+
+    `open_time` es el inicio de la vela en milisegundos Unix; `price_type` distingue las
+    velas de precio de mercado de las de precio de marca.
+    """
     symbol: str
     interval: str
     price_type: str
@@ -172,6 +201,12 @@ class OHLCVBar(BaseModel):
 
 
 class ContractSpec(BaseModel):
+    """Especificacion de un contrato perpetuo de Bitunix (fila de `contract_specs_cache`).
+
+    Incluye el volumen minimo y las precisiones de cantidad y precio, el apalancamiento
+    permitido, los tramos de margen y los datos de funding del contrato; `fetched_at` es
+    cuando se consulto a la bolsa.
+    """
     symbol: str
     min_trade_volume: float | None = None
     base_precision: int | None = None

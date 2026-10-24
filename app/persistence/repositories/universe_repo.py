@@ -1,4 +1,8 @@
-"""Repositorio de `asset_universe` (Fase 2)."""
+"""Repositorio de `asset_universe` (Fase 2): los snapshots del universo dinamico de activos.
+
+Cada refresco guarda una fila por moneda evaluada (incluidas las excluidas) con la misma
+marca `refreshed_at`; el universo vigente es el snapshot mas reciente.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +13,15 @@ from app.persistence.models import AssetUniverseEntry
 
 
 async def insert_snapshot(db: Database, entries: list[AssetUniverseEntry]) -> None:
-    """Un solo commit para todo el snapshot (ver Database.execute_many)."""
+    """Guarda un snapshot completo del universo, con un solo commit.
+
+    Args:
+        db: conexion a la base.
+        entries: una entrada por moneda evaluada (todas con el mismo `refreshed_at`).
+
+    Efectos:
+        Escribe `asset_universe` (INSERT en bloque).
+    """
     params = [
         (
             e.refreshed_at.isoformat(), e.coingecko_id, e.symbol, e.coingecko_rank,
@@ -49,6 +61,17 @@ def _row_to_entry(row) -> AssetUniverseEntry:
 
 
 async def get_latest_refreshed_at(db: Database) -> datetime | None:
+    """Instante del snapshot mas reciente.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        El mayor `refreshed_at`, o `None` si nunca se refresco el universo.
+
+    Efectos:
+        Lee `asset_universe`.
+    """
     row = await db.fetch_one("SELECT MAX(refreshed_at) AS latest FROM asset_universe")
     if row is None or row["latest"] is None:
         return None
@@ -56,6 +79,17 @@ async def get_latest_refreshed_at(db: Database) -> datetime | None:
 
 
 async def get_latest_snapshot(db: Database) -> list[AssetUniverseEntry]:
+    """Las entradas del snapshot mas reciente, por rank de CoinGecko.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        Lista de `AssetUniverseEntry` (vacia si no hay snapshots).
+
+    Efectos:
+        Lee `asset_universe`.
+    """
     latest = await get_latest_refreshed_at(db)
     if latest is None:
         return []
@@ -67,14 +101,37 @@ async def get_latest_snapshot(db: Database) -> list[AssetUniverseEntry]:
 
 
 async def get_included_symbols(db: Database) -> list[str]:
+    """Los simbolos incluidos en el universo vigente.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        Lista de simbolos Bitunix (p. ej. `BTCUSDT`) con `included = 1` en el ultimo snapshot.
+
+    Efectos:
+        Lee `asset_universe`.
+    """
     return [e.symbol for e in await get_latest_snapshot(db) if e.included]
 
 
 async def get_included_history(
     db: Database, limit_snapshots: int = 30,
 ) -> list[tuple[datetime, frozenset[str]]]:
-    """Los ultimos `limit_snapshots` snapshots como (instante, simbolos incluidos), del mas VIEJO
-    al mas nuevo. Un snapshot sin ningun incluido aparece con el conjunto vacio."""
+    """Los ultimos snapshots como (instante, simbolos incluidos), del mas viejo al mas nuevo.
+
+    Un snapshot sin ningun incluido aparece con el conjunto vacio.
+
+    Args:
+        db: conexion a la base.
+        limit_snapshots: cuantos snapshots recientes considerar.
+
+    Returns:
+        Lista de `(refreshed_at, frozenset de simbolos)`.
+
+    Efectos:
+        Lee `asset_universe`.
+    """
     time_rows = await db.fetch_all(
         "SELECT DISTINCT refreshed_at FROM asset_universe ORDER BY refreshed_at DESC LIMIT ?",
         (limit_snapshots,),

@@ -1,6 +1,8 @@
-"""Auditoria de rechazos del motor de riesgo en vivo (Fase 3, subfase 3.2)
--- tabla `risk_rejections`. Nunca se usa para cierres: el motor de riesgo
-solo bloquea entradas nuevas (ver `app/trading/risk_engine.py`)."""
+"""Auditoria de los rechazos del motor de riesgo en vivo (Fase 3, subfase 3.2).
+
+Tabla `risk_rejections`. Nunca se usa para cierres: el motor de riesgo solo bloquea
+entradas nuevas (ver `app/trading/risk_engine.py`).
+"""
 
 from __future__ import annotations
 
@@ -19,6 +21,19 @@ async def insert_rejection(
     reason: str,
     details: dict,
 ) -> None:
+    """Registra una entrada bloqueada por el motor de riesgo, con el motivo y los valores exactos.
+
+    Args:
+        db: conexion a la base.
+        symbol: simbolo de la entrada rechazada.
+        side: direccion.
+        strategy: estrategia que la propuso, si hay.
+        reason: codigo del motivo (los define `app/trading/risk_engine.py`).
+        details: valores que motivaron el rechazo (p. ej. `{"open": 3, "limit": 3}`).
+
+    Efectos:
+        Escribe `risk_rejections` (INSERT).
+    """
     await db.execute(
         """
         INSERT INTO risk_rejections (created_at, symbol, side, strategy, reason, details_json)
@@ -46,6 +61,19 @@ def _row_to_rejection(row) -> RiskRejection:
 async def get_rejections(
     db: Database, reason: str | None = None, limit: int = 100
 ) -> list[RiskRejection]:
+    """Los rechazos mas recientes, opcionalmente de un solo motivo.
+
+    Args:
+        db: conexion a la base.
+        reason: si se da, solo ese motivo.
+        limit: maximo de filas.
+
+    Returns:
+        Lista de `RiskRejection`, el mas reciente primero.
+
+    Efectos:
+        Lee `risk_rejections`.
+    """
     if reason:
         rows = await db.fetch_all(
             "SELECT * FROM risk_rejections WHERE reason = ? "
@@ -60,7 +88,18 @@ async def get_rejections(
 
 
 async def count_by_reason_since(db: Database, since: datetime) -> dict[str, int]:
-    """Rechazos desde `since` agrupados por motivo (solo conteos: no lee los detalles)."""
+    """Rechazos desde `since` agrupados por motivo (solo conteos: no lee los detalles).
+
+    Args:
+        db: conexion a la base.
+        since: inicio del periodo (inclusive).
+
+    Returns:
+        Diccionario `{motivo: filas}`, del mas frecuente al menos frecuente.
+
+    Efectos:
+        Lee `risk_rejections`.
+    """
     rows = await db.fetch_all(
         "SELECT reason, COUNT(*) AS n FROM risk_rejections WHERE created_at >= ? "
         "GROUP BY reason ORDER BY n DESC",

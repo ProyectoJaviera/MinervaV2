@@ -1,13 +1,16 @@
-"""Capa de persistencia (aiosqlite).
+"""Capa de persistencia: conexion aiosqlite, esquema SQL y migraciones de columnas.
 
-Fase 1 creo `trades`, `system_state`, `ohlcv_cache`, `contract_specs_cache`.
-Fase 2 agrega `asset_universe`, `backtest_trades`, `backtest_skipped_entries`,
-`backtest_runs`, `backtest_verdicts`. Fase 3 subfase 3.2 agrega
-`risk_rejections`; subfase 3.3 agrega `signals` y
-`signals_discarded_by_sl_cap`; subfase 3.5 agrega `shadow_trades`; subfase 3.6
-agrega `llm_logs` y el disparador `llm_decision_inmutable`. El resto del
-esquema propuesto en docs/FASE0.md (news_items, lessons_learned, etc.) se
-crea en la fase que lo necesite, para no mantener tablas vacias sin dueno.
+`SCHEMA` contiene el DDL completo de la base (todas las tablas, indices y el disparador
+`llm_decision_inmutable`); `Database.connect()` lo ejecuta en cada arranque con
+`CREATE ... IF NOT EXISTS`, asi que una base existente solo recibe lo que le falta. Las
+columnas agregadas despues de la primera version de una tabla se migran con los
+diccionarios `_*_MIGRATED_COLUMNS` mediante `ALTER TABLE ADD COLUMN` (idempotente).
+El esquema tabla por tabla se documenta, generado desde este archivo, en
+`docs/ESQUEMA_BD.md`; la guia de como cambiarlo esta en `docs/dev/MODELO_DATOS.md`.
+
+Efectos:
+    Crear una `Database` y llamar a `connect()` crea el directorio y el archivo de la
+    base si no existen, activa WAL y escribe las tablas y columnas que falten. Sin red.
 """
 
 from __future__ import annotations
@@ -715,11 +718,15 @@ _LLM_LOGS_MIGRATED_COLUMNS = {
 
 
 class Database:
-    """Wrapper fino sobre una conexion aiosqlite compartida.
+    """Envoltorio fino sobre UNA conexion aiosqlite compartida por todo el proceso.
 
-    Se usa una sola conexion con un lock de escritura porque SQLite no
-    soporta bien escrituras concurrentes desde multiples conexiones; para
-    el volumen de Minerva (un bot, no multiusuario) esto es suficiente.
+    Se usa una sola conexion con un candado de escritura (`_write_lock`) porque SQLite no
+    tolera bien escrituras concurrentes desde varias conexiones; para el volumen de Minerva
+    (un bot, no multiusuario) basta. `execute` y `execute_many` toman el candado y hacen
+    commit; `fetch_one` y `fetch_all` no lo toman (leen sobre la misma conexion).
+
+    Attributes:
+        path: ruta del archivo SQLite, o `":memory:"` para una base volatil (pruebas).
     """
 
     def __init__(self, path: str) -> None:
@@ -729,11 +736,27 @@ class Database:
 
     @property
     def conn(self) -> aiosqlite.Connection:
+        """La conexion aiosqlite abierta.
+
+        Raises:
+            RuntimeError: si todavia no se llamo a `connect()` (o ya se cerro).
+        """
         if self._conn is None:
             raise RuntimeError("Database no conectada; llama a connect() primero.")
         return self._conn
 
     async def connect(self) -> None:
+        """Abre la conexion, configura SQLite y crea o completa el esquema.
+
+        Crea el directorio padre del archivo (salvo `:memory:`), usa `aiosqlite.Row` como fabrica
+        de filas, activa `journal_mode=WAL` y `synchronous=NORMAL` (seguro con WAL: solo arriesga
+        las ultimas transacciones en un corte de energia, no la integridad) y llama a
+        `init_schema()`.
+
+        Efectos:
+            Disco: crea el directorio y el archivo de la base si no existen. Escribe las tablas,
+            indices, el disparador y las columnas migradas que falten. Sin red.
+        """
         if self.path != ":memory:":
             Path(os.path.dirname(self.path) or ".").mkdir(parents=True, exist_ok=True)
         self._conn = await aiosqlite.connect(self.path)
@@ -746,11 +769,27 @@ class Database:
         await self.init_schema()
 
     async def close(self) -> None:
+        """Cierra la conexion si esta abierta; es idempotente.
+
+        Efectos:
+            Cierra el archivo SQLite (en modo WAL el ultimo cierre consolida el `-wal`).
+        """
         if self._conn is not None:
             await self._conn.close()
             self._conn = None
 
     async def init_schema(self) -> None:
+        """Ejecuta `SCHEMA` y aplica las migraciones de columnas, bajo el candado de escritura.
+
+        Es seguro correrlo sobre una base ya poblada: nada se borra ni se reescribe. Para
+        agregar una columna a una tabla existente hay que declararla en `SCHEMA` Y en el
+        diccionario `_*_MIGRATED_COLUMNS` de esa tabla (ver `docs/dev/MODELO_DATOS.md`).
+
+        Efectos:
+            Escribe el esquema (CREATE ... IF NOT EXISTS) y `ALTER TABLE ADD COLUMN` para las
+            columnas migradas de `backtest_verdicts`, `trades`, `signals`, `shadow_trades` y
+            `llm_logs` que falten. Sin red.
+        """
         async with self._write_lock:
             await self.conn.executescript(SCHEMA)
             await self.conn.commit()
@@ -774,17 +813,37 @@ class Database:
         await self.conn.commit()
 
     async def execute(self, query: str, params: tuple = ()) -> aiosqlite.Cursor:
+        """Ejecuta una sentencia de escritura y hace commit, bajo el candado de escritura.
+
+        Args:
+            query: sentencia SQL con marcadores `?`.
+            params: valores de los marcadores, en orden.
+
+        Returns:
+            El cursor, ya confirmado: sirve para leer `lastrowid` y `rowcount`.
+
+        Efectos:
+            Escribe en la tabla que nombre `query`. Sin red.
+        """
         async with self._write_lock:
             cursor = await self.conn.execute(query, params)
             await self.conn.commit()
             return cursor
 
     async def execute_many(self, query: str, params_list: list[tuple]) -> None:
-        """Ejecuta la misma consulta para cada tupla de `params_list` en UNA
-        sola transaccion (un solo commit), en vez de uno por fila -- evita
-        el costo de fsync por fila al insertar en bloque (p.ej. una pagina
-        de 200 velas); se detecto como cuello de botella real durante la
-        corrida del backtest de Fase 2."""
+        """Ejecuta la misma sentencia para cada tupla de `params_list` en UNA sola transaccion.
+
+        Evita el fsync por fila al insertar en bloque (p. ej. una pagina de 200 velas); se
+        detecto como cuello de botella real durante la corrida del backtest de la Fase 2.
+        Con la lista vacia no hace nada.
+
+        Args:
+            query: sentencia SQL con marcadores `?`.
+            params_list: una tupla de valores por fila.
+
+        Efectos:
+            Escribe en la tabla que nombre `query`, con un solo commit. Sin red.
+        """
         if not params_list:
             return
         async with self._write_lock:
@@ -792,12 +851,40 @@ class Database:
             await self.conn.commit()
 
     async def fetch_one(self, query: str, params: tuple = ()) -> aiosqlite.Row | None:
+        """Devuelve la primera fila de una consulta, o `None` si no hay.
+
+        No toma el candado de escritura.
+
+        Args:
+            query: consulta SQL con marcadores `?`.
+            params: valores de los marcadores, en orden.
+
+        Returns:
+            Un `aiosqlite.Row` (acceso por nombre de columna) o `None`.
+
+        Efectos:
+            Lee la tabla que nombre `query`. Sin red.
+        """
         cursor = await self.conn.execute(query, params)
         row = await cursor.fetchone()
         await cursor.close()
         return row
 
     async def fetch_all(self, query: str, params: tuple = ()) -> list[aiosqlite.Row]:
+        """Devuelve todas las filas de una consulta.
+
+        No toma el candado de escritura.
+
+        Args:
+            query: consulta SQL con marcadores `?`.
+            params: valores de los marcadores, en orden.
+
+        Returns:
+            Lista de `aiosqlite.Row` (vacia si no hay resultados).
+
+        Efectos:
+            Lee la tabla que nombre `query`. Sin red.
+        """
         cursor = await self.conn.execute(query, params)
         rows = await cursor.fetchall()
         await cursor.close()

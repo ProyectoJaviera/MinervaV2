@@ -1,15 +1,12 @@
-"""Repositorio de las tablas de backtesting (Fase 2): `backtest_trades`,
-`backtest_skipped_entries`, `backtest_runs`, `backtest_verdicts`.
+"""Repositorio de las tablas del backtest (Fase 2).
 
-Los INSERT generan los `?` de `VALUES` a partir de la lista de columnas
-(nunca escritos a mano) -- un desajuste entre el numero de columnas
-listadas y el numero de `?` escritos a mano causo un error real en
-produccion ("29 values for 30 columns") en `insert_verdict` al agregar la
-simulacion de cartera Monte Carlo. Con `_insert(table, columns, values)`
-generando el SQL, ese desajuste ya no es posible: el numero de `?` siempre
-coincide con `len(columns)`, y un `assert` adicional detecta si `values`
-no tiene exactamente esa misma longitud (en vez de que sqlite3 lo rechace
-con un mensaje generico)."""
+Tablas: `backtest_trades`, `backtest_skipped_entries`, `backtest_runs` y
+`backtest_verdicts`. Los `INSERT` generan los `?` de `VALUES` a partir de la lista de
+columnas (nunca escritos a mano): un desajuste entre columnas y `?` causo un error real
+("29 values for 30 columns") en `insert_verdict` al agregar la simulacion de cartera
+Monte Carlo. Con `_insert(table, columns, values)` ese desajuste ya no es posible, y un
+`assert` detecta si `values` no tiene la misma longitud que `columns`.
+"""
 
 from __future__ import annotations
 
@@ -39,13 +36,19 @@ async def _insert(db: Database, table: str, columns: tuple[str, ...], values: tu
 
 
 async def clear_results(db: Database) -> None:
-    """Borra resultados de corridas anteriores (trades, skips, runs,
-    veredictos) antes de empezar una corrida completa nueva -- hace que
-    reintentar tras una interrupcion (p.ej. un colgado de red, ver
-    docs/PROGRESS.md) sea seguro e idempotente, en vez de acumular filas
-    duplicadas. NO borra `asset_universe`, `contract_specs_cache`,
-    `ohlcv_cache` ni `funding_cache`: esos son cachés legítimamente
-    reutilizables entre corridas."""
+    """Borra los resultados de corridas anteriores antes de una corrida completa nueva.
+
+    Hace que reintentar tras una interrupcion (p. ej. un colgado de red) sea seguro e
+    idempotente en vez de acumular filas duplicadas. NO borra `asset_universe`,
+    `contract_specs_cache`, `ohlcv_cache` ni `funding_cache`: son caches reutilizables.
+
+    Args:
+        db: conexion a la base.
+
+    Efectos:
+        Escribe (DELETE de todas las filas) `backtest_trades`, `backtest_skipped_entries`,
+        `backtest_runs` y `backtest_verdicts`.
+    """
     tables = ("backtest_trades", "backtest_skipped_entries", "backtest_runs", "backtest_verdicts")
     for table in tables:
         await db.execute(f"DELETE FROM {table}")  # nombres de tabla fijos, no son input de usuario
@@ -72,11 +75,28 @@ def _trade_values(t: BacktestTrade) -> tuple:
 
 
 async def insert_trade(db: Database, t: BacktestTrade) -> None:
+    """Guarda una operacion simulada del backtest.
+
+    Args:
+        db: conexion a la base.
+        t: la operacion.
+
+    Efectos:
+        Escribe `backtest_trades` (INSERT).
+    """
     await _insert(db, "backtest_trades", _TRADE_COLUMNS, _trade_values(t))
 
 
 async def insert_trades(db: Database, trades: list[BacktestTrade]) -> None:
-    """Un solo commit para todo el lote (ver Database.execute_many)."""
+    """Guarda un lote de operaciones simuladas con un solo commit.
+
+    Args:
+        db: conexion a la base.
+        trades: operaciones a guardar; con la lista vacia no hace nada.
+
+    Efectos:
+        Escribe `backtest_trades` (INSERT en bloque).
+    """
     if not trades:
         return
     placeholders = ", ".join(["?"] * len(_TRADE_COLUMNS))
@@ -93,6 +113,15 @@ _SKIPPED_ENTRY_COLUMNS = (
 
 
 async def insert_skipped_entry(db: Database, s: BacktestSkippedEntry) -> None:
+    """Guarda una entrada que el motor omitio por exceder el tope de riesgo por operacion.
+
+    Args:
+        db: conexion a la base.
+        s: la entrada omitida.
+
+    Efectos:
+        Escribe `backtest_skipped_entries` (INSERT).
+    """
     await _insert(
         db, "backtest_skipped_entries", _SKIPPED_ENTRY_COLUMNS,
         (s.strategy, s.symbol, s.timeframe, s.segment, s.ts.isoformat(), s.side.value,
@@ -109,6 +138,15 @@ _RUN_COLUMNS = (
 
 
 async def insert_run(db: Database, r: BacktestRun) -> None:
+    """Guarda las metricas agregadas de una celda (estrategia, simbolo, timeframe, segmento).
+
+    Args:
+        db: conexion a la base.
+        r: las metricas de la celda.
+
+    Efectos:
+        Escribe `backtest_runs` (INSERT).
+    """
     await _insert(
         db, "backtest_runs", _RUN_COLUMNS,
         (
@@ -122,14 +160,21 @@ async def insert_run(db: Database, r: BacktestRun) -> None:
 
 
 async def insert_verdict(db: Database, v: BacktestVerdict) -> None:
-    """A diferencia de las demas funciones de este archivo, construye las
-    columnas Y los valores a partir de `v.model_dump()` en vez de listas
-    paralelas escritas a mano -- `BacktestVerdict` es, con mucho, el
-    modelo que mas crecio durante esta fase (de 17 a 36+ columnas en tres
-    revisiones) y es exactamente donde ocurrio el bug real ("29 values
-    for 30 columns"). Con esto, agregar un campo nuevo al modelo alcanza
-    por si solo: no hay una segunda lista de columnas que sincronizar a
-    mano y se pueda desincronizar otra vez."""
+    """Guarda el veredicto global de una estrategia.
+
+    A diferencia de las demas funciones del archivo, construye las columnas Y los valores a
+    partir de `v.model_dump()` en vez de listas paralelas escritas a mano: `BacktestVerdict`
+    es, con mucho, el modelo que mas crecio (de 17 a mas de 36 columnas en tres revisiones) y
+    es donde ocurrio el bug real. Agregar un campo al modelo alcanza por si solo, aunque la
+    columna tambien debe existir en `SCHEMA` y en la lista de migracion.
+
+    Args:
+        db: conexion a la base.
+        v: el veredicto.
+
+    Efectos:
+        Escribe `backtest_verdicts` (INSERT).
+    """
     data = v.model_dump(exclude={"id"})
     data["is_experimental"] = int(data["is_experimental"])
     data["evidence_insufficient"] = int(data["evidence_insufficient"])
@@ -175,6 +220,19 @@ def _row_to_verdict(row) -> BacktestVerdict:
 
 
 async def get_verdicts(db: Database, strategy: str | None = None) -> list[BacktestVerdict]:
+    """Los veredictos del backtest, opcionalmente de una estrategia.
+
+    Args:
+        db: conexion a la base.
+        strategy: si se da, solo esa estrategia.
+
+    Returns:
+        Lista de `BacktestVerdict` por `id` ascendente. Las columnas "v1" que ya no tienen
+        campo en el modelo se descartan.
+
+    Efectos:
+        Lee `backtest_verdicts`.
+    """
     query = "SELECT * FROM backtest_verdicts"
     params: tuple = ()
     if strategy:
@@ -192,6 +250,21 @@ async def get_trades(
     timeframe: str | None = None,
     segment: str | None = None,
 ) -> list[BacktestTrade]:
+    """Las operaciones simuladas de una estrategia, con filtros opcionales.
+
+    Args:
+        db: conexion a la base.
+        strategy: estrategia.
+        symbol: si se da, solo ese simbolo.
+        timeframe: si se da, solo ese timeframe.
+        segment: si se da, solo ese segmento (`IS`, `OOS`, `FOLD_<n>`).
+
+    Returns:
+        Lista de `BacktestTrade` por `entry_time` ascendente.
+
+    Efectos:
+        Lee `backtest_trades`.
+    """
     query = "SELECT * FROM backtest_trades WHERE strategy = ?"
     params: list = [strategy]
     if symbol:

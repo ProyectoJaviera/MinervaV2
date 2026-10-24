@@ -1,6 +1,9 @@
-"""Cache local de `funding_rate_history` (misma idea que `ohlcv_repo` para
-velas): evita volver a pedir por red el funding ya descargado en una
-corrida/reintento anterior del backtest."""
+"""Cache local del historial de funding (tabla `funding_cache`).
+
+Misma idea que `ohlcv_repo` para las velas: evita volver a pedir por red el funding ya
+descargado en una corrida o reintento anterior del backtest. El piso del historial de
+funding vive en `ohlcv_floor` con `interval = price_type = '__funding__'`.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +11,17 @@ from app.persistence.database import Database
 
 
 async def upsert_funding(db: Database, symbol: str, events: list[tuple[int, float]]) -> None:
+    """Guarda eventos de funding (inserta o actualiza la tasa).
+
+    Args:
+        db: conexion a la base.
+        symbol: simbolo.
+        events: lista de `(funding_time en ms Unix, funding_rate)`. Con la lista vacia no hace
+            nada.
+
+    Efectos:
+        Escribe `funding_cache` (UPSERT en bloque).
+    """
     if not events:
         return
     await db.execute_many(
@@ -23,6 +37,20 @@ async def upsert_funding(db: Database, symbol: str, events: list[tuple[int, floa
 async def get_funding(
     db: Database, symbol: str, start_time: int, end_time: int
 ) -> list[tuple[int, float]]:
+    """Los eventos de funding guardados de un simbolo en un rango.
+
+    Args:
+        db: conexion a la base.
+        symbol: simbolo.
+        start_time: inicio del rango (ms Unix, inclusive).
+        end_time: fin del rango (ms Unix, inclusive).
+
+    Returns:
+        Lista de `(funding_time, funding_rate)` en orden cronologico.
+
+    Efectos:
+        Lee `funding_cache`.
+    """
     rows = await db.fetch_all(
         "SELECT funding_time, funding_rate FROM funding_cache "
         "WHERE symbol = ? AND funding_time >= ? AND funding_time <= ? "
@@ -33,8 +61,20 @@ async def get_funding(
 
 
 async def get_covered_range(db: Database, symbol: str) -> tuple[int, int] | None:
-    """(funding_time mas antiguo, mas nuevo) ya cacheados, o `None` si no
-    hay ninguno -- misma idea que `ohlcv_repo.get_covered_range`."""
+    """El evento de funding mas antiguo y el mas nuevo ya guardados de un simbolo.
+
+    Misma idea que `ohlcv_repo.get_covered_range`.
+
+    Args:
+        db: conexion a la base.
+        symbol: simbolo.
+
+    Returns:
+        La tupla `(mas antiguo, mas nuevo)` en ms Unix, o `None` si no hay eventos.
+
+    Efectos:
+        Lee `funding_cache`.
+    """
     row = await db.fetch_one(
         "SELECT MIN(funding_time) AS lo, MAX(funding_time) AS hi FROM funding_cache "
         "WHERE symbol = ?",

@@ -1,5 +1,9 @@
-"""Repositorio de `signals`/`signals_discarded_by_sl_cap` (Fase 3, subfase
-3.3) -- ver `app/trading/signal_generator.py` para el flujo completo."""
+"""Repositorio de `signals` y `signals_discarded_by_sl_cap` (Fase 3, subfase 3.3).
+
+Cada evaluacion de una estrategia sobre un simbolo, timeframe y vela cerrada es una fila
+de `signals` (HOLD incluido: registro auditable completo). Ver
+`app/trading/signal_generator.py` para el flujo completo.
+"""
 
 from __future__ import annotations
 
@@ -10,10 +14,21 @@ from app.persistence.models import Side, SignalDiscardedBySLCap, SignalRecord
 
 
 async def insert_signal(db: Database, signal: SignalRecord) -> int | None:
-    """`INSERT OR IGNORE` sobre `UNIQUE(symbol, strategy, timeframe,
-    candle_close_time)` -- devuelve el id nuevo, o `None` si la fila ya
-    existia (vela ya evaluada en un poll anterior: el llamador debe
-    saltarse todo procesamiento posterior para esta senal)."""
+    """Inserta una evaluacion de estrategia, salvo que esa vela ya se haya evaluado.
+
+    Usa `INSERT OR IGNORE` sobre `UNIQUE(symbol, strategy, timeframe, candle_close_time)`.
+
+    Args:
+        db: conexion a la base.
+        signal: la evaluacion (LONG, SHORT o HOLD) con su precio y niveles.
+
+    Returns:
+        El id nuevo, o `None` si la fila ya existia (vela evaluada en un poll anterior: el
+        llamador debe saltarse todo procesamiento posterior de esta senal).
+
+    Efectos:
+        Escribe `signals` (INSERT OR IGNORE).
+    """
     cursor = await db.execute(
         """
         INSERT OR IGNORE INTO signals (
@@ -38,6 +53,16 @@ async def insert_signal(db: Database, signal: SignalRecord) -> int | None:
 
 
 async def update_status(db: Database, signal_id: int, status: str) -> None:
+    """Cambia el estado de una senal (`PENDING`, `DISCARDED_SL_CAP`, ...).
+
+    Args:
+        db: conexion a la base.
+        signal_id: `signals.id`.
+        status: nuevo estado.
+
+    Efectos:
+        Escribe `signals` (UPDATE de `status`).
+    """
     await db.execute("UPDATE signals SET status = ? WHERE id = ?", (status, signal_id))
 
 
@@ -67,12 +92,25 @@ def _row_to_signal(row) -> SignalRecord:
 async def get_by_symbol_strategy_candle(
     db: Database, symbol: str, strategy: str, candle_close_time: datetime
 ) -> SignalRecord | None:
-    """Busca la fila de `signals` de esa estrategia para esa vela (subfase 3.6,
-    fase iii): es la fuente de `indicators_json` para el prompt del LLM -- datos
-    ya calculados por `precompute`, no se recalculan aqui. La UNIQUE real es
-    `(symbol, strategy, timeframe, candle_close_time)`; sin `timeframe` (una
-    estrategia como `donchian_breakout_20` corre en mas de uno) se toma la mas
-    reciente -- una simplificacion aceptable para el piloto/smoke, documentada."""
+    """La fila de `signals` de una estrategia para una vela.
+
+    Es la fuente de `indicators_json` para el prompt del LLM (subfase 3.6, fase iii): son
+    datos ya calculados por `precompute`, no se recalculan aqui. La UNIQUE real incluye
+    `timeframe`; como una estrategia como `donchian_breakout_20` corre en mas de uno, sin
+    `timeframe` se toma la mas reciente (simplificacion aceptable para el piloto, documentada).
+
+    Args:
+        db: conexion a la base.
+        symbol: simbolo, p. ej. `BTCUSDT`.
+        strategy: nombre de la estrategia.
+        candle_close_time: cierre de la vela evaluada.
+
+    Returns:
+        El `SignalRecord`, o `None` si no hay.
+
+    Efectos:
+        Lee `signals`.
+    """
     row = await db.fetch_one(
         "SELECT * FROM signals WHERE symbol = ? AND strategy = ? AND candle_close_time = ? "
         "ORDER BY id DESC LIMIT 1",
@@ -87,6 +125,20 @@ async def get_signals(
     status: str | None = None,
     limit: int = 100,
 ) -> list[SignalRecord]:
+    """Evaluaciones recientes, con filtros opcionales.
+
+    Args:
+        db: conexion a la base.
+        symbol: si se da, solo ese simbolo.
+        status: si se da, solo ese estado.
+        limit: maximo de filas (las de `id` mas alto primero).
+
+    Returns:
+        Lista de `SignalRecord`.
+
+    Efectos:
+        Lee `signals`.
+    """
     query = "SELECT * FROM signals WHERE 1=1"
     params: list = []
     if symbol:
@@ -104,6 +156,15 @@ async def get_signals(
 async def insert_discarded_by_sl_cap(
     db: Database, discarded: SignalDiscardedBySLCap
 ) -> None:
+    """Registra una senal descartada porque su SL perderia mas del tope sobre el margen.
+
+    Args:
+        db: conexion a la base.
+        discarded: el descarte, con el `sl_margin_loss_pct` y el tope aplicado.
+
+    Efectos:
+        Escribe `signals_discarded_by_sl_cap` (INSERT).
+    """
     await db.execute(
         """
         INSERT INTO signals_discarded_by_sl_cap (
@@ -137,6 +198,19 @@ def _row_to_discarded(row) -> SignalDiscardedBySLCap:
 async def get_discarded_by_sl_cap(
     db: Database, symbol: str | None = None, limit: int = 100
 ) -> list[SignalDiscardedBySLCap]:
+    """Los descartes por tope de SL mas recientes.
+
+    Args:
+        db: conexion a la base.
+        symbol: si se da, solo ese simbolo.
+        limit: maximo de filas.
+
+    Returns:
+        Lista de `SignalDiscardedBySLCap`, el de `id` mas alto primero.
+
+    Efectos:
+        Lee `signals_discarded_by_sl_cap`.
+    """
     if symbol:
         rows = await db.fetch_all(
             "SELECT * FROM signals_discarded_by_sl_cap WHERE symbol = ? "

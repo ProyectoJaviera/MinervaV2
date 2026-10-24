@@ -1,7 +1,10 @@
-"""Memoria de lecciones (Fase 4, `app/memory/`): tablas `memory_entries`, `lessons`,
-`lesson_applications` y `lessons_reports`. Las filas llevan PnL y tasas de acierto: NADA de lo que
-lee este repositorio se muestra por API/Telegram/dashboard sin `is_outcome_reveal_allowed`
-(ver `app/memory/` y `app/api/routes/memory.py`)."""
+"""Memoria de lecciones (Fase 4, `app/memory/`).
+
+Tablas: `memory_entries`, `lessons`, `lesson_applications` y `lessons_reports`. Las filas
+llevan PnL y tasas de acierto: NADA de lo que lee este repositorio se muestra por API,
+Telegram o dashboard sin `is_outcome_reveal_allowed` (ver `app/memory/` y
+`app/api/routes/memory.py`).
+"""
 
 from __future__ import annotations
 
@@ -15,6 +18,11 @@ from app.persistence.repositories.timeutil import iso_utc
 
 @dataclass
 class MemoryEntry:
+    """Una operacion cerrada convertida en entrada de memoria (fila de `memory_entries`).
+
+    Es INMUTABLE: guarda lo que se sabia al decidir (hora, ATR, riesgo/beneficio, etiqueta
+    del LLM, contexto de noticias) y el resultado (`pnl_net_usdt`, `return_pct`, `outcome`).
+    """
     signal_group_key: str
     shadow_trade_id: int | None
     symbol: str
@@ -41,11 +49,18 @@ class MemoryEntry:
 
     @property
     def strategies(self) -> frozenset[str]:
+        """El conjunto de estrategias de `strategy_set` (separadas por `+`)."""
         return frozenset(s for s in self.strategy_set.split("+") if s)
 
 
 @dataclass
 class LessonRow:
+    """Una leccion agregada (fila de `lessons`).
+
+    `status` es `ACTIVE` solo con muestra minima, intervalo que excluye la tasa base y signo
+    estable en las dos mitades del tiempo; si no, `INSUFFICIENT`, `UNSTABLE` o
+    `NOT_SIGNIFICANT`.
+    """
     dimension: str
     pattern: str
     n: int
@@ -80,7 +95,19 @@ def _row_to_entry(row) -> MemoryEntry:
 
 
 async def insert_entry(db: Database, entry: MemoryEntry, *, built_at: datetime) -> bool:
-    """Las entradas son INMUTABLES: `INSERT OR IGNORE` sobre `signal_group_key`."""
+    """Guarda una entrada de memoria, salvo que su grupo ya tenga una (son inmutables).
+
+    Args:
+        db: conexion a la base.
+        entry: la entrada.
+        built_at: cuando se construyo.
+
+    Returns:
+        True si se inserto; False si `signal_group_key` ya existia.
+
+    Efectos:
+        Escribe `memory_entries` (INSERT OR IGNORE).
+    """
     cursor = await db.execute(
         """
         INSERT OR IGNORE INTO memory_entries (
@@ -103,11 +130,33 @@ async def insert_entry(db: Database, entry: MemoryEntry, *, built_at: datetime) 
 
 
 async def count_entries(db: Database) -> int:
+    """Cuantas entradas de memoria hay.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        El numero de filas de `memory_entries`.
+
+    Efectos:
+        Lee `memory_entries`.
+    """
     row = await db.fetch_one("SELECT COUNT(*) AS n FROM memory_entries")
     return row["n"]
 
 
 async def get_known_keys(db: Database) -> set[str]:
+    """Las claves de grupo que ya tienen entrada de memoria.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        Conjunto de `signal_group_key`.
+
+    Efectos:
+        Lee `memory_entries`.
+    """
     rows = await db.fetch_all("SELECT signal_group_key FROM memory_entries")
     return {r["signal_group_key"] for r in rows}
 
@@ -115,7 +164,18 @@ async def get_known_keys(db: Database) -> set[str]:
 async def get_entries_closed_before(
     db: Database, cutoff: datetime | None = None,
 ) -> list[MemoryEntry]:
-    """Entradas cerradas ESTRICTAMENTE antes de `cutoff` (None = todas), mas antiguas primero."""
+    """Entradas cerradas ESTRICTAMENTE antes de `cutoff`, las mas antiguas primero.
+
+    Args:
+        db: conexion a la base.
+        cutoff: limite exclusivo; `None` = todas.
+
+    Returns:
+        Lista de `MemoryEntry` por `closed_at` e `id`.
+
+    Efectos:
+        Lee `memory_entries` (incluye PnL: no exponerlo sin el registro oficial).
+    """
     if cutoff is None:
         rows = await db.fetch_all("SELECT * FROM memory_entries ORDER BY closed_at, id")
     else:
@@ -129,7 +189,20 @@ async def get_entries_closed_before(
 async def replace_lessons(
     db: Database, build_id: str, built_at: datetime, lessons: list[LessonRow],
 ) -> None:
-    """Guarda una reconstruccion completa bajo `build_id` (las anteriores se conservan)."""
+    """Guarda una reconstruccion completa de lecciones bajo `build_id`.
+
+    Las reconstrucciones anteriores se conservan; solo se reemplaza una fila si coincide
+    `(build_id, dimension, pattern)`.
+
+    Args:
+        db: conexion a la base.
+        build_id: identificador de la reconstruccion.
+        built_at: cuando se construyo.
+        lessons: las lecciones de esa reconstruccion.
+
+    Efectos:
+        Escribe `lessons` (INSERT OR REPLACE en bloque).
+    """
     await db.execute_many(
         """
         INSERT OR REPLACE INTO lessons (
@@ -149,6 +222,17 @@ async def replace_lessons(
 
 
 async def latest_build_id(db: Database) -> str | None:
+    """El `build_id` de la reconstruccion mas reciente.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        El identificador, o `None` si nunca se construyeron lecciones.
+
+    Efectos:
+        Lee `lessons`.
+    """
     row = await db.fetch_one("SELECT build_id FROM lessons ORDER BY id DESC LIMIT 1")
     return row["build_id"] if row else None
 
@@ -156,6 +240,19 @@ async def latest_build_id(db: Database) -> str | None:
 async def get_lessons(
     db: Database, build_id: str | None = None, status: str | None = None,
 ) -> list[LessonRow]:
+    """Las lecciones de una reconstruccion, opcionalmente de un solo estado.
+
+    Args:
+        db: conexion a la base.
+        build_id: reconstruccion a leer; `None` = la mas reciente.
+        status: si se da, solo ese estado (p. ej. `ACTIVE`).
+
+    Returns:
+        Lista de `LessonRow` por muestra descendente (vacia si no hay reconstruccion).
+
+    Efectos:
+        Lee `lessons`.
+    """
     build_id = build_id or await latest_build_id(db)
     if build_id is None:
         return []
@@ -181,6 +278,23 @@ async def record_application(
     db: Database, *, signal_group_key: str, created_at: datetime, build_id: str | None,
     lesson_ids: list[int], n_similar: int, evidence: str,
 ) -> bool:
+    """Registra que lecciones se inyectaron en una decision (auditoria de su influencia).
+
+    Args:
+        db: conexion a la base.
+        signal_group_key: clave de la senal agrupada.
+        created_at: hora del registro.
+        build_id: reconstruccion usada, si hubo.
+        lesson_ids: ids de las lecciones aplicadas.
+        n_similar: operaciones similares encontradas.
+        evidence: nivel de evidencia (`BAJA`, `SUFICIENTE`, ...).
+
+    Returns:
+        True si se inserto; False si ya habia registro de ese grupo.
+
+    Efectos:
+        Escribe `lesson_applications` (INSERT OR IGNORE).
+    """
     cursor = await db.execute(
         """
         INSERT OR IGNORE INTO lesson_applications (
@@ -196,6 +310,17 @@ async def record_application(
 
 
 async def count_applications(db: Database) -> int:
+    """Cuantas aplicaciones de lecciones hay registradas.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        El numero de filas de `lesson_applications`.
+
+    Efectos:
+        Lee `lesson_applications`.
+    """
     row = await db.fetch_one("SELECT COUNT(*) AS n FROM lesson_applications")
     return row["n"]
 
@@ -203,6 +328,21 @@ async def count_applications(db: Database) -> int:
 async def save_report(
     db: Database, *, kind: str, body: dict, created_at: datetime, dedupe_key: str | None = None,
 ) -> bool:
+    """Guarda un informe de la memoria (post-mortem o calibracion).
+
+    Args:
+        db: conexion a la base.
+        kind: `POSTMORTEM` o `CALIBRATION`.
+        body: contenido del informe (se guarda como JSON).
+        created_at: hora del informe.
+        dedupe_key: clave para no repetir el mismo informe, o `None`.
+
+    Returns:
+        True si se inserto; False si `dedupe_key` ya existia.
+
+    Efectos:
+        Escribe `lessons_reports` (INSERT OR IGNORE).
+    """
     cursor = await db.execute(
         "INSERT OR IGNORE INTO lessons_reports (kind, created_at, dedupe_key, body_json) "
         "VALUES (?, ?, ?, ?)",
@@ -212,6 +352,19 @@ async def save_report(
 
 
 async def get_reports(db: Database, kind: str, limit: int = 10) -> list[dict]:
+    """Los informes mas recientes de un tipo.
+
+    Args:
+        db: conexion a la base.
+        kind: `POSTMORTEM` o `CALIBRATION`.
+        limit: maximo de informes.
+
+    Returns:
+        Lista de diccionarios con `created_at`, `dedupe_key` y `body` (ya decodificado).
+
+    Efectos:
+        Lee `lessons_reports`.
+    """
     rows = await db.fetch_all(
         "SELECT created_at, dedupe_key, body_json FROM lessons_reports WHERE kind = ? "
         "ORDER BY id DESC LIMIT ?",

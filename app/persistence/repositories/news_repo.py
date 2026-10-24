@@ -1,7 +1,10 @@
-"""Noticias recolectadas (Fase 4, `app/news/`): tablas `news_items`, `news_fetch_state` y
-`fear_greed`. Solo titulo, URL, dominio y fecha (nunca el cuerpo). Todo lo que se lee para un
-contexto de decision exige `fetched_at <= instante` Y `published_at <= instante`: lo que el bot
-todavia no habia visto no existia para esa decision."""
+"""Noticias recolectadas (Fase 4, `app/news/`).
+
+Tablas `news_items`, `news_fetch_state` y `fear_greed`. Solo titulo, URL, dominio y
+fecha (nunca el cuerpo). Todo lo que se lee para un contexto de decision exige
+`fetched_at <= instante` Y `published_at <= instante`: lo que el bot todavia no habia
+visto no existia para esa decision. Los titulares son texto NO confiable.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +18,12 @@ from app.persistence.repositories.timeutil import iso_utc
 
 @dataclass
 class NewsRecord:
+    """Un titular (fila de `news_items`).
+
+    `url_hash` es unico (la misma noticia no se guarda dos veces); `dup_of` apunta al original
+    si es un casi duplicado (se guarda pero se excluye del contexto); `fetched_at` es cuando
+    LO VIO el bot.
+    """
     source: str
     fetched_at: datetime
     title: str
@@ -35,6 +44,11 @@ class NewsRecord:
 
 @dataclass(frozen=True)
 class FetchState:
+    """Estado de la consulta condicional de una fuente (fila de `news_fetch_state`).
+
+    Guarda el `etag` y `last_modified` para pedir solo lo nuevo, el ultimo intento y cuando se
+    puede volver a pedir (`next_allowed_at`: intervalo minimo o enfriamiento tras un 429).
+    """
     source: str
     etag: str | None = None
     last_modified: str | None = None
@@ -61,7 +75,18 @@ def _row_to_record(row) -> NewsRecord:
 
 
 async def insert_item(db: Database, rec: NewsRecord) -> int | None:
-    """`INSERT OR IGNORE` sobre `url_hash`: el id nuevo, o `None` si la noticia ya existia."""
+    """Guarda un titular, salvo que ya exista.
+
+    Args:
+        db: conexion a la base.
+        rec: el titular.
+
+    Returns:
+        El id nuevo, o `None` si ya existia (`INSERT OR IGNORE` sobre `url_hash`).
+
+    Efectos:
+        Escribe `news_items` (INSERT OR IGNORE).
+    """
     cursor = await db.execute(
         """
         INSERT OR IGNORE INTO news_items (
@@ -80,7 +105,20 @@ async def insert_item(db: Database, rec: NewsRecord) -> int | None:
 
 
 async def get_recent_originals(db: Database, since: datetime) -> list[NewsRecord]:
-    """Titulares NO duplicados vistos desde `since` (para detectar casi duplicados al insertar)."""
+    """Titulares NO duplicados vistos desde `since`.
+
+    Sirven para detectar casi duplicados al insertar.
+
+    Args:
+        db: conexion a la base.
+        since: inicio del periodo (por `fetched_at`).
+
+    Returns:
+        Lista de `NewsRecord` por `id`.
+
+    Efectos:
+        Lee `news_items`.
+    """
     rows = await db.fetch_all(
         "SELECT * FROM news_items WHERE dup_of IS NULL AND fetched_at >= ? ORDER BY id",
         (iso_utc(since),),
@@ -92,10 +130,27 @@ async def get_for_context(
     db: Database, *, as_of: datetime, since: datetime, symbol: str | None = None, limit: int = 20,
     source: str | None = None, exclude_source: str | None = None, untagged_only: bool = False,
 ) -> list[NewsRecord]:
-    """Noticias NO duplicadas que existian en `as_of`: publicadas Y vistas por el bot en o antes de
-    ese instante, y no mas viejas que `since`. `symbol` filtra por activo detectado en el titular
-    (None = todas); `untagged_only` deja solo las que no mencionan ningun activo; `source` /
-    `exclude_source` filtran por fuente. Mas recientes primero."""
+    """Noticias NO duplicadas que existian en `as_of`.
+
+    Publicadas Y vistas por el bot en o antes de ese instante, y no mas viejas que `since`.
+    Es la consulta que alimenta el contexto de noticias de una decision.
+
+    Args:
+        db: conexion a la base.
+        as_of: instante de la decision.
+        since: antiguedad maxima (por `published_at`).
+        symbol: si se da, solo titulares que mencionan ese activo.
+        limit: maximo de filas.
+        source: si se da, solo esa fuente.
+        exclude_source: si se da, excluye esa fuente.
+        untagged_only: si es True, solo titulares que no mencionan ningun activo.
+
+    Returns:
+        Lista de `NewsRecord`, los mas recientes primero.
+
+    Efectos:
+        Lee `news_items`.
+    """
     query = (
         "SELECT * FROM news_items WHERE dup_of IS NULL AND fetched_at <= ? "
         "AND published_at IS NOT NULL AND published_at <= ? AND published_at >= ?"
@@ -120,6 +175,19 @@ async def get_for_context(
 async def get_recent(
     db: Database, *, limit: int = 50, symbol: str | None = None,
 ) -> list[NewsRecord]:
+    """Los titulares no duplicados mas recientes, para mostrarlos.
+
+    Args:
+        db: conexion a la base.
+        limit: maximo de filas.
+        symbol: si se da, solo titulares que mencionan ese activo.
+
+    Returns:
+        Lista de `NewsRecord`, los mas recientes primero.
+
+    Efectos:
+        Lee `news_items`.
+    """
     query = "SELECT * FROM news_items WHERE dup_of IS NULL"
     params: list = []
     if symbol is not None:
@@ -131,7 +199,18 @@ async def get_recent(
 
 
 async def count_since(db: Database, since: datetime) -> dict[str, int]:
-    """Titulares guardados desde `since`, por fuente (excluye duplicados)."""
+    """Titulares guardados desde `since`, por fuente (excluye duplicados).
+
+    Args:
+        db: conexion a la base.
+        since: inicio del periodo (por `fetched_at`).
+
+    Returns:
+        Diccionario `{fuente: titulares}`.
+
+    Efectos:
+        Lee `news_items`.
+    """
     rows = await db.fetch_all(
         "SELECT source, COUNT(*) AS n FROM news_items WHERE dup_of IS NULL AND fetched_at >= ? "
         "GROUP BY source",
@@ -141,6 +220,18 @@ async def count_since(db: Database, since: datetime) -> dict[str, int]:
 
 
 async def prune_older_than(db: Database, cutoff: datetime) -> int:
+    """Borra los titulares vistos antes de `cutoff` (retencion).
+
+    Args:
+        db: conexion a la base.
+        cutoff: se borra todo lo que tenga `fetched_at` anterior.
+
+    Returns:
+        Cuantas filas se borraron.
+
+    Efectos:
+        Escribe `news_items` (DELETE).
+    """
     cursor = await db.execute(
         "DELETE FROM news_items WHERE fetched_at < ?", (iso_utc(cutoff),)
     )
@@ -148,6 +239,18 @@ async def prune_older_than(db: Database, cutoff: datetime) -> int:
 
 
 async def get_state(db: Database, source: str) -> FetchState:
+    """El estado de consulta de una fuente.
+
+    Args:
+        db: conexion a la base.
+        source: id de la fuente.
+
+    Returns:
+        El `FetchState`; si la fuente nunca se consulto, uno vacio.
+
+    Efectos:
+        Lee `news_fetch_state`.
+    """
     row = await db.fetch_one("SELECT * FROM news_fetch_state WHERE source = ?", (source,))
     if row is None:
         return FetchState(source=source)
@@ -159,6 +262,15 @@ async def get_state(db: Database, source: str) -> FetchState:
 
 
 async def save_state(db: Database, state: FetchState) -> None:
+    """Guarda el estado de consulta de una fuente (inserta o reemplaza).
+
+    Args:
+        db: conexion a la base.
+        state: el estado.
+
+    Efectos:
+        Escribe `news_fetch_state` (UPSERT).
+    """
     await db.execute(
         """
         INSERT INTO news_fetch_state (
@@ -181,6 +293,21 @@ async def save_state(db: Database, state: FetchState) -> None:
 async def upsert_fear_greed(
     db: Database, *, ts: datetime, value: int, classification: str | None, fetched_at: datetime,
 ) -> bool:
+    """Guarda un valor del indice Fear & Greed, salvo que ese dia ya exista.
+
+    Args:
+        db: conexion a la base.
+        ts: instante del dato publicado.
+        value: valor del indice (0-100).
+        classification: etiqueta textual (p. ej. `Extreme Fear`).
+        fetched_at: cuando lo vio el bot.
+
+    Returns:
+        True si se inserto; False si ya existia.
+
+    Efectos:
+        Escribe `fear_greed` (INSERT OR IGNORE).
+    """
     cursor = await db.execute(
         "INSERT OR IGNORE INTO fear_greed (ts, value, classification, fetched_at) "
         "VALUES (?, ?, ?, ?)",
@@ -190,7 +317,18 @@ async def upsert_fear_greed(
 
 
 async def latest_fear_greed(db: Database, as_of: datetime) -> dict | None:
-    """El ultimo valor publicado Y visto por el bot en o antes de `as_of`."""
+    """El ultimo valor de Fear & Greed publicado Y visto por el bot en o antes de `as_of`.
+
+    Args:
+        db: conexion a la base.
+        as_of: instante de la decision.
+
+    Returns:
+        Diccionario con `ts`, `value`, `classification` y `fetched_at`, o `None`.
+
+    Efectos:
+        Lee `fear_greed`.
+    """
     row = await db.fetch_one(
         "SELECT ts, value, classification, fetched_at FROM fear_greed "
         "WHERE ts <= ? AND fetched_at <= ? ORDER BY ts DESC LIMIT 1",

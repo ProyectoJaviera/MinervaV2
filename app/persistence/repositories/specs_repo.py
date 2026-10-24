@@ -1,4 +1,8 @@
-"""Cache de especificaciones de contrato (tabla `contract_specs_cache`)."""
+"""Cache de especificaciones de contrato (tabla `contract_specs_cache`).
+
+Una fila por simbolo con volumen minimo, precisiones, apalancamiento y datos de funding.
+La alimenta `app/market/contract_specs.py` y la leen el simulador y el brazo ejecutado.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +11,15 @@ from app.persistence.models import ContractSpec
 
 
 async def upsert_spec(db: Database, spec: ContractSpec) -> None:
+    """Guarda la especificacion de un contrato (inserta o reemplaza).
+
+    Args:
+        db: conexion a la base.
+        spec: la especificacion, con `fetched_at`.
+
+    Efectos:
+        Escribe `contract_specs_cache` (UPSERT).
+    """
     await db.execute(
         """
         INSERT INTO contract_specs_cache (
@@ -37,6 +50,18 @@ async def upsert_spec(db: Database, spec: ContractSpec) -> None:
 
 
 async def get_spec(db: Database, symbol: str) -> ContractSpec | None:
+    """La especificacion en cache de un simbolo.
+
+    Args:
+        db: conexion a la base.
+        symbol: simbolo.
+
+    Returns:
+        El `ContractSpec`, o `None` si no esta en cache.
+
+    Efectos:
+        Lee `contract_specs_cache`.
+    """
     row = await db.fetch_one("SELECT * FROM contract_specs_cache WHERE symbol = ?", (symbol,))
     if row is None:
         return None
