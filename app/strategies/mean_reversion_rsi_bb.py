@@ -18,6 +18,21 @@ ATR_MULTIPLIER = 2.0
 
 
 class MeanReversionRSIBBStrategy(BaseStrategy):
+    """Reversion a la media: RSI en extremo y cierre fuera de la banda de Bollinger.
+
+    LONG si RSI < `oversold` y el cierre toca o cruza la banda inferior; SHORT simetrico
+    con RSI > `overbought` y la banda superior. Objetivo (TP) en la banda media (SMA); SL a
+    `ATR_MULTIPLIER` (2.0) veces el ATR en contra. Familia deliberadamente distinta a la
+    de tendencia. Nombre: `mean_reversion_rsi<rsi_period>_bb<bb_period>`.
+
+    Attributes:
+        rsi_period: periodo del RSI.
+        bb_period: periodo de las bandas de Bollinger.
+        bb_std: desviaciones de las bandas exteriores.
+        oversold: umbral de sobreventa del RSI.
+        overbought: umbral de sobrecompra del RSI.
+        atr_period: periodo del ATR del stop.
+    """
     def __init__(
         self, rsi_period: int = 14, bb_period: int = 20, bb_std: float = 2.0,
         oversold: float = 30.0, overbought: float = 70.0, atr_period: int = 14,
@@ -31,6 +46,14 @@ class MeanReversionRSIBBStrategy(BaseStrategy):
         self.name = f"mean_reversion_rsi{rsi_period}_bb{bb_period}"
 
     def precompute(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Agrega `rsi`, `bb_upper`, `bb_middle`, `bb_lower` y `atr`.
+
+        Args:
+            df: velas con `high`, `low` y `close`.
+
+        Returns:
+            Una copia de `df` con los indicadores.
+        """
         df = df.copy()
         df["rsi"] = rsi(df["close"], self.rsi_period)
         upper, middle, lower = bollinger_bands(df["close"], self.bb_period, self.bb_std)
@@ -39,6 +62,14 @@ class MeanReversionRSIBBStrategy(BaseStrategy):
         return df
 
     def evaluate(self, df: pd.DataFrame) -> Signal:
+        """LONG o SHORT cuando el RSI y la banda de Bollinger estan ambos en el extremo.
+
+        Args:
+            df: velas (con las columnas precalculadas si existen).
+
+        Returns:
+            La senal; `HOLD` con menos de `max(rsi_period, bb_period) + 1` velas o sin extremo.
+        """
         if len(df) < max(self.rsi_period, self.bb_period) + 1:
             return Signal.HOLD
 
@@ -57,6 +88,16 @@ class MeanReversionRSIBBStrategy(BaseStrategy):
         return Signal.HOLD
 
     def take_profit_price(self, df: pd.DataFrame, side: Signal, entry_price: float) -> float | None:
+        """La banda media de Bollinger de la ultima vela.
+
+        Args:
+            df: velas hasta la de la senal.
+            side: direccion de la entrada (no cambia el objetivo).
+            entry_price: precio de entrada (no se usa).
+
+        Returns:
+            El precio de la banda media, o `None` si aun no esta definida.
+        """
         if "bb_middle" in df.columns:
             value = df["bb_middle"].iloc[-1]
         else:
@@ -65,6 +106,16 @@ class MeanReversionRSIBBStrategy(BaseStrategy):
         return None if pd.isna(value) else float(value)
 
     def stop_price(self, df: pd.DataFrame, side: Signal, entry_price: float) -> float | None:
+        """SL a `ATR_MULTIPLIER` veces el ATR de la entrada, en contra de la direccion.
+
+        Args:
+            df: velas hasta la de la senal.
+            side: direccion de la entrada.
+            entry_price: precio de entrada.
+
+        Returns:
+            El precio del SL, o `None` si el ATR aun no esta definido.
+        """
         atr_series = df["atr"] if "atr" in df.columns else atr(df, self.atr_period)
         distance = ATR_MULTIPLIER * atr_series.iloc[-1]
         if pd.isna(distance):

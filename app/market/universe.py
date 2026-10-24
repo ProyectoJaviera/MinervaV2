@@ -48,9 +48,30 @@ async def build_universe_snapshot(
     bitunix: BitunixRestClient,
     settings: Settings,
 ) -> list[AssetUniverseEntry]:
-    """Construye (sin persistir) el snapshot completo -- incluye TODOS los
-    candidatos evaluados (no solo los incluidos), para que la exclusion
-    quede auditable."""
+    """Construye, sin persistir, el snapshot completo del universo dinamico.
+
+    Toma los `UNIVERSE_CANDIDATE_POOL` primeros de CoinGecko por capitalizacion, marca los de
+    las categorias a excluir y las exclusiones manuales, intersecta con los perpetuos USDT
+    con `symbolStatus = OPEN` de Bitunix, comprueba que el precio de CoinGecko y el de
+    Bitunix no difieran mas de la tolerancia, e incluye hasta `UNIVERSE_SIZE`. Devuelve TODOS
+    los candidatos evaluados (no solo los incluidos) para que la exclusion quede auditable.
+
+    Args:
+        coingecko: cliente de CoinGecko.
+        bitunix: cliente REST de Bitunix.
+        settings: configuracion.
+
+    Returns:
+        Una `AssetUniverseEntry` por candidato, todas con el mismo `refreshed_at`.
+
+    Raises:
+        CoinGeckoApiError: si CoinGecko falla tras los reintentos.
+        BitunixApiError: si Bitunix responde con un error.
+
+    Efectos:
+        Red: CoinGecko (ranking y una llamada por categoria excluida) y Bitunix
+        (`trading_pairs` y `tickers`). No toca la base.
+    """
     now = datetime.now(UTC)
 
     candidates = await coingecko.get_markets(per_page=settings.universe_candidate_pool)
@@ -123,9 +144,24 @@ async def refresh_universe(
     db: Database,
     settings: Settings,
 ) -> list[AssetUniverseEntry]:
-    """Intenta refrescar el universo; si falla, deja el ultimo snapshot
-    persistido intacto (degradacion controlada) y re-lanza la excepcion para
-    que el llamador decida como notificar/registrar el fallo."""
+    """Refresca el universo y guarda el snapshot; si falla deja el ultimo intacto.
+
+    Args:
+        coingecko: cliente de CoinGecko.
+        bitunix: cliente REST de Bitunix.
+        db: conexion a la base.
+        settings: configuracion.
+
+    Returns:
+        Las entradas guardadas.
+
+    Raises:
+        CoinGeckoApiError: si CoinGecko falla (se registra y se vuelve a lanzar).
+        RuntimeError: si el snapshot no incluye ningun simbolo (no se guarda).
+
+    Efectos:
+        Red: CoinGecko y Bitunix. Escribe `asset_universe` (INSERT del snapshot).
+    """
     try:
         entries = await build_universe_snapshot(coingecko, bitunix, settings)
     except CoinGeckoApiError:
@@ -138,6 +174,18 @@ async def refresh_universe(
 
 
 async def is_universe_stale(db: Database, settings: Settings) -> bool:
+    """Dice si el ultimo snapshot es mas viejo que `UNIVERSE_STALENESS_HOURS` (o no existe).
+
+    Args:
+        db: conexion a la base.
+        settings: configuracion.
+
+    Returns:
+        True si no hay snapshot o supera el umbral de antiguedad.
+
+    Efectos:
+        Lee `asset_universe`.
+    """
     latest = await universe_repo.get_latest_refreshed_at(db)
     if latest is None:
         return True
@@ -151,8 +199,23 @@ async def refresh_universe_safely(
     db: Database,
     settings: Settings,
 ) -> bool:
-    """Refresco que nunca lanza: si falla por cualquier motivo, conserva el snapshot
-    anterior, registra el error en `system_state` y devuelve False. No bloquea cierres."""
+    """Refresco que nunca lanza: ante cualquier fallo conserva el snapshot anterior.
+
+    Registra el resultado en `system_state` (clave `universe_last_refresh_error`: vacia si
+    salio bien, con la hora y el error si fallo). No bloquea cierres.
+
+    Args:
+        coingecko: cliente de CoinGecko.
+        bitunix: cliente REST de Bitunix.
+        db: conexion a la base.
+        settings: configuracion.
+
+    Returns:
+        True si se refresco; False si fallo.
+
+    Efectos:
+        Red: CoinGecko y Bitunix. Escribe `asset_universe` y `system_state`.
+    """
     try:
         entries = await refresh_universe(coingecko, bitunix, db, settings)
     except Exception as exc:  # noqa: BLE001 - el refresco no debe tumbar el proceso
@@ -186,9 +249,21 @@ class UniverseRefresher:
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
+        """Pide que `run_forever` termine despues de su espera actual."""
         self._stop.set()
 
     async def is_due(self, now: datetime | None = None) -> bool:
+        """Dice si ya toca refrescar: no hay snapshot o pasaron `UNIVERSE_REFRESH_HOURS`.
+
+        Args:
+            now: instante de referencia; por defecto, ahora (UTC).
+
+        Returns:
+            True si toca refrescar.
+
+        Efectos:
+            Lee `asset_universe`.
+        """
         latest = await universe_repo.get_latest_refreshed_at(self.db)
         if latest is None:
             return True
@@ -196,12 +271,31 @@ class UniverseRefresher:
         return (now - latest).total_seconds() / 3600 >= self.settings.universe_refresh_hours
 
     async def run_once(self) -> str:
+        """Refresca el universo si toca.
+
+        Returns:
+            `"vigente"` si no tocaba, `"refrescado"` si salio bien o `"fallido"` si no.
+
+        Efectos:
+            Lee `asset_universe`; si toca, red CoinGecko y Bitunix y escribe `asset_universe` y
+            `system_state`.
+        """
         if not await self.is_due():
             return "vigente"
         ok = await refresh_universe_safely(self.coingecko, self.bitunix, self.db, self.settings)
         return "refrescado" if ok else "fallido"
 
     async def run_forever(self, check_seconds: float = CHECK_INTERVAL_SECONDS) -> None:
+        """Revisa cada `check_seconds` si toca refrescar, hasta `stop()`.
+
+        Un error inesperado se registra y el bucle sigue.
+
+        Args:
+            check_seconds: segundos entre revisiones (por defecto, una hora).
+
+        Efectos:
+            Ver `run_once`.
+        """
         while not self._stop.is_set():
             try:
                 await self.run_once()

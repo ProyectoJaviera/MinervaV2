@@ -36,5 +36,16 @@ NO_KEEPALIVE_LIMITS = httpx.Limits(max_keepalive_connections=0)
 
 
 def build_async_http_client(timeout: float = 10.0) -> httpx.AsyncClient:
+    """Construye el cliente HTTP asincrono que debe usar TODO el proyecto.
+
+    Usa el almacen de certificados del sistema operativo (`truststore`) y desactiva el
+    keep-alive (ver el docstring del modulo para el porque de ambas decisiones).
+
+    Args:
+        timeout: segundos de espera maxima por peticion.
+
+    Returns:
+        Un `httpx.AsyncClient` nuevo; quien lo crea debe cerrarlo con `aclose()`.
+    """
     ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     return httpx.AsyncClient(timeout=timeout, verify=ssl_context, limits=NO_KEEPALIVE_LIMITS)

@@ -21,48 +21,93 @@ import pandas as pd
 
 
 class Signal(StrEnum):
+    """Senal de una estrategia sobre la ultima vela cerrada: `LONG`, `SHORT` o `HOLD`."""
     LONG = "LONG"
     SHORT = "SHORT"
     HOLD = "HOLD"
 
 
 class BaseStrategy(ABC):
+    """Clase base de las estrategias: `evaluate` decide la senal; lo demas es opcional.
+
+    Una estrategia solo emite una senal; no abre nada. `stop_price`, `take_profit_price` y
+    `trailing_distance` devuelven `None` por defecto (el motor usa entonces un SL/TP
+    porcentual de respaldo). `precompute` agrega una sola vez las columnas de indicadores
+    a toda la serie, y `evaluate` las usa si estan presentes (asi el backtest no recalcula
+    en cada vela; el resultado es identico porque todos los indicadores son causales).
+
+    Attributes:
+        name: nombre unico de la estrategia (clave del registro y de las tablas).
+    """
     name: str
 
     @abstractmethod
     def evaluate(self, df: pd.DataFrame) -> Signal:
-        """Recibe un DataFrame OHLCV ordenado por tiempo ascendente (columnas
-        'open', 'high', 'low', 'close') y devuelve la senal para la ULTIMA vela
-        cerrada."""
+        """Decide la senal para la ULTIMA vela cerrada.
+
+        Args:
+            df: velas OHLCV en orden cronologico ascendente (columnas `open`, `high`, `low`,
+                `close`, y las que `precompute` haya agregado).
+
+        Returns:
+            `Signal.LONG`, `Signal.SHORT` o `Signal.HOLD`.
+
+        Raises:
+            NotImplementedError: en la clase base; cada estrategia debe implementarlo.
+        """
         raise NotImplementedError
 
     def stop_price(self, df: pd.DataFrame, side: Signal, entry_price: float) -> float | None:
-        """Precio absoluto de stop loss para una entrada en `entry_price`.
-        `None` -> el motor usa un SL porcentual de respaldo."""
+        """Precio absoluto del stop loss para una entrada en `entry_price`.
+
+        Args:
+            df: velas hasta la de la senal.
+            side: direccion de la entrada.
+            entry_price: precio de entrada.
+
+        Returns:
+            El precio del SL, o `None` para que el motor use el SL porcentual de respaldo.
+        """
         return None
 
     def take_profit_price(self, df: pd.DataFrame, side: Signal, entry_price: float) -> float | None:
-        """Precio absoluto de take profit. `None` -> el motor usa un TP
-        porcentual de respaldo."""
+        """Precio absoluto del take profit.
+
+        Args:
+            df: velas hasta la de la senal.
+            side: direccion de la entrada.
+            entry_price: precio de entrada.
+
+        Returns:
+            El precio del TP, o `None` para que el motor use el TP porcentual de respaldo.
+        """
         return None
 
     def trailing_distance(self, df: pd.DataFrame) -> float | None:
-        """Distancia (en precio, siempre positiva) que mantiene el trailing
-        stop respecto del mejor precio alcanzado. `None` -> sin trailing."""
+        """Distancia (en precio, siempre positiva) que mantiene el trailing stop del mejor precio.
+
+        Args:
+            df: velas hasta la de la senal.
+
+        Returns:
+            La distancia, o `None` si la estrategia no usa trailing.
+        """
         return None
 
     def precompute(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Devuelve `df` con columnas de indicador agregadas, calculadas UNA
-        SOLA VEZ sobre toda la serie (correccion de rendimiento post-Fase-2:
-        sin esto, el motor de backtest recalculaba cada indicador desde
-        cero en cada vela sobre una ventana de hasta `MAX_LOOKBACK_BARS`,
-        miles de veces por celda -- lento aunque sea O(n), por el costo fijo
-        de cada llamada a pandas). Todos los indicadores usados aqui son
-        causales (nunca leen datos futuros), asi que precalcularlos sobre
-        la serie completa da EXACTAMENTE el mismo valor que recomputarlos en
-        cada vela sobre una ventana suficientemente larga -- no es una
-        aproximacion. Default: no agrega nada, `evaluate`/`stop_price`/etc.
-        recalculan sobre el sub-dataframe que reciban (compatibilidad con
-        llamadas directas en tests). Cada estrategia que lo necesite
-        sobreescribe esto Y lee la columna ya calculada si esta presente."""
+        """Agrega a `df` las columnas de indicadores, calculadas UNA vez sobre toda la serie.
+
+        Correccion de rendimiento post-Fase 2: sin esto el motor de backtest recalculaba cada
+        indicador desde cero en cada vela. Todos los indicadores son causales (jamas leen datos
+        futuros), asi que precalcular da EXACTAMENTE el valor que se obtendria recomputando en
+        cada vela con una ventana suficiente; no es una aproximacion. Por defecto no agrega
+        nada. Una estrategia que lo sobreescribe tambien debe leer la columna si esta presente.
+
+        Args:
+            df: velas OHLCV de toda la serie.
+
+        Returns:
+            Una copia de `df` con las columnas de indicador agregadas (o `df` mismo si la
+            estrategia no precalcula).
+        """
         return df

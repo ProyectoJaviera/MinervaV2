@@ -1,7 +1,10 @@
-"""Registro de estrategias candidatas (Fase 2, docs/FASE2_PLAN.md seccion B).
+"""Registro de las estrategias vigentes (Fase 2, `docs/historial/FASE2_PLAN.md`, seccion B).
 
-`EXPERIMENTAL_STRATEGIES` marca las que NO participan en el veredicto
-global de descarte (solo se reportan): las dos variantes de `funding_contrarian`.
+`STRATEGIES` mapea el nombre a la instancia, `STRATEGY_TIMEFRAMES` fija en que
+timeframes se evalua cada una y `EXPERIMENTAL_STRATEGIES` marca las dos variantes de
+`funding_contrarian`, que no participan en el veredicto de descarte (solo se
+reportan). Agregar, quitar o renombrar una estrategia cambia que senales nacen, es
+decir la medicion: ver `docs/dev/ZONAS_PROTEGIDAS.md`.
 """
 
 from __future__ import annotations

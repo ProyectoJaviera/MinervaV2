@@ -52,6 +52,22 @@ LOWER_PERCENTILE = 10.0
 
 
 class FundingContrarianPercentileStrategy(BaseStrategy):
+    """Contrarian de funding v2 EXPERIMENTAL con umbral relativo (percentil).
+
+    Version nueva y separada de `FundingContrarianStrategy` (cuyo umbral no se modifica por
+    la regla de pre-registro). `precompute` calcula UNA vez los percentiles moviles
+    (`rolling().quantile()`, causales) y el promedio reciente; `evaluate` solo lee columnas.
+    No opera mientras la ventana de referencia contenga AUNQUE SEA una vela de funding
+    aproximado (se exige funding 100 % real en toda la ventana). La primera version tenia un
+    bug (exigia mas filas de las que el backtest le pasaba y siempre devolvia HOLD); se
+    corrigio calculando en `precompute`.
+
+    Attributes:
+        lookback: periodos de funding que se promedian.
+        history_window: velas de la ventana de referencia de los percentiles.
+        upper_percentile: percentil superior (90).
+        lower_percentile: percentil inferior (10).
+    """
     def __init__(
         self,
         lookback: int = FUNDING_LOOKBACK,
@@ -66,6 +82,17 @@ class FundingContrarianPercentileStrategy(BaseStrategy):
         self.name = "funding_contrarian_percentile_experimental"
 
     def precompute(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Agrega los percentiles moviles y el promedio reciente del funding.
+
+        Las columnas son `funding_recent_avg`, `funding_pctl_upper`, `funding_pctl_lower` y
+        `funding_history_all_real` (True si TODA la ventana de referencia es funding real).
+
+        Args:
+            df: velas con `funding_rate` (y, opcional, `funding_is_approximated`).
+
+        Returns:
+            Una copia de `df` con las columnas; `df` sin cambios si no tiene `funding_rate`.
+        """
         if "funding_rate" not in df.columns:
             return df
         df = df.copy()
@@ -92,6 +119,15 @@ class FundingContrarianPercentileStrategy(BaseStrategy):
         return df
 
     def evaluate(self, df: pd.DataFrame) -> Signal:
+        """SHORT con funding sobre el percentil alto y momentum negativo; LONG al reves.
+
+        Args:
+            df: velas con las columnas que agrega `precompute`.
+
+        Returns:
+            La senal; `HOLD` si faltan columnas, hay menos de 2 velas, el funding de la ventana
+            no es 100 % real o los percentiles no estan definidos.
+        """
         required = {"funding_rate", "funding_pctl_upper", "funding_pctl_lower",
                     "funding_recent_avg", "funding_history_all_real"}
         if not required.issubset(df.columns) or len(df) < 2:

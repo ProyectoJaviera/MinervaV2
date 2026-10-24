@@ -75,6 +75,14 @@ class BoundedQueueHandler(logging.handlers.QueueHandler):
         self.dropped_count = 0
 
     def enqueue(self, record: logging.LogRecord) -> None:
+        """Encola el registro sin esperar jamas; con la cola llena aplica la politica de descarte.
+
+        DEBUG e INFO se descartan (y se cuentan). Un WARNING o mas grave desaloja UN registro
+        viejo de menor prioridad; solo se pierde si la cola esta llena de WARNING o mas grave.
+
+        Args:
+            record: el registro de log a encolar.
+        """
         try:
             self.queue.put_nowait(record)
             return
@@ -107,6 +115,11 @@ class BoundedQueueHandler(logging.handlers.QueueHandler):
             self.dropped_count += 1
 
     def handleError(self, record: logging.LogRecord) -> None:
+        """No hace nada, a proposito: escribir a stderr podria bloquear el mismo pipe del incidente.
+
+        Args:
+            record: el registro que fallo (se ignora; el descarte ya quedo contado en `enqueue`).
+        """
         # Nunca escribir a stderr desde aqui: podria ser el mismo pipe
         # trabado del incidente. Un descarte ya quedo contado en `enqueue`.
         pass
@@ -234,4 +247,12 @@ def get_dropped_log_count() -> int:
 
 
 def get_logger(name: str) -> logging.Logger:
+    """El logger de un modulo; se usa como `logger = get_logger(__name__)`.
+
+    Args:
+        name: nombre del logger, normalmente `__name__`.
+
+    Returns:
+        El `logging.Logger` de ese nombre.
+    """
     return logging.getLogger(name)

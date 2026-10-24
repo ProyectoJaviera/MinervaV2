@@ -11,6 +11,13 @@ from datetime import datetime
 
 @dataclass(frozen=True)
 class UniverseChange:
+    """Un cambio del universo vigente entre dos refrescos consecutivos.
+
+    Attributes:
+        at: instante del refresco en que se noto el cambio.
+        added: simbolos que entraron, ordenados.
+        removed: simbolos que salieron, ordenados.
+    """
     at: datetime
     added: tuple[str, ...]
     removed: tuple[str, ...]
@@ -19,13 +26,29 @@ class UniverseChange:
 def diff_sets(
     previous: frozenset[str], current: frozenset[str],
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """(entran, salen), ordenados."""
+    """Diferencia entre dos conjuntos de simbolos.
+
+    Args:
+        previous: simbolos incluidos antes.
+        current: simbolos incluidos ahora.
+
+    Returns:
+        La tupla `(entran, salen)`, cada una ordenada.
+    """
     return tuple(sorted(current - previous)), tuple(sorted(previous - current))
 
 
 def universe_changes(history: list[tuple[datetime, frozenset[str]]]) -> list[UniverseChange]:
-    """Cambios entre snapshots consecutivos. `history` va del mas VIEJO al mas nuevo; el resultado
-    va del mas NUEVO al mas viejo. El primer snapshot no es un cambio (no hay anterior)."""
+    """Cambios entre snapshots consecutivos del universo.
+
+    El primer snapshot no es un cambio (no hay anterior).
+
+    Args:
+        history: `(instante, simbolos incluidos)` del mas VIEJO al mas NUEVO.
+
+    Returns:
+        Los `UniverseChange`, del mas NUEVO al mas viejo; solo snapshots que difieren.
+    """
     changes: list[UniverseChange] = []
     for (_, before), (at, after) in zip(history, history[1:], strict=False):
         added, removed = diff_sets(before, after)

@@ -90,14 +90,24 @@ _INTERVAL_MS = {
 
 
 class MissingHistoricalDataError(RuntimeError):
-    """El rango de velas pedido no esta completo en `ohlcv_cache`. El motor
-    de backtest ya no descarga por red (tarea 3): corre primero
-    `scripts/download_history.py` para llenar el cache."""
+    """El rango de velas pedido no esta completo en `ohlcv_cache`.
+
+    El motor de backtest ya no descarga por red: hay que correr antes
+    `scripts/download_history.py` para llenar el cache.
+    """
 
 
 def interval_to_ms(interval: str) -> int | None:
-    """Duracion de un intervalo de vela en ms, o None si es desconocido
-    (p. ej. '1M' -- mes calendario, duracion variable)."""
+    """Duracion de un intervalo de vela en milisegundos.
+
+    Args:
+        interval: texto del intervalo (`1m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `6h`, `8h`,
+            `12h`, `1d`, `3d`, `1w`).
+
+    Returns:
+        Los milisegundos, o `None` si el intervalo es desconocido (p. ej. `1M`: mes de
+        duracion variable).
+    """
     return _INTERVAL_MS.get(interval)
 
 
@@ -124,10 +134,18 @@ def _bar_from_raw(symbol: str, interval: str, price_type: str, raw: dict) -> OHL
 def drop_incomplete_last_bar(
     bars: list[OHLCVBar], interval: str, now_ms: int
 ) -> list[OHLCVBar]:
-    """Descarta la ultima vela si todavia no ha cerrado (su open_time + la
-    duracion del intervalo es posterior a `now_ms`). Usado por el motor de
-    backtest (Fase 2, punto 6 de los ajustes) para nunca operar sobre una
-    vela en formacion."""
+    """Descarta las velas que todavia no cerraron (su `open_time` mas la duracion pasa de `now_ms`).
+
+    El motor de backtest lo usa para no operar jamas sobre una vela en formacion.
+
+    Args:
+        bars: velas de una serie.
+        interval: intervalo de la serie.
+        now_ms: instante de referencia, en ms Unix.
+
+    Returns:
+        Las velas ya cerradas; la lista intacta si el intervalo es desconocido o esta vacia.
+    """
     step_ms = interval_to_ms(interval)
     if step_ms is None or not bars:
         return bars
@@ -220,11 +238,21 @@ GAP_RETRY_COOLDOWN_HOURS = 24.0
 def find_gaps(
     open_times: list[int], step_ms: int, start: int | None = None, end: int | None = None
 ) -> list[int]:
-    """`open_time` que faltan en una serie cacheada, dado el paso `step_ms`.
-    Por defecto revisa entre el minimo y el maximo de `open_times`; si se
-    pasan `start`/`end` (alineados a la grilla) revisa ESE rango en vez del
-    que resulte de los datos -- para detectar un hueco justo en el borde de
-    lo pedido, no solo entre lo que ya este cacheado."""
+    """Los `open_time` que faltan en una serie, dado el paso `step_ms`.
+
+    Por defecto revisa entre el minimo y el maximo de `open_times`; con `start` y `end`
+    (alineados a la grilla) revisa ESE rango, para detectar un hueco justo en el borde de lo
+    pedido y no solo entre lo ya cacheado.
+
+    Args:
+        open_times: `open_time` presentes (ms Unix).
+        step_ms: duracion de una vela, en ms.
+        start: inicio del rango a revisar, o `None`.
+        end: fin del rango a revisar, o `None`.
+
+    Returns:
+        Los `open_time` ausentes, en orden; lista vacia si no hay datos o el rango es invalido.
+    """
     times = set(open_times)
     lo = start if start is not None else (min(times) if times else None)
     hi = end if end is not None else (max(times) if times else None)
@@ -242,12 +270,27 @@ async def fill_gaps(
     gap_times: list[int],
     step_ms: int,
 ) -> list[int]:
-    """Repara huecos puntuales con pedidos ESTRECHOS (ventana chica, `limit`
-    bajo: ver la nota de modulo sobre la vela que Bitunix a veces omite en
-    una respuesta de `limit=200`). Agrupa huecos contiguos para no gastar una
-    llamada por minuto. Devuelve los `open_time` que se lograron recuperar
-    (puede ser un subconjunto de `gap_times`, si alguno sigue sin aparecer
-    incluso con la ventana chica)."""
+    """Repara huecos puntuales con pedidos ESTRECHOS (ventana chica, `limit` bajo).
+
+    Bitunix a veces omite una vela en una respuesta de `limit=200` que si aparece al pedirla
+    en una ventana pequena (ver la nota del modulo). Agrupa huecos contiguos para no gastar
+    una llamada por minuto; una racha larga se parte en varias llamadas, nunca se trunca.
+
+    Args:
+        client: cliente REST de Bitunix.
+        db: conexion a la base.
+        symbol: simbolo.
+        interval: intervalo.
+        price_type: `LAST_PRICE` o `MARK_PRICE`.
+        gap_times: `open_time` faltantes (ms Unix).
+        step_ms: duracion de una vela, en ms.
+
+    Returns:
+        Los `open_time` recuperados (puede ser un subconjunto de `gap_times`).
+
+    Efectos:
+        Red: GET `kline` a Bitunix. Escribe `ohlcv_cache` (UPSERT).
+    """
     if not gap_times:
         return []
     gap_times = sorted(gap_times)
@@ -389,14 +432,28 @@ async def download_missing(
     end_time: int,
     price_type: str = "LAST_PRICE",
 ) -> None:
-    """Descarga por red SOLO lo que falte en cache para cubrir
-    [start_time, end_time]: la cola reciente (mas nuevo que lo cacheado,
-    hasta `end_time`) y la cabeza vieja (mas viejo que lo cacheado, hasta
-    `start_time` o el piso real ya conocido); al final verifica y repara
-    huecos puntuales (`_verify_and_repair`, ver la nota de modulo). La usan
-    `scripts/download_history.py` y, para velas de 1 minuto, la
-    reconciliacion al reiniciar -- el motor de backtest nunca llama esto,
-    solo lee con `get_cached_or_raise`."""
+    """Descarga por red SOLO lo que falte en cache para cubrir `[start_time, end_time]`.
+
+    Pide la cola reciente (mas nueva que lo cacheado, hasta `end_time`) y la cabeza vieja
+    (mas vieja que lo cacheado, hasta `start_time` o el piso real ya conocido), y al final
+    verifica y repara huecos puntuales. Cada pagina se guarda de inmediato: interrumpirla no
+    pierde progreso. La usan `scripts/download_history.py`, el generador de senales y, para
+    velas de 1 minuto, la reconciliacion al reiniciar; el motor de backtest nunca la llama.
+
+    Args:
+        client: cliente REST de Bitunix.
+        db: conexion a la base.
+        symbol: simbolo.
+        interval: intervalo.
+        start_time: inicio del rango, en ms Unix.
+        end_time: fin del rango, en ms Unix.
+        price_type: `LAST_PRICE` o `MARK_PRICE`.
+
+    Efectos:
+        Red: GET `kline` a Bitunix. Lee `ohlcv_cache`, `ohlcv_floor` y
+        `ohlcv_unrepairable_gaps`; escribe `ohlcv_cache`, `ohlcv_floor` y
+        `ohlcv_unrepairable_gaps` (marca y borra huecos).
+    """
     step_ms = interval_to_ms(interval)
     floor = await ohlcv_repo.get_floor(db, symbol, interval, price_type)
 
@@ -475,12 +532,27 @@ async def check_series_availability(
     end_time: int,
     price_type: str = "LAST_PRICE",
 ) -> str | None:
-    """Verifica si [start_time, end_time] esta completo en `ohlcv_cache`
-    SIN lanzar nada -- devuelve `None` si esta completo, o un mensaje
-    describiendo que falta. Usada tanto por `get_cached_or_raise` (que
-    lanza `MissingHistoricalDataError` con ese mismo mensaje) como por
-    `scripts/run_backtest.py` para validar TODAS las series necesarias de
-    antemano y listarlas juntas, antes de calcular nada (tarea 1a)."""
+    """Comprueba, sin lanzar nada, si `[start_time, end_time]` esta completo en `ohlcv_cache`.
+
+    La cabeza se acepta completa si hay vela desde `start_time`, si el piso real conocido ya
+    esta cubierto, o si `ohlcv_series_complete` marca la serie como descargada completa; la
+    cola, si llega a dos velas de `end_time`. Avisa en el log de huecos internos pero no
+    cambia el resultado.
+
+    Args:
+        db: conexion a la base.
+        symbol: simbolo.
+        interval: intervalo.
+        start_time: inicio del rango, en ms Unix.
+        end_time: fin del rango, en ms Unix.
+        price_type: `LAST_PRICE` o `MARK_PRICE`.
+
+    Returns:
+        `None` si esta completo; si no, el mensaje que describe lo que falta.
+
+    Efectos:
+        Lee `ohlcv_cache`, `ohlcv_floor` y `ohlcv_series_complete`. Escribe en el log.
+    """
     step_ms = interval_to_ms(interval)
     if step_ms is None:
         return None
@@ -530,9 +602,26 @@ async def get_cached_or_raise(
     end_time: int,
     price_type: str = "LAST_PRICE",
 ) -> list[OHLCVBar]:
-    """Lee SOLO de `ohlcv_cache` (nunca toca la red). Si el rango pedido no
-    esta completo, lanza `MissingHistoricalDataError` -- el llamador debe
-    correr `scripts/download_history.py` primero."""
+    """Lee SOLO de `ohlcv_cache` (nunca toca la red); si el rango no esta completo, lanza.
+
+    Args:
+        db: conexion a la base.
+        symbol: simbolo.
+        interval: intervalo.
+        start_time: inicio del rango, en ms Unix.
+        end_time: fin del rango, en ms Unix.
+        price_type: `LAST_PRICE` o `MARK_PRICE`.
+
+    Returns:
+        Las velas del rango, en orden cronologico.
+
+    Raises:
+        MissingHistoricalDataError: si el rango no esta completo; hay que correr antes
+            `scripts/download_history.py`.
+
+    Efectos:
+        Lee `ohlcv_cache`, `ohlcv_floor` y `ohlcv_series_complete`.
+    """
     problem = await check_series_availability(
         db, symbol, interval, start_time, end_time, price_type
     )

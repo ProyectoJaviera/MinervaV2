@@ -1,11 +1,12 @@
-"""Punto de entrada FastAPI. `GET /health`/`/positions`/`/trades` siguen sin
-auth (preexistentes, nada sensible); las rutas nuevas bajo `/api/` (pre-Fase
-5, item 2 del plan aprobado 2026-10-14) exigen login -- ver
-`app/api/security.py`. El dashboard completo sigue siendo Fase 5 -- ver
-docs/FASE0.md y el plan de Fase 1.
+"""Punto de entrada de la aplicacion FastAPI (`app.main:app`).
 
-Indicador permanente de modo paper trading: ver `GET /health` y el header
-`X-Minerva-Mode` en todas las respuestas.
+Aqui se construye el objeto `app`, se registran los routers y se define el `lifespan`
+que arma y arranca todas las tareas del bot. Solo `GET /health`, `GET /positions` y
+`GET /trades` son publicos (y los dos ultimos ocultan los resultados hasta el registro
+oficial); el resto de `/api/` exige login (ver `app/api/security.py`). Todas las
+respuestas llevan el encabezado `X-Minerva-Mode: PAPER_TRADING`. Si existe
+`frontend/dist`, se sirve en `/` el dashboard compilado. La secuencia de arranque y
+parada esta explicada en `docs/dev/FLUJO_EJECUCION.md`.
 """
 
 from __future__ import annotations
@@ -60,6 +61,31 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Arma el bot al arrancar y lo desarma al parar; se pasa a `FastAPI(lifespan=...)`.
+
+    Arranque, en orden: logging; aviso si `JWT_SECRET` es debil; base de datos; clientes
+    REST y WebSocket de Bitunix; `PaperBackend`, `ShadowBook`, `PositionMonitor`, brazo
+    ejecutado y etiquetador; scheduler; universo; latido. Luego reconcilia las posiciones
+    abiertas con velas de 1 minuto, activa el brazo ejecutado y abre el feed. Las tareas
+    permanentes son el WebSocket, el monitor, el scheduler, el universo y el latido; el bot
+    de Telegram, el push, las noticias y la memoria de lecciones se agregan solo si su
+    interruptor esta encendido. Al parar cancela las tareas, drena el etiquetador y el brazo
+    y cierra clientes y base.
+
+    Un fallo de reconciliacion o de activacion del brazo se registra y NO impide arrancar.
+
+    Args:
+        app: la aplicacion FastAPI; se le cuelgan en `app.state` la base, el backend, el
+            monitor, el scheduler y el resto de objetos que usan las rutas.
+
+    Yields:
+        Nada: mientras el contexto esta abierto la API atiende peticiones.
+
+    Efectos:
+        Abre la base y el archivo de log; red hacia Bitunix y CoinGecko; crea las tareas
+        asyncio; puede lanzar Telegram y las noticias segun los interruptores. Todo el
+        detalle de lectura y escritura esta en cada tarea.
+    """
     setup_logging()
     logger.warning("Minerva arrancando en MODO PAPER TRADING -- nunca se envian ordenes reales.")
     warn_if_jwt_secret_is_unsafe(logger, settings)
@@ -196,6 +222,15 @@ app = FastAPI(title="Minerva (PAPER TRADING)", lifespan=lifespan)
 
 @app.middleware("http")
 async def add_paper_trading_header(request, call_next):
+    """Middleware: agrega `X-Minerva-Mode: PAPER_TRADING` a todas las respuestas.
+
+    Args:
+        request: la peticion entrante.
+        call_next: siguiente manejador de la cadena.
+
+    Returns:
+        La respuesta, ya con el encabezado.
+    """
     response = await call_next(request)
     response.headers["X-Minerva-Mode"] = "PAPER_TRADING"
     return response

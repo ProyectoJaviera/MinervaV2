@@ -40,6 +40,18 @@ class CoinGeckoApiError(RuntimeError):
 
 
 class CoinGeckoClient:
+    """Cliente de CoinGecko (plan Demo gratuito) con reintentos y backoff.
+
+    Envia la cabecera `x-cg-demo-api-key` solo si hay clave configurada. Reintenta errores
+    de red y los estados 429, 500, 502, 503 y 504; ante un timeout duro reconstruye el
+    cliente HTTP.
+
+    Attributes:
+        base_url: URL base sin barra final.
+        api_key: clave Demo (puede estar vacia).
+        max_retries: reintentos extra tras el primer intento.
+        timeout: segundos maximos por peticion.
+    """
     def __init__(
         self,
         base_url: str,
@@ -54,9 +66,30 @@ class CoinGeckoClient:
         self._client = build_async_http_client(timeout=timeout)
 
     async def aclose(self) -> None:
+        """Cierra el cliente HTTP subyacente.
+
+        Efectos:
+            Cierra las conexiones de red.
+        """
         await self._client.aclose()
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        """GET con reintentos y backoff.
+
+        Args:
+            path: ruta bajo `base_url`.
+            params: parametros de consulta; los `None` se omiten.
+
+        Returns:
+            El JSON decodificado de la respuesta.
+
+        Raises:
+            CoinGeckoApiError: si se agotan los reintentos.
+            httpx.HTTPStatusError: si el estado no es reintentable (p. ej. 401 o 404).
+
+        Efectos:
+            Red: GET a CoinGecko.
+        """
         url = f"{self.base_url}{path}"
         params = {k: v for k, v in (params or {}).items() if v is not None}
         headers = {"x-cg-demo-api-key": self.api_key} if self.api_key else {}
@@ -100,8 +133,24 @@ class CoinGeckoClient:
     async def get_markets(
         self, per_page: int = 30, category: str | None = None, vs_currency: str = "usd"
     ) -> list[dict]:
-        """GET /coins/markets. Ordenado por market_cap_desc. `category`
-        filtra por inclusion (no hay parametro de exclusion)."""
+        """Ranking por capitalizacion (`GET /coins/markets`), ordenado por `market_cap_desc`.
+
+        `category` filtra por inclusion: no existe un parametro de exclusion.
+
+        Args:
+            per_page: monedas a pedir (maximo 250).
+            category: id de categoria de CoinGecko, o `None` para el ranking general.
+            vs_currency: moneda de cotizacion.
+
+        Returns:
+            Lista de diccionarios (`id`, `symbol`, `current_price`, `market_cap`, ...).
+
+        Raises:
+            CoinGeckoApiError: si se agotan los reintentos.
+
+        Efectos:
+            Red: GET a CoinGecko (cuenta contra el limite del plan Demo).
+        """
         data = await self._get(
             "/coins/markets",
             {
@@ -114,6 +163,16 @@ class CoinGeckoClient:
         return data if isinstance(data, list) else []
 
     async def get_categories_list(self) -> list[dict]:
-        """GET /coins/categories/list -- ids de categoria disponibles."""
+        """Ids de categoria disponibles (`GET /coins/categories/list`).
+
+        Returns:
+            Lista de diccionarios con el id y el nombre de cada categoria.
+
+        Raises:
+            CoinGeckoApiError: si se agotan los reintentos.
+
+        Efectos:
+            Red: GET a CoinGecko.
+        """
         data = await self._get("/coins/categories/list")
         return data if isinstance(data, list) else []

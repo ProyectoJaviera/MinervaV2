@@ -32,6 +32,18 @@ MAX_BACKOFF_SECONDS = 60
 
 
 class BitunixPublicWSClient:
+    """Cliente del WebSocket publico de Bitunix, canal `tickers`, con reconexion automatica.
+
+    Entrega TODO mensaje JSON del servidor (el `pong` incluido) a `on_message`: el monitor
+    de posiciones usa cualquier mensaje como latido del feed. Envia un ping cada 15 s y
+    reconecta con espera exponencial (tope 60 s) ante cualquier corte.
+
+    Attributes:
+        ws_url: URL del WebSocket.
+        symbols: simbolos suscritos (sin duplicados, en orden).
+        channel: canal suscrito (`tickers`).
+        on_message: corrutina que recibe cada mensaje ya decodificado, o `None`.
+    """
     def __init__(
         self,
         ws_url: str,
@@ -48,11 +60,21 @@ class BitunixPublicWSClient:
         self._subscribed: set[str] = set()
 
     def stop(self) -> None:
+        """Pide que `run_forever` termine despues del mensaje o espera actual."""
         self._stop.set()
 
     async def set_symbols(self, symbols: list[str]) -> None:
-        """Cambia el conjunto de simbolos suscritos. Si hay conexion viva, suscribe
-        en caliente solo los nuevos; si no, se suscribe al reconectar."""
+        """Cambia el conjunto de simbolos suscritos.
+
+        Si hay conexion viva suscribe en caliente solo los nuevos; si no, se suscribe al
+        reconectar. No se desuscribe de los que sobran.
+
+        Args:
+            symbols: simbolos deseados.
+
+        Efectos:
+            Red: envia un mensaje `subscribe` al WebSocket si hay conexion.
+        """
         self.symbols = list(dict.fromkeys(symbols))
         new = [s for s in self.symbols if s not in self._subscribed]
         if self._ws is not None and new:
@@ -63,8 +85,12 @@ class BitunixPublicWSClient:
         return {"op": "subscribe", "args": [{"symbol": s, "ch": self.channel} for s in symbols]}
 
     async def run_forever(self) -> None:
-        """Mantiene la conexion viva; reconecta con backoff exponencial ante
-        cualquier corte, hasta que se llama a `stop()`."""
+        """Mantiene la conexion viva hasta `stop()`, reconectando con backoff exponencial.
+
+        Efectos:
+            Red: conexion WebSocket publica a Bitunix, suscripcion y pings. Entrega los mensajes
+            a `on_message` (el monitor escribe la salud de `ws_feed` a partir de ellos).
+        """
         attempt = 0
         while not self._stop.is_set():
             try:

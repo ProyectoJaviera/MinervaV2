@@ -1,5 +1,9 @@
-"""Indicadores tecnicos calculados con pandas puro (sin pandas-ta, por decision
-del usuario en Fase 0: la libreria tiene soporte de mantenimiento incierto)."""
+"""Indicadores tecnicos calculados con pandas puro.
+
+Se evito `pandas-ta` por decision del usuario en la Fase 0 (mantenimiento incierto).
+Todos son causales: el valor de una vela depende solo de esa vela y de las anteriores,
+lo que permite precalcularlos sobre toda la serie sin mirar al futuro.
+"""
 
 from __future__ import annotations
 
@@ -7,15 +11,39 @@ import pandas as pd
 
 
 def ema(series: pd.Series, span: int) -> pd.Series:
-    """Media movil exponencial. `span` debe ser >= 1."""
+    """Media movil exponencial (`adjust=False`).
+
+    Args:
+        series: serie de precios.
+        span: ventana de la EMA (>= 1).
+
+    Returns:
+        La EMA, de la misma longitud que `series`.
+
+    Raises:
+        ValueError: si `span` es menor que 1.
+    """
     if span < 1:
         raise ValueError("span debe ser >= 1")
     return series.ewm(span=span, adjust=False).mean()
 
 
 def rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    """RSI de Wilder. Las primeras `period` posiciones son NaN (no hay suficiente
-    historia para suavizar)."""
+    """RSI de Wilder.
+
+    Las primeras `period` posiciones son NaN (no hay historia para suavizar). Si no hay
+    perdidas y si hay ganancias vale 100; si el precio esta plano vale 50 por convencion.
+
+    Args:
+        series: serie de precios de cierre.
+        period: periodo del RSI (>= 1).
+
+    Returns:
+        El RSI en la escala 0-100.
+
+    Raises:
+        ValueError: si `period` es menor que 1.
+    """
     if period < 1:
         raise ValueError("period debe ser >= 1")
     delta = series.diff()
@@ -33,7 +61,18 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
 
 
 def sma(series: pd.Series, period: int) -> pd.Series:
-    """Media movil simple. `period` debe ser >= 1."""
+    """Media movil simple; las primeras `period - 1` posiciones son NaN.
+
+    Args:
+        series: serie de precios.
+        period: ventana (>= 1).
+
+    Returns:
+        La media movil.
+
+    Raises:
+        ValueError: si `period` es menor que 1.
+    """
     if period < 1:
         raise ValueError("period debe ser >= 1")
     return series.rolling(window=period, min_periods=period).mean()
@@ -42,9 +81,22 @@ def sma(series: pd.Series, period: int) -> pd.Series:
 def bollinger_bands(
     series: pd.Series, period: int = 20, num_std: float = 2.0
 ) -> tuple[pd.Series, pd.Series, pd.Series]:
-    """Bandas de Bollinger: (banda_superior, banda_media, banda_inferior).
-    Banda media = SMA(period); bandas exteriores = media +/- num_std * desv.
-    estandar (poblacional, ddof=0, convencion estandar de Bollinger)."""
+    """Bandas de Bollinger: banda superior, media e inferior.
+
+    La banda media es la SMA(`period`); las exteriores son la media mas o menos `num_std`
+    desviaciones estandar poblacionales (`ddof=0`, la convencion de Bollinger).
+
+    Args:
+        series: serie de precios de cierre.
+        period: ventana de la media y de la desviacion (>= 1).
+        num_std: numero de desviaciones de las bandas exteriores.
+
+    Returns:
+        La tupla `(superior, media, inferior)`.
+
+    Raises:
+        ValueError: si `period` es menor que 1.
+    """
     if period < 1:
         raise ValueError("period debe ser >= 1")
     middle = sma(series, period)
@@ -55,8 +107,18 @@ def bollinger_bands(
 
 
 def donchian_channel(df: pd.DataFrame, period: int = 20) -> tuple[pd.Series, pd.Series]:
-    """Canal de Donchian: (maximo_superior, minimo_inferior) de las ultimas
-    `period` velas (incluyendo la actual). Requiere columnas 'high', 'low'."""
+    """Canal de Donchian: maximo y minimo de las ultimas `period` velas, la actual incluida.
+
+    Args:
+        df: velas con columnas `high` y `low`.
+        period: ventana del canal (>= 1).
+
+    Returns:
+        La tupla `(maximo superior, minimo inferior)`.
+
+    Raises:
+        ValueError: si `period` es menor que 1 o falta `high` o `low`.
+    """
     if period < 1:
         raise ValueError("period debe ser >= 1")
     for col in ("high", "low"):
@@ -68,7 +130,18 @@ def donchian_channel(df: pd.DataFrame, period: int = 20) -> tuple[pd.Series, pd.
 
 
 def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    """Average True Range de Wilder. Requiere columnas 'high', 'low', 'close'."""
+    """Average True Range de Wilder.
+
+    Args:
+        df: velas con columnas `high`, `low` y `close`.
+        period: periodo del ATR (>= 1).
+
+    Returns:
+        El ATR en unidades de precio.
+
+    Raises:
+        ValueError: si `period` es menor que 1 o falta una columna.
+    """
     if period < 1:
         raise ValueError("period debe ser >= 1")
     for col in ("high", "low", "close"):

@@ -24,6 +24,26 @@ logger = get_logger(__name__)
 
 
 async def refresh_spec(client: BitunixRestClient, db: Database, symbol: str) -> ContractSpec:
+    """Consulta a Bitunix la especificacion de un contrato y la guarda en cache.
+
+    Combina `trading_pairs` (precisiones, minimos, apalancamiento), `position_tiers` (tramos
+    de margen de mantenimiento; si falla se registra un aviso y se sigue sin tramos) y
+    `funding_rate/batch` (funding vigente).
+
+    Args:
+        client: cliente REST de Bitunix.
+        db: conexion a la base.
+        symbol: simbolo, p. ej. `BTCUSDT`.
+
+    Returns:
+        El `ContractSpec` guardado.
+
+    Raises:
+        BitunixApiError: si `trading_pairs` o `funding_rate/batch` responden con un error.
+
+    Efectos:
+        Red: tres GET publicos a Bitunix. Escribe `contract_specs_cache` (UPSERT).
+    """
     pairs = await client.get_trading_pairs(symbol)
     pair = next((p for p in pairs if p.get("symbol") == symbol), pairs[0] if pairs else {})
 

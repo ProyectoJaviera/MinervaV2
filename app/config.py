@@ -45,6 +45,19 @@ _PERCENT_PCT_FIELDS = ("live_sl_margin_cap_pct",)
 
 
 class Settings(BaseSettings):
+    """Configuracion de Minerva: un campo por variable de `.env`, con su valor por defecto.
+
+    Cada campo se llena desde la variable de entorno que indica su `alias` (en mayusculas) y,
+    si no esta, desde `.env` en el directorio de trabajo; las variables del proceso ganan
+    sobre el archivo. `extra="ignore"`: una variable desconocida en `.env` no falla. Los
+    campos `*_pct` mezclan dos escalas (fraccion 0-1 y porcentaje 0-100), documentadas junto
+    a cada uno y validadas al arrancar para los de riesgo en vivo. El unico objeto que se usa
+    en el codigo es la instancia `settings` del final del modulo; se crea al importarlo.
+
+    Raises:
+        pydantic.ValidationError: al construirla, si un valor no tiene el tipo o la escala
+            declarada (p. ej. `MAX_DRAWDOWN_PCT=20` en vez de `0.20`).
+    """
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # --- General ---
@@ -309,32 +322,40 @@ class Settings(BaseSettings):
 
     @property
     def universe_exclude_categories_list(self) -> list[str]:
+        """`UNIVERSE_EXCLUDE_CATEGORIES` como lista (separada por comas, sin vacios)."""
         return [c.strip() for c in self.universe_exclude_categories.split(",") if c.strip()]
 
     @property
     def universe_manual_exclusions_list(self) -> list[str]:
-        """Ids de CoinGecko (no simbolos) a excluir manualmente, ademas del
-        filtro automatico por categoria -- ver docs/FASE2_PLAN.md punto 6."""
+        """Ids de CoinGecko (no simbolos) a excluir a mano, ademas del filtro por categoria.
+
+        Ver `docs/historial/FASE2_PLAN.md`, punto 6.
+        """
         return [c.strip().lower() for c in self.universe_manual_exclusions.split(",") if c.strip()]
 
     @property
     def backtest_control_symbols_list(self) -> list[str]:
+        """`BACKTEST_CONTROL_SYMBOLS` como lista de simbolos en mayusculas."""
         return [s.strip().upper() for s in self.backtest_control_symbols.split(",") if s.strip()]
 
     @property
     def real_account_eligible_strategies_list(self) -> list[str]:
-        """Vacio = sin restriccion (todas las estrategias son elegibles)."""
+        """Estrategias que pueden abrir en la cuenta paper (`REAL_ACCOUNT_ELIGIBLE_STRATEGIES`).
+
+        Una lista vacia significa sin restriccion: todas las estrategias son elegibles.
+        """
         return [
             s.strip() for s in self.real_account_eligible_strategies.split(",") if s.strip()
         ]
 
     @property
     def news_sources_list(self) -> list[str]:
+        """`NEWS_SOURCES` como lista de ids de fuente en minusculas."""
         return [s.strip().lower() for s in self.news_sources.split(",") if s.strip()]
 
     @property
     def backtest_official_end_ms(self) -> int:
-        """`backtest_official_end_date` ("YYYY-MM-DD", UTC) en epoch ms."""
+        """`BACKTEST_OFFICIAL_END_DATE` (`YYYY-MM-DD`, UTC) en milisegundos Unix."""
         from datetime import UTC, datetime
 
         dt = datetime.strptime(self.backtest_official_end_date, "%Y-%m-%d").replace(tzinfo=UTC)
@@ -346,11 +367,20 @@ class Settings(BaseSettings):
         margin_committed_on_symbol: float,
         margin_committed_total: float,
     ) -> float:
-        """Margen maximo permitido para una nueva operacion (ver docs/FASE0.md / plan Fase 1).
+        """Margen maximo permitido para una operacion nueva.
 
-        Formula acordada: min(margen configurado, 10% del capital actual menos lo ya
-        comprometido en ese simbolo, margen disponible bajo el limite de posiciones
-        simultaneas). La usa el motor de riesgo (`risk_engine.check_new_entry`) al abrir.
+        Formula acordada: el minimo entre el margen configurado, el tope por activo (porcentaje
+        del capital actual menos lo ya comprometido en ese simbolo) y el margen que queda bajo
+        el limite de posiciones simultaneas. La usa el motor de riesgo
+        (`risk_engine.check_new_entry`) al abrir.
+
+        Args:
+            current_capital: capital actual de la cuenta paper, en USDT.
+            margin_committed_on_symbol: margen ya comprometido en ese simbolo.
+            margin_committed_total: margen comprometido en todas las posiciones abiertas.
+
+        Returns:
+            El margen maximo en USDT; nunca negativo (0.0 si no cabe nada).
         """
         per_asset_cap = max(
             0.0, current_capital * self.max_capital_pct_per_asset - margin_committed_on_symbol

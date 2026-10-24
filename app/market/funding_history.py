@@ -95,12 +95,26 @@ async def download_missing_funding(
     client: BitunixRestClient, db: Database, symbol: str, start_time_ms: int, end_time_ms: int,
     freshness_tolerance_ms: int = FRESHNESS_TOLERANCE_MS,
 ) -> None:
-    """Descarga por red SOLO la cola/cabeza de `funding_rate_history` que
-    falte -- misma logica que `ohlcv_history.download_missing`. La cola se
-    repone si el ultimo evento cacheado tiene mas de `freshness_tolerance_ms`
-    de antiguedad: el generador en vivo pasa el intervalo de funding del
-    contrato mas un margen (ver `signal_generator`); el script de descarga
-    historica usa la tolerancia por defecto de 2 dias."""
+    """Descarga por red SOLO la cola o cabeza del historial de funding que falte en cache.
+
+    Misma logica que `ohlcv_history.download_missing`. La cola se repone si el ultimo evento
+    cacheado es mas viejo que `freshness_tolerance_ms`: el generador en vivo pasa el
+    intervalo de funding del contrato mas un margen; el script de descarga historica usa la
+    tolerancia por defecto de 2 dias. Cada pagina se guarda al instante, asi que interrumpir
+    no pierde progreso.
+
+    Args:
+        client: cliente REST de Bitunix.
+        db: conexion a la base.
+        symbol: simbolo.
+        start_time_ms: inicio del rango pedido, en ms Unix.
+        end_time_ms: fin del rango pedido, en ms Unix.
+        freshness_tolerance_ms: antiguedad maxima tolerada del ultimo evento cacheado.
+
+    Efectos:
+        Red: GET `get_funding_rate_history` a Bitunix. Lee `funding_cache` y `ohlcv_floor`;
+        escribe `funding_cache` y `ohlcv_floor` (con `interval = price_type = '__funding__'`).
+    """
     floor = await ohlcv_repo.get_floor(db, symbol, _FLOOR_INTERVAL, _FLOOR_PRICE_TYPE)
     covered = await funding_repo.get_covered_range(db, symbol)
 
