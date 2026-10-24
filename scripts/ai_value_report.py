@@ -68,6 +68,26 @@ def main(
     db_path: str, *, allow_synthetic_for_tests: bool = False,
     frozen_hash: str = FROZEN_PROMPT_SHA256, out_path: str | None = None,
 ) -> int:
+    """Construye y muestra el informe del veredicto sobre una copia; con `--out` lo guarda.
+
+    Se niega a mostrar resultados con el gate cerrado o sin el punto de analisis limpio
+    (imprime solo contadores). `--out` no sobrescribe un archivo y solo admite UN registro
+    oficial en total.
+
+    Args:
+        db_path: copia de la base (nunca la de trabajo).
+        allow_synthetic_for_tests: acepta una base sintetica (solo pruebas).
+        frozen_hash: hash del prompt de la medicion; por defecto, el congelado.
+        out_path: archivo donde guardar el informe como registro oficial, o `None`.
+
+    Returns:
+        0 con veredicto impreso; 3 por gate cerrado o punto de analisis no alcanzado; 4 si la
+        bandera de pruebas se rechaza; 5 si `--out` existe o ya hay un registro oficial.
+
+    Efectos:
+        Lee la copia en modo solo lectura (`llm_logs`, `shadow_trades`, `signals`; PnL solo
+        con el gate abierto). Con `--out`, escribe el archivo del registro oficial.
+    """
     if out_path is not None and Path(out_path).exists():
         print(f"RECHAZADO: {out_path} ya existe; este script no sobrescribe un registro.")
         return EXIT_OUT_EXISTS

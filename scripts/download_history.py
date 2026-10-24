@@ -85,6 +85,17 @@ async def _check_internal_gaps(
 
 
 async def main() -> None:
+    """Descarga el historial de velas y funding de todo el universo y de los simbolos de control.
+
+    Construye el universo, refresca los contratos y baja cada serie (velas LAST y MARK de
+    cada timeframe, y funding), reanudable: solo pide lo que falta. Al terminar cada serie
+    sin errores la marca como completa. Despues se puede correr `scripts/run_backtest.py`.
+
+    Efectos:
+        Red: CoinGecko y Bitunix. Escribe `asset_universe`, `contract_specs_cache`,
+        `ohlcv_cache`, `ohlcv_floor`, `ohlcv_series_complete`, `ohlcv_unrepairable_gaps` y
+        `funding_cache` de la base configurada.
+    """
     setup_logging()
     t0 = time.time()
     db = Database(settings.database_path)

@@ -26,7 +26,16 @@ logger = get_logger(__name__)
 def build_news_collector(
     settings: Settings, db: Database, *, transport: httpx.AsyncBaseTransport | None = None,
 ) -> NewsCollector | None:
-    """El colector listo para correr, o `None` (desactivado) sin lanzar nunca."""
+    """El colector listo para correr, o `None` (desactivado), sin lanzar nunca.
+
+    Args:
+        settings: configuracion (`NEWS_COLLECTION_ENABLED`, User-Agent y tope de respuesta).
+        db: conexion a la base.
+        transport: transporte HTTP de prueba (sin red), o `None`.
+
+    Returns:
+        El `NewsCollector`, o `None`.
+    """
     try:
         if not settings.news_collection_enabled:
             logger.info("Recoleccion de noticias desactivada (NEWS_COLLECTION_ENABLED no es true).")
@@ -64,8 +73,21 @@ async def run_isolated(collector: NewsCollector) -> None:
 def maybe_start_news_collector(
     settings: Settings, db: Database, tasks: list[asyncio.Task],
 ) -> NewsCollector | None:
-    """Si corresponde, crea la tarea del colector y la agrega a `tasks` (para que el cierre
-    ordenado del `lifespan` la cancele igual que a las demas)."""
+    """Si corresponde, crea la tarea del colector y la agrega a `tasks`.
+
+    Asi el cierre ordenado del `lifespan` la cancela igual que a las demas. Nunca lanza.
+
+    Args:
+        settings: configuracion.
+        db: conexion a la base.
+        tasks: lista de tareas del `lifespan`.
+
+    Returns:
+        El colector, o `None` si esta desactivado.
+
+    Efectos:
+        Crea una tarea asyncio y agrega una entrada al log.
+    """
     collector = build_news_collector(settings, db)
     if collector is None:
         return None

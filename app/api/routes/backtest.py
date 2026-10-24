@@ -28,7 +28,16 @@ _LONG_FLOAT = re.compile(r"\d+\.\d{3,}")
 
 
 def round_reason(text: str) -> str:
-    """Los motivos de descarte traen floats crudos (1.1233661231946566): van a 2 decimales."""
+    """Redondea a 2 decimales los numeros largos de un motivo de descarte.
+
+    Los motivos traen floats crudos (1.1233661231946566).
+
+    Args:
+        text: el motivo.
+
+    Returns:
+        El motivo con los decimales acotados.
+    """
     return _LONG_FLOAT.sub(lambda m: f"{float(m.group()):.2f}", text)
 
 

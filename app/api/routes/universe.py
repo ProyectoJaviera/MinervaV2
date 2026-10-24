@@ -31,7 +31,15 @@ RULE = (
 
 
 def exclusion_reason(entry: AssetUniverseEntry, settings: Settings) -> str | None:
-    """Por que un candidato no esta incluido, en el mismo orden en que lo decide el refresco."""
+    """Por que un candidato no esta incluido, en el mismo orden en que lo decide el refresco.
+
+    Args:
+        entry: el candidato del snapshot.
+        settings: configuracion (tamano del universo).
+
+    Returns:
+        El motivo en texto, o `None` si esta incluido.
+    """
     if entry.included:
         return None
     if entry.excluded_category:

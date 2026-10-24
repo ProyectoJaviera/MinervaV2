@@ -104,7 +104,15 @@ class LessonsRunner:
 
 
 def build_lessons_runner(settings: Settings, db: Database) -> LessonsRunner | None:
-    """El ejecutor listo para correr, o `None` (desactivado) sin lanzar nunca."""
+    """El ejecutor de la memoria listo para correr, o `None` (desactivado), sin lanzar nunca.
+
+    Args:
+        settings: configuracion (`LESSONS_MEMORY_ENABLED`).
+        db: conexion a la base.
+
+    Returns:
+        El `LessonsRunner`, o `None`.
+    """
     try:
         if not settings.lessons_memory_enabled:
             logger.info("Memoria de lecciones desactivada (LESSONS_MEMORY_ENABLED no es true).")

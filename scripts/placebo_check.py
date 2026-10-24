@@ -74,6 +74,27 @@ def main(
     db_path: str, n_repeats: int = PLACEBO_REPEATS, *, allow_synthetic_for_tests: bool = False,
     frozen_hash: str = FROZEN_PROMPT_SHA256, out_path: str | None = None,
 ) -> int:
+    """Corre el placebo sobre una copia, imprime el informe y devuelve el codigo de salida.
+
+    Relabela cada conglomerado al azar y aplica la misma regla del veredicto `n_repeats`
+    veces (el criterio de calibracion y el tiempo que tarda estan en el docstring del modulo).
+
+    Args:
+        db_path: copia de la base (nunca la de trabajo).
+        n_repeats: repeticiones del placebo; el diseno usa `PLACEBO_REPEATS`.
+        allow_synthetic_for_tests: acepta una base sintetica (solo pruebas).
+        frozen_hash: hash del prompt de la medicion; por defecto, el congelado.
+        out_path: archivo donde guardar el informe (UTF-8), o `None`; nunca se sobrescribe.
+
+    Returns:
+        0 calibrado; 3 nada que calibrar todavia; 4 bandera de pruebas rechazada; 5 `out_path`
+        ya existe; 6 no calibrado; 7 no informativo.
+
+    Efectos:
+        Lee de la copia, con `mode=ro`, los mismos insumos del veredicto (`llm_logs` y
+        `shadow_trades`). Escribe `out_path` (modo exclusivo `x`) si se pidio y hay resultado.
+        Imprime el informe.
+    """
     if out_path is not None and Path(out_path).exists():
         print(f"RECHAZADO: {out_path} ya existe; este script no sobrescribe un registro.")
         return EXIT_OUT_EXISTS

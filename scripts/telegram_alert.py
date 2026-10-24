@@ -169,8 +169,23 @@ def _build_message(
 
 
 def send_telegram_message(token: str, chat_id: str, text: str, *, timeout: float = 10.0) -> bool:
-    """True si Telegram confirmo el envio (HTTP 200). Nunca loguea `token` ni
-    `chat_id`, ni siquiera en un mensaje de error."""
+    """Envia un mensaje por la Bot API de Telegram y dice si Telegram lo confirmo.
+
+    Nunca imprime ni registra el token ni el chat, ni siquiera en un error: ante cualquier
+    falla de red o HTTP solo imprime el nombre de la excepcion.
+
+    Args:
+        token: token del bot.
+        chat_id: chat de destino.
+        text: texto del mensaje.
+        timeout: segundos de espera.
+
+    Returns:
+        True si Telegram respondio con exito; False en cualquier otro caso.
+
+    Efectos:
+        Red: POST a `sendMessage` de `api.telegram.org`. Imprime una linea si falla.
+    """
     try:
         response = httpx.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
@@ -197,11 +212,34 @@ def run(
     check_health_fn: Callable[[str, int, float], int] = check_health_main,
     send_fn: Callable[..., bool] = send_telegram_message,
 ) -> bool:
-    """Devuelve si el PIPELINE DE ALERTADO funciono -- no el estado del bot.
-    STALE/SIN_RESPUESTA correctamente detectado y avisado es `True` (el
-    monitor hizo su trabajo); solo un envio a Telegram fallido (cuando hacia
-    falta avisar) es `False`, para que el Programador de tareas marque esa
-    corrida como fallida en su historial."""
+    """Sondea el bot y avisa por Telegram si cambio su estado o toca un recordatorio.
+
+    Devuelve si el PIPELINE DE ALERTADO funciono, no el estado del bot: un bot STALE o
+    SIN_RESPUESTA bien detectado y avisado es `True`. Solo un envio fallido (cuando hacia falta
+    avisar) es `False`, para que el Programador de tareas marque la corrida como fallida. El
+    archivo de estado solo se actualiza tras un envio exitoso, de modo que el proximo sondeo
+    reintenta el aviso pendiente.
+
+    Args:
+        host: host del bot.
+        port: puerto del bot.
+        timeout: segundos de espera del sondeo y del envio.
+        state_path: archivo JSON con el ultimo estado visto.
+        reminder_minutes: cada cuantos minutos repetir el aviso mientras siga caido.
+        token: token del bot de Telegram.
+        chat_id: chat de destino.
+        now: instante actual (inyectable en pruebas); por defecto, ahora (UTC).
+        check_health_fn: sondeo de salud (por defecto, `scripts.check_health.main`).
+        send_fn: envio a Telegram (por defecto, `send_telegram_message`).
+
+    Returns:
+        True si el pipeline funciono; False si fallo un envio necesario.
+
+    Efectos:
+        Red: `GET /health` del bot y, si hay que avisar, `POST sendMessage` a Telegram. Lee el
+        archivo de estado y, tras un envio exitoso, lo reescribe de forma atomica. Imprime la
+        salida del sondeo.
+    """
     now = now or datetime.now(UTC)
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):

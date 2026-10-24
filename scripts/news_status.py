@@ -32,6 +32,25 @@ def _table_exists(conn, name: str) -> bool:
 
 
 def format_report(conn, *, last: int = 15, now: datetime | None = None) -> str:
+    """El texto del estado de la recoleccion de noticias, sin resultados de operaciones.
+
+    Muestra la salud y la proxima consulta de cada fuente, los titulares guardados y los casi
+    duplicados, los titulares de las ultimas 24 h por fuente, el ultimo Fear & Greed, los
+    ultimos `last` titulares (texto de terceros, no confiable) y las atribuciones. Una copia
+    anterior a la Fase 4 (sin `news_items`) se informa y termina.
+
+    Args:
+        conn: conexion de solo lectura con `row_factory = sqlite3.Row`.
+        last: cuantos titulares listar.
+        now: instante de referencia de la ventana de 24 h; por defecto, ahora (UTC).
+
+    Returns:
+        El informe en texto, terminado en salto de linea.
+
+    Efectos:
+        Lee `data_source_health` (fuentes `news:*`), `news_fetch_state`, `news_items` y
+        `fear_greed`.
+    """
     now = now or datetime.now(UTC)
     lines = ["=== Noticias recolectadas (Fase 4) ==="]
     if not _table_exists(conn, "news_items"):
@@ -98,6 +117,18 @@ def format_report(conn, *, last: int = 15, now: datetime | None = None) -> str:
 
 
 def main(db_path: str, *, last: int = 15) -> None:
+    """Imprime el estado de las noticias de una copia, abierta en solo lectura.
+
+    Args:
+        db_path: copia de la base (nunca la de trabajo).
+        last: cuantos titulares listar.
+
+    Raises:
+        SystemExit: si la base no existe (la lanza `_connect_ro`).
+
+    Efectos:
+        Abre la copia con `mode=ro` y lee lo que indica `format_report`. Imprime el informe.
+    """
     conn = _connect_ro(db_path)
     try:
         print(format_report(conn, last=last))

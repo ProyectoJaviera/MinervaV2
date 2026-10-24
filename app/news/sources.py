@@ -75,7 +75,14 @@ SOURCES: dict[str, NewsSource] = {
 
 
 def enabled_sources(ids: list[str]) -> list[NewsSource]:
-    """Fuentes conocidas entre las pedidas (las desconocidas se ignoran), en orden de registro."""
+    """Las fuentes conocidas entre las pedidas, en orden de registro. Las desconocidas se ignoran.
+
+    Args:
+        ids: ids de fuente (`NEWS_SOURCES`).
+
+    Returns:
+        Lista de `NewsSource`.
+    """
     wanted = set(ids)
     return [s for sid, s in SOURCES.items() if sid in wanted]
 

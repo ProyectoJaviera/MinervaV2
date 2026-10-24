@@ -98,13 +98,28 @@ _MOVED_PATH = re.compile(r"\bdocs/(" + "|".join(MOVED_TO_HISTORY) + r")\.md")
 
 
 def modernize_doc_paths(text: str) -> str:
-    """Sustituye la ruta antigua de un documento movido a `docs/historial/` por la actual."""
+    """Sustituye la ruta antigua de un documento movido a `docs/historial/` por la actual.
+
+    Los comentarios del DDL (en `app/`, que no se toca) citan rutas viejas.
+
+    Args:
+        text: texto con posibles rutas antiguas.
+
+    Returns:
+        El texto con las rutas actuales.
+    """
     return _MOVED_PATH.sub(r"docs/historial/\1.md", text)
 
 
 def table_comments(schema: str) -> dict[str, str]:
-    """El comentario SQL que precede a cada `CREATE TABLE` (lineas `--` consecutivas, sin linea en
-    blanco de por medio)."""
+    """El comentario SQL que precede a cada `CREATE TABLE` (lineas `--` consecutivas).
+
+    Args:
+        schema: el DDL (`database.SCHEMA`).
+
+    Returns:
+        Diccionario `tabla -> comentario`; una linea en blanco corta el comentario.
+    """
     comments: dict[str, str] = {}
     pending: list[str] = []
     for raw in schema.splitlines():
@@ -120,7 +135,14 @@ def table_comments(schema: str) -> dict[str, str]:
 
 
 def extract_checks(sql: str) -> list[str]:
-    """Las expresiones `CHECK (...)` de un `CREATE TABLE`, con sus parentesis balanceados."""
+    """Las expresiones `CHECK (...)` de un `CREATE TABLE`, con sus parentesis balanceados.
+
+    Args:
+        sql: el `CREATE TABLE`.
+
+    Returns:
+        Lista de expresiones, con los espacios colapsados.
+    """
     checks = []
     for match in re.finditer(r"\bCHECK\s*\(", sql):
         depth, i = 1, match.end()
@@ -136,7 +158,14 @@ def _md(value: object) -> str:
 
 
 async def read_schema() -> dict:
-    """Tablas, columnas, indices y disparadores de una base recien creada (el camino del bot)."""
+    """Tablas, columnas, indices y disparadores de una base recien creada (el camino del bot).
+
+    Returns:
+        Diccionario con `tables` y `triggers`.
+
+    Efectos:
+        Crea una base en memoria con `Database.connect()` y la lee; no toca ninguna base real.
+    """
     db = Database(":memory:")
     await db.connect()
     try:
@@ -169,6 +198,19 @@ async def read_schema() -> dict:
 
 
 def render(schema: dict, comments: dict[str, str]) -> str:
+    """El documento Markdown del esquema, agrupado por tema.
+
+    Args:
+        schema: lo que devuelve `read_schema`.
+        comments: comentarios de cada tabla (`table_comments`).
+
+    Returns:
+        El texto de `docs/ESQUEMA_BD.md`.
+
+    Raises:
+        SystemExit: si una tabla no tiene grupo en `GROUPS`, o un grupo nombra una tabla que
+            ya no existe.
+    """
     tables = schema["tables"]
     grouped = [name for _t, _d, names in GROUPS for name in names]
     unknown = sorted(set(tables) - set(grouped))
@@ -228,10 +270,29 @@ def render(schema: dict, comments: dict[str, str]) -> str:
 
 
 def build_document() -> str:
+    """El contenido que deberia tener `docs/ESQUEMA_BD.md` segun el codigo actual.
+
+    Returns:
+        El texto del documento.
+
+    Efectos:
+        Crea una base en memoria (ver `read_schema`).
+    """
     return render(asyncio.run(read_schema()), table_comments(database_module.SCHEMA))
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Regenera `docs/ESQUEMA_BD.md` o, con `--check`, verifica que esta al dia.
+
+    Args:
+        argv: argumentos (por defecto, los de la linea de comandos).
+
+    Returns:
+        0 si escribio o esta al dia; 1 con `--check` si esta desactualizado.
+
+    Efectos:
+        Escribe `docs/ESQUEMA_BD.md` (salvo con `--check`).
+    """
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--check", action="store_true", help="falla si el documento esta viejo")
     args = parser.parse_args(argv)

@@ -48,6 +48,17 @@ NO_DATA = "(sin dato)"
 
 
 class Group(NamedTuple):
+    """Un grupo de filas de la MEDICION con la misma identidad.
+
+    Attributes:
+        model: modelo que etiqueto.
+        prompt_version: version del texto del prompt.
+        prompt_sha256: hash del prompt y de la version de features.
+        features_version: version del mensaje de features.
+        rows: cuantas filas tiene.
+        first_at: fecha de la primera fila.
+        last_at: fecha de la ultima fila.
+    """
     model: str
     prompt_version: str
     prompt_sha256: str
@@ -58,8 +69,19 @@ class Group(NamedTuple):
 
 
 def load_groups(conn: sqlite3.Connection) -> list[Group]:
-    """Filas de la MEDICION agrupadas por su identidad, de la mas antigua a la mas reciente.
-    Solo cuenta filas y toma fechas: no lee decisiones, costos ni respuestas."""
+    """Las filas de la MEDICION agrupadas por su identidad, de la mas antigua a la mas reciente.
+
+    Solo cuenta filas y toma fechas: no lee decisiones, costos ni respuestas.
+
+    Args:
+        conn: conexion de solo lectura a una copia.
+
+    Returns:
+        Lista de `Group`.
+
+    Efectos:
+        Lee `llm_logs`.
+    """
     rows = conn.execute(
         "SELECT model, prompt_version, prompt_sha256, features_version, COUNT(*), "
         "MIN(created_at), MAX(created_at) FROM llm_logs WHERE fase = 'MEDICION' "
@@ -75,7 +97,19 @@ def load_groups(conn: sqlite3.Connection) -> list[Group]:
 def assess(
     groups: list[Group], configured_model: str, frozen_hash: str = FROZEN_PROMPT_SHA256,
 ) -> tuple[int, list[str]]:
-    """(codigo de salida, lineas del informe). Pura: no toca la base ni el entorno."""
+    """Evalua si la medicion tiene UNA sola identidad (modelo, prompt congelado, features).
+
+    Pura: no toca la base ni el entorno. Avisa de mas de una combinacion, de filas que no
+    usan el prompt congelado y de un modelo configurado ahora distinto del que etiqueto.
+
+    Args:
+        groups: los grupos de `load_groups`.
+        configured_model: modelo configurado en este entorno.
+        frozen_hash: hash del prompt congelado.
+
+    Returns:
+        La tupla `(codigo de salida, lineas del informe)`: 0 sin anomalias; 1 con anomalia.
+    """
     lines = [
         "=== Identidad de la medicion (llm_logs, fase MEDICION) ===",
         f"Hash del prompt congelado: {frozen_hash}",
@@ -124,6 +158,17 @@ def assess(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Imprime la identidad de la medicion de una copia y avisa de anomalias.
+
+    Args:
+        argv: argumentos (por defecto, los de la linea de comandos).
+
+    Returns:
+        0 identidad unica y congelada (o sin filas todavia); 1 anomalia; 3 la base no existe.
+
+    Efectos:
+        Lee `llm_logs` de la copia en solo lectura.
+    """
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--db", required=True, help="copia de la base (nunca la de trabajo)")
     args = parser.parse_args(argv)

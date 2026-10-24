@@ -30,7 +30,20 @@ def build_telegram_bot(
     settings: Settings, ctx: BotContext, *, transport: httpx.AsyncBaseTransport | None = None,
     base_url: str = DEFAULT_BASE_URL,
 ) -> TelegramBot | None:
-    """El bot listo para correr, o `None` (desactivado) sin lanzar nunca."""
+    """El bot listo para correr, o `None` (desactivado), sin lanzar nunca.
+
+    Avisa si falta el token o el chat, o si el chat parece de un grupo (negativo): el bot solo
+    atiende chats PRIVADOS.
+
+    Args:
+        settings: configuracion (`TELEGRAM_COMMANDS_ENABLED`, token y chat).
+        ctx: dependencias de los comandos.
+        transport: transporte HTTP de prueba (sin red), o `None`.
+        base_url: URL base de la Bot API.
+
+    Returns:
+        El `TelegramBot`, o `None`.
+    """
     try:
         if not settings.telegram_commands_enabled:
             logger.info("Bot de Telegram desactivado (TELEGRAM_COMMANDS_ENABLED no es true).")
@@ -78,8 +91,21 @@ async def run_isolated(bot: TelegramBot) -> None:
 def maybe_start_telegram_bot(
     settings: Settings, ctx: BotContext, tasks: list[asyncio.Task],
 ) -> TelegramBot | None:
-    """Si corresponde, crea la tarea del bot y la agrega a `tasks` (para que el
-    cierre ordenado del `lifespan` la cancele igual que a las demas)."""
+    """Si corresponde, crea la tarea del bot y la agrega a `tasks`.
+
+    Asi el cierre ordenado del `lifespan` la cancela igual que a las demas. Nunca lanza.
+
+    Args:
+        settings: configuracion.
+        ctx: dependencias de los comandos.
+        tasks: lista de tareas del `lifespan`.
+
+    Returns:
+        El bot, o `None` si esta desactivado.
+
+    Efectos:
+        Crea una tarea asyncio y agrega una entrada al log.
+    """
     bot = build_telegram_bot(settings, ctx)
     if bot is None:
         return None

@@ -47,6 +47,18 @@ SCRIPT_NAME = re.compile(r"^[a-z][a-z0-9_]*\.py$")
 
 
 def cmd_backup(args: argparse.Namespace) -> int:
+    """`backup`: respaldo consistente en el volumen y en el host, con SHA-256 verificado.
+
+    Args:
+        args: argumentos ya parseados (`out_dir`, `prefix`, `keep`).
+
+    Returns:
+        0 si salio bien.
+
+    Efectos:
+        Ejecuta Docker (backup dentro del contenedor y copia al host); escribe en `out_dir`
+        y borra los respaldos antiguos del host.
+    """
     out_dir = Path(args.out_dir)
     copy = docker_support.export_db_copy(
         out_dir, args.prefix, keep_in_volume=True, volume_keep=args.keep,
@@ -60,12 +72,35 @@ def cmd_backup(args: argparse.Namespace) -> int:
 
 
 def cmd_export(args: argparse.Namespace) -> int:
+    """`export`: UNA copia verificada en el host; imprime solo su ruta.
+
+    Args:
+        args: argumentos ya parseados (`out_dir`, `prefix`).
+
+    Returns:
+        0 si salio bien.
+
+    Efectos:
+        Ejecuta Docker y escribe la copia en `out_dir`.
+    """
     copy = docker_support.export_db_copy(Path(args.out_dir), args.prefix)
     print(copy)  # SOLO la ruta por stdout: otros scripts la leen
     return EXIT_OK
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    """`run`: copia fresca de la base de Docker, corre `scripts/<script> --db <copia>` y la borra.
+
+    Args:
+        args: argumentos ya parseados (`script`, `script_args`, `keep_copy`, `out_dir`).
+
+    Returns:
+        El codigo de salida del script ejecutado, o 2 si el nombre no es valido o no existe.
+
+    Efectos:
+        Ejecuta Docker, crea y borra una carpeta temporal (o deja la copia con `--keep-copy`)
+        y lanza el script como proceso hijo sin ventana de consola.
+    """
     if not SCRIPT_NAME.match(args.script):
         print(f"Nombre de script no valido: {args.script!r}", file=sys.stderr)
         return EXIT_USAGE
@@ -91,6 +126,11 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """El analizador de argumentos con los subcomandos `backup`, `export` y `run`.
+
+    Returns:
+        El `ArgumentParser`.
+    """
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -119,6 +159,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Linea de comandos de las herramientas de la base en Docker.
+
+    Args:
+        argv: argumentos (por defecto, los de la linea de comandos).
+
+    Returns:
+        El codigo de salida: 0 ok, 2 uso, 5 fallo de Docker o de la copia; `run` devuelve el
+        del script.
+
+    Efectos:
+        Ver los subcomandos.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
     if getattr(args, "keep", 0) < 0 or (

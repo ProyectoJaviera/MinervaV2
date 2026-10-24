@@ -39,6 +39,21 @@ EXIT_REFUSED = 3
 
 
 async def main(db_path: str) -> int:
+    """Imprime el reporte de sombras por estrategia, o se niega mientras los resultados estan
+    ocultos.
+
+    Args:
+        db_path: copia de la base (nunca la de trabajo).
+
+    Returns:
+        0 con el reporte impreso; 3 si se niega (la puerta de resultados esta cerrada).
+
+    Efectos:
+        Abre la copia con `Database.connect()`, que puede aplicar migraciones: por eso solo se
+        usa sobre una copia. Lee `llm_logs` y `shadow_trades` para la puerta, busca el registro
+        oficial del veredicto en `docs/` y, con la puerta abierta, lee lo que lee
+        `build_report`. Imprime por consola.
+    """
     db = Database(db_path)
     await db.connect()
     try:

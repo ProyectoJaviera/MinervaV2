@@ -52,7 +52,19 @@ async def status(
     db: Database = Depends(get_db), settings: Settings = Depends(get_settings),
     collector: NewsCollector | None = Depends(get_news_collector),
 ) -> dict:
-    """Interruptor, salud por fuente, titulares de las ultimas 24 h y el ultimo Fear & Greed."""
+    """`GET /api/news/status`: interruptor, salud por fuente, titulares de 24 h y Fear & Greed.
+
+    Args:
+        db: base (inyectada).
+        settings: configuracion (inyectada).
+        collector: colector de noticias (inyectado), o `None` si esta apagado.
+
+    Returns:
+        El bloque de salud de noticias mas el ultimo Fear & Greed.
+
+    Efectos:
+        Lee `data_source_health`, `news_items` y `fear_greed`.
+    """
     block = await news_health_block(db, settings, active=collector is not None)
     now = datetime.now(UTC)
     fear_greed = await news_repo.latest_fear_greed(db, now)
@@ -72,7 +84,20 @@ async def recent(
     symbol: str | None = Query(default=None, pattern=r"^[A-Z0-9]{1,12}$"),
     db: Database = Depends(get_db), settings: Settings = Depends(get_settings),
 ) -> dict:
-    """Titulares recientes (sin duplicados), mas nuevos primero; `symbol` = ticker base (`BTC`)."""
+    """`GET /api/news/recent`: titulares recientes sin duplicados, los mas nuevos primero.
+
+    Args:
+        limit: cuantos devolver (1-100).
+        symbol: ticker base (`BTC`) para filtrar por activo, o `None`.
+        db: base (inyectada).
+        settings: configuracion (inyectada).
+
+    Returns:
+        Los titulares y las lineas de atribucion de las fuentes.
+
+    Efectos:
+        Lee `news_items`.
+    """
     items = await news_repo.get_recent(db, limit=limit, symbol=symbol)
     return {
         "items": [news_item_to_public_dict(i) for i in items],

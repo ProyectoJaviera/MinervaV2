@@ -26,9 +26,22 @@ BCRYPT_MAX_PASSWORD_BYTES = 72
 
 
 def build_hash_line(password: str, confirm: str) -> str:
-    """Linea `AUTH_PASSWORD_HASH='...'` lista para pegar en `.env` (el hash va entre comillas
-    simples: ver el docstring del modulo); `ValueError` con un mensaje claro si la contrasena no
-    se puede hashear."""
+    """La linea `AUTH_PASSWORD_HASH='...'` lista para pegar en `.env`.
+
+    El hash va entre comillas simples porque lleva signos `$` que Docker Compose interpretaria
+    como variables.
+
+    Args:
+        password: la contrasena.
+        confirm: la contrasena repetida.
+
+    Returns:
+        La linea con el hash bcrypt.
+
+    Raises:
+        ValueError: si la contrasena esta vacia, no coincide con la confirmacion, o ocupa mas
+            de 72 bytes en UTF-8 (limite de bcrypt).
+    """
     if not password:
         raise ValueError("La contrasena no puede estar vacia.")
     if password != confirm:

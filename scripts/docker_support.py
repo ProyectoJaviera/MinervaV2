@@ -54,16 +54,42 @@ class DockerError(RuntimeError):
 
 
 def marker_path(db_path: str | Path) -> Path:
-    """La marca vive junto a la base nativa: la protege justo a ella."""
+    """La ruta de la marca de la mudanza, junto a la base nativa.
+
+    Args:
+        db_path: ruta de la base nativa.
+
+    Returns:
+        La ruta de `MIGRADO_A_DOCKER.txt`.
+    """
     return Path(db_path).resolve().parent / MARKER_NAME
 
 
 def docker_mode_active(db_path: str | Path) -> bool:
+    """Dice si ya se hizo la mudanza a Docker (existe la marca junto a la base nativa).
+
+    Args:
+        db_path: ruta de la base nativa.
+
+    Returns:
+        True si la marca existe.
+
+    Efectos:
+        Consulta el sistema de archivos.
+    """
     return marker_path(db_path).is_file()
 
 
 def docker_mode_refusal(db_path: str | Path, hint: str) -> str | None:
-    """El rechazo si `db_path` es la base nativa VIEJA de una mudanza ya hecha; si no, `None`."""
+    """El rechazo si `db_path` es la base nativa VIEJA de una mudanza ya hecha.
+
+    Args:
+        db_path: ruta de la base.
+        hint: que hacer en su lugar.
+
+    Returns:
+        El mensaje de rechazo, o `None`.
+    """
     if not docker_mode_active(db_path):
         return None
     return (
@@ -77,13 +103,33 @@ def docker_mode_refusal(db_path: str | Path, hint: str) -> str | None:
 
 
 def docker_exe() -> str:
+    """El ejecutable de Docker: `MINERVA_DOCKER_EXE` o `docker`.
+
+    Returns:
+        El nombre o la ruta del ejecutable.
+    """
     return os.environ.get("MINERVA_DOCKER_EXE", "docker")
 
 
 def run_docker(
     args: list[str], *, timeout: float = 900, check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    """Ejecuta `docker <args>` capturando la salida. Nunca usa el shell ni espera una terminal."""
+    """Ejecuta `docker <args>` capturando la salida; nunca usa el shell ni espera una terminal.
+
+    Args:
+        args: argumentos de `docker`.
+        timeout: segundos maximos.
+        check: si es True, un codigo distinto de 0 lanza `DockerError`.
+
+    Returns:
+        El resultado del proceso.
+
+    Raises:
+        DockerError: si no existe `docker`, se agota el tiempo, o falla con `check`.
+
+    Efectos:
+        Lanza el proceso `docker` sin ventana de consola.
+    """
     command = [docker_exe(), *args]
     try:
         result = subprocess.run(
@@ -105,8 +151,23 @@ def run_docker(
 
 
 def compose(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
-    """`docker compose` sobre el compose del repo. `COMPOSE_PROJECT_NAME` (si esta) elige el
-    proyecto; el `.env` real no se interpola (ver `COMPOSE_VARS`)."""
+    """`docker compose` sobre el compose del repo, sin interpolar el `.env` real.
+
+    `COMPOSE_PROJECT_NAME` (si esta) elige el proyecto.
+
+    Args:
+        args: argumentos de `compose`.
+        kwargs: opciones que se pasan a `run_docker`.
+
+    Returns:
+        El resultado del proceso.
+
+    Raises:
+        DockerError: ver `run_docker`.
+
+    Efectos:
+        Lanza `docker compose`.
+    """
     base = ["compose", "--progress", "quiet", "-f", str(REPO_ROOT / "docker-compose.yml")]
     if COMPOSE_VARS.is_file():
         base += ["--env-file", str(COMPOSE_VARS)]
@@ -140,12 +201,22 @@ def _kill_tree(pid: int) -> None:
 
 
 def run_streaming(command: list[str], *, cwd: str | Path | None = None) -> int:
-    """Ejecuta `command` SIN abrir una ventana de consola, reenvia su stdout y su stderr a los
-    nuestros en cuanto llegan (un informe largo muestra su avance) y devuelve su codigo de salida.
+    """Ejecuta un comando SIN ventana de consola y reenvia su salida en vivo.
 
-    Con `CREATE_NO_WINDOW` el hijo tiene su propia consola oculta y no hereda la nuestra: por eso su
-    salida se recoge por tuberias y se reenvia, en vez de dejarla caer en una consola que nadie ve.
-    Ctrl+C ya no llega al hijo (no comparte consola), asi que se le cierra a mano, con sus hijos."""
+    Con `CREATE_NO_WINDOW` el hijo tiene su propia consola oculta y no hereda la nuestra:
+    su salida se recoge por tuberias y se reenvia. Ctrl+C ya no le llega, asi que se le
+    cierra a mano, con sus hijos.
+
+    Args:
+        command: comando y argumentos.
+        cwd: carpeta de trabajo.
+
+    Returns:
+        El codigo de salida del hijo.
+
+    Efectos:
+        Lanza un proceso y escribe su salida en stdout y stderr.
+    """
     env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
     process = subprocess.Popen(
         command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
@@ -175,8 +246,17 @@ def run_streaming(command: list[str], *, cwd: str | Path | None = None) -> int:
 
 
 def engine_ready(timeout: float = 120) -> bool:
-    """Espera (hasta `timeout`) a que el motor de Docker responda: tras encender el PC, Docker
-    Desktop tarda un rato en estar listo."""
+    """Espera a que el motor de Docker responda (tras encender el PC tarda un rato).
+
+    Args:
+        timeout: segundos maximos de espera.
+
+    Returns:
+        True si el motor respondio a tiempo.
+
+    Efectos:
+        Ejecuta `docker info` repetidamente.
+    """
     deadline = time.time() + timeout
     while True:
         try:
@@ -191,7 +271,14 @@ def engine_ready(timeout: float = 120) -> bool:
 
 
 def parse_compose_ps(output: str) -> list[dict]:
-    """`docker compose ps --format json`: un objeto por linea (Compose reciente) o una lista."""
+    """Interpreta `docker compose ps --format json`: un objeto por linea o una lista.
+
+    Args:
+        output: la salida del comando.
+
+    Returns:
+        La lista de contenedores (vacia si no hay salida).
+    """
     text = output.strip()
     if not text:
         return []
@@ -203,8 +290,16 @@ def parse_compose_ps(output: str) -> list[dict]:
 
 
 def service_state() -> str:
-    """`running`, otro estado de Docker (`exited`, `created`, ...) o `absent` si no hay contenedor
-    del servicio. Los contenedores de un solo uso (`compose run`) no cuentan."""
+    """El estado del servicio `minerva`: `running`, otro estado de Docker o `absent`.
+
+    Los contenedores de un solo uso (`compose run`) no cuentan.
+
+    Returns:
+        El estado como texto.
+
+    Efectos:
+        Ejecuta `docker compose ps`.
+    """
     result = compose(["ps", "-a", "--format", "json", SERVICE], check=False)
     entries = [
         e for e in parse_compose_ps(result.stdout)
@@ -217,6 +312,17 @@ def service_state() -> str:
 
 
 def sha256_of(path: Path) -> str:
+    """El SHA-256 de un archivo, leido por bloques de 1 MB.
+
+    Args:
+        path: archivo.
+
+    Returns:
+        El hash en hexadecimal.
+
+    Efectos:
+        Lee el archivo.
+    """
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for block in iter(lambda: handle.read(1 << 20), b""):
@@ -233,16 +339,26 @@ def export_db_copy(
 ) -> Path:
     """Respaldo consistente de la base del volumen, traido al host y VERIFICADO.
 
-    1. `scripts/backup_db.py` DENTRO del contenedor (API de backup de SQLite, el origen en solo
-       lectura: seguro con el bot escribiendo; verifica la integridad antes de darle su nombre).
-       Si el servicio esta detenido, lo hace un contenedor de un solo uso sobre el mismo volumen.
-    2. SHA-256 del archivo dentro del contenedor.
-    3. `docker compose cp` al host (o, si no existe ni el contenedor detenido, un contenedor de un
-       solo uso con la carpeta montada) y comparacion del SHA-256: una copia a medias nunca pasa.
-    4. Salvo `keep_in_volume`, borra el archivo del volumen: las copias para informes no se
-       acumulan. `volume_keep > 0` deja solo los N respaldos mas recientes con ese prefijo.
-    `engine_timeout` es cuanto espera a que Docker responda: tras encender el PC, Docker Desktop
-    tarda un rato en estar listo.
+    Hace el respaldo con `scripts/backup_db.py` DENTRO del contenedor (si el servicio esta
+    detenido, en un contenedor de un solo uso sobre el mismo volumen), calcula su SHA-256
+    alla, lo copia al host y compara: una copia a medias nunca pasa. Salvo `keep_in_volume`,
+    borra el archivo del volumen.
+
+    Args:
+        out_dir: carpeta del host donde dejar la copia.
+        prefix: prefijo del nombre.
+        keep_in_volume: dejar tambien el respaldo en el volumen.
+        volume_keep: si es mayor que 0, deja solo los N respaldos mas recientes en el volumen.
+        engine_timeout: segundos de espera a que Docker responda.
+
+    Returns:
+        La ruta de la copia en el host.
+
+    Raises:
+        DockerError: si Docker no responde, el destino ya existe o el SHA-256 no coincide.
+
+    Efectos:
+        Ejecuta Docker; lee la base del volumen; escribe un archivo en `out_dir`.
     """
     if not engine_ready(timeout=engine_timeout):
         raise DockerError("Docker no responde. Abre Docker Desktop y espera a que este listo.")

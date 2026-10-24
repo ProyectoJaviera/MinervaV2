@@ -39,11 +39,30 @@ EXIT_OK, EXIT_USAGE, EXIT_NO_SOURCE, EXIT_BAD_COPY, EXIT_EXISTS = 0, 2, 3, 4, 5
 
 
 def backup_name(prefix: str, now: datetime) -> str:
+    """El nombre de un respaldo: `<prefijo>_AAAAMMDD_HHMMSS.db`, con la hora en UTC.
+
+    Args:
+        prefix: prefijo del nombre.
+        now: instante del respaldo.
+
+    Returns:
+        El nombre del archivo.
+    """
     return f"{prefix}_{now.astimezone(UTC):%Y%m%d_%H%M%S}.db"
 
 
 def integrity_check(path: Path) -> str:
-    """Resultado de `PRAGMA integrity_check` sobre `path`, abierto en solo lectura."""
+    """Resultado de `PRAGMA integrity_check` sobre un archivo, abierto en solo lectura.
+
+    Args:
+        path: archivo SQLite.
+
+    Returns:
+        `ok` o el primer mensaje de error.
+
+    Efectos:
+        Lee la base.
+    """
     conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
     try:
         return str(conn.execute("PRAGMA integrity_check").fetchone()[0])
@@ -52,13 +71,20 @@ def integrity_check(path: Path) -> str:
 
 
 def copy_consistently(source: Path, destination: Path) -> None:
-    """Copia con la API de backup, el origen en solo lectura.
+    """Copia una base con la API de backup de SQLite, con el origen en solo lectura.
 
-    La copia hereda del origen el modo WAL en su cabecera, y un archivo asi NO se puede abrir desde
-    un medio de solo lectura (SQLite necesita crear el `-shm`): lo comprobo la prueba real con
-    Docker, donde el respaldo se monta `:ro` en el contenedor que lo restaura. Se guarda en modo
-    de diario clasico (`DELETE`): un archivo suelto, sin `-wal`/`-shm`, que abre en cualquier parte.
-    El bot lo vuelve a poner en WAL al conectarse (`Database.connect`)."""
+    La copia hereda del origen el modo WAL y un archivo asi NO se puede abrir desde un
+    medio de solo lectura (SQLite necesita crear el `-shm`), asi que se guarda en modo de
+    diario clasico (`DELETE`): un archivo suelto que abre en cualquier parte. El bot lo
+    vuelve a poner en WAL al conectarse.
+
+    Args:
+        source: base de origen.
+        destination: archivo de destino.
+
+    Efectos:
+        Lee el origen y escribe el destino.
+    """
     src = sqlite3.connect(f"file:{source.as_posix()}?mode=ro", uri=True)
     try:
         dst = sqlite3.connect(str(destination))
@@ -72,8 +98,19 @@ def copy_consistently(source: Path, destination: Path) -> None:
 
 
 def prune(out_dir: Path, prefix: str, keep: int) -> list[Path]:
-    """Borra los respaldos mas antiguos con ese prefijo hasta dejar `keep`; devuelve los
-    borrados."""
+    """Borra los respaldos mas antiguos con ese prefijo hasta dejar `keep`.
+
+    Args:
+        out_dir: carpeta de respaldos.
+        prefix: prefijo de los respaldos a considerar.
+        keep: cuantos conservar (0 o menos = no borra nada).
+
+    Returns:
+        Las rutas borradas.
+
+    Efectos:
+        Borra archivos `<prefijo>_AAAAMMDD_HHMMSS.db` de la carpeta.
+    """
     if keep <= 0:
         return []
     mine = sorted(
@@ -89,7 +126,26 @@ def prune(out_dir: Path, prefix: str, keep: int) -> list[Path]:
 def run(
     db: str, out_dir: str, prefix: str, keep: int, now: datetime | None = None,
 ) -> tuple[int, str]:
-    """(codigo de salida, mensaje). Pura respecto a la consola: la usan el CLI y las pruebas."""
+    """Hace el respaldo: copia a un temporal, verifica la integridad y le da su nombre definitivo.
+
+    Pura respecto a la consola: la usan el CLI y las pruebas. Un respaldo corrupto nunca
+    queda con aspecto de bueno.
+
+    Args:
+        db: base de origen.
+        out_dir: carpeta de destino.
+        prefix: prefijo del nombre.
+        keep: respaldos a conservar (0 = no borrar nada).
+        now: instante del respaldo; por defecto, ahora (UTC).
+
+    Returns:
+        La tupla `(codigo de salida, mensaje)`: 0 ok, 2 uso, 3 origen inexistente, 4 copia
+        invalida, 5 destino existente.
+
+    Efectos:
+        Lee el origen; crea la carpeta, escribe el respaldo y borra los antiguos si hay
+        `keep`.
+    """
     source = Path(db)
     if not source.is_file():
         return EXIT_NO_SOURCE, f"No existe la base de origen: {source}"
@@ -123,8 +179,14 @@ def run(
 
 
 def docker_mode_refusal(db: str) -> str | None:
-    """Tras la mudanza a Docker, `data/minerva_estabilidad.db` es una copia VIEJA: respaldarla en
-    silencio daria por respaldado algo que no es la base viva (scripts/docker_support.py)."""
+    """Rechazo si la base por defecto es la copia VIEJA de una mudanza a Docker ya hecha.
+
+    Args:
+        db: ruta de la base por defecto.
+
+    Returns:
+        El mensaje de rechazo, o `None`.
+    """
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from scripts.docker_support import docker_mode_refusal as refusal
 
@@ -132,6 +194,18 @@ def docker_mode_refusal(db: str) -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Linea de comandos del respaldo.
+
+    Args:
+        argv: argumentos (por defecto, los de la linea de comandos).
+
+    Returns:
+        El codigo de salida (ver `run`; 2 tambien cuando la base por defecto es la vieja de
+        Docker).
+
+    Efectos:
+        Ver `run`. Escribe el resultado en la consola.
+    """
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--db", default=None, help=f"base a respaldar (def.: {DEFAULT_DB})")
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, help="carpeta de los respaldos")

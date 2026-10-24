@@ -177,9 +177,16 @@ def _detach_uvicorn_handlers() -> None:
 
 
 def setup_logging() -> None:
-    """Idempotente: una segunda llamada en el mismo proceso no hace nada (ver
-    `tests/unit/test_logging.py` y el test de `httpx` en
-    `test_universe_refresh.py`, que la llaman directo)."""
+    """Configura el logging sin bloqueos: dos colas y dos hilos (archivo y consola).
+
+    Es idempotente: una segunda llamada en el mismo proceso no hace nada. Usa el nivel
+    `LOG_LEVEL`, un `RotatingFileHandler` de 10 MB con 5 respaldos en `LOG_DIR` y quita los
+    handlers sincronos de uvicorn (ver el docstring del modulo).
+
+    Efectos:
+        Crea el directorio de logs y el archivo `minerva.log`; arranca dos hilos que
+        consumen las colas; reemplaza los handlers del logger raiz.
+    """
     global _file_listener, _console_listener, _file_handler, _console_handler
     if _file_listener is not None:
         return
@@ -235,9 +242,14 @@ def shutdown_logging() -> None:
 
 
 def get_dropped_log_count() -> int:
-    """Total de registros DEBUG/INFO descartados por cola llena (archivo +
-    consola) desde el ultimo `setup_logging()`. Expuesto en el heartbeat y en
-    `GET /health` para notar un cuelgue de consola antes de que importe."""
+    """Total de registros DEBUG o INFO descartados por cola llena desde el ultimo `setup_logging()`.
+
+    Se expone en el heartbeat y en `GET /health` para notar un cuelgue de consola antes de
+    que importe.
+
+    Returns:
+        La suma de descartes del archivo y de la consola.
+    """
     total = 0
     if _file_handler is not None:
         total += _file_handler.dropped_count

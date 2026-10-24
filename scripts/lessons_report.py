@@ -49,6 +49,25 @@ def main(
     db_path: str, *, allow_synthetic_for_tests: bool = False,
     frozen_hash: str = FROZEN_PROMPT_SHA256, docs_dir: Path | None = None,
 ) -> int:
+    """Informe de la memoria de lecciones sobre una copia; se niega a mostrar resultados ocultos.
+
+    Primero comprueba la puerta con una conexion de solo lectura; con ella cerrada solo dice
+    cuantas operaciones cerradas hay y que falta, y ni abre la base para escribir.
+
+    Args:
+        db_path: copia de la base (nunca la de trabajo).
+        allow_synthetic_for_tests: acepta una base sintetica (solo pruebas).
+        frozen_hash: hash del prompt de la medicion; por defecto, el congelado.
+        docs_dir: carpeta del registro oficial (solo pruebas), o `None`.
+
+    Returns:
+        0 con el informe impreso; 3 con resultados ocultos; 4 si la bandera de pruebas se
+        rechaza.
+
+    Efectos:
+        Lee la copia; con la puerta abierta, la ABRE PARA ESCRIBIR y construye en ella
+        `memory_entries`, `lessons` y `lessons_reports`.
+    """
     # 1) La puerta, con una conexion de SOLO LECTURA y sin tocar ningun resultado.
     conn = _connect_ro(db_path)
     try:

@@ -64,6 +64,23 @@ async def _find_missing_series(
 
 
 async def main() -> None:
+    """Corre el backtest completo de la Fase 2 sobre el universo cacheado e imprime el resumen.
+
+    No usa la red: lee universo, especificaciones, velas y funding de SQLite. Antes de calcular
+    comprueba que esten todas las series que alguna estrategia necesita; si falta alguna, las
+    lista y termina sin correr nada. La fecha final es la fija `backtest_official_end_ms`.
+
+    Raises:
+        RuntimeError: si no hay universo cacheado en `asset_universe`.
+
+    Efectos:
+        Usa `settings.database_path`: el script no tiene `--db`, asi que hay que apuntarlo a
+        una copia con la variable `DATABASE_PATH`. Lee `asset_universe`, `ohlcv_cache`,
+        `funding_cache` y `contract_specs_cache`. BORRA los resultados de corridas anteriores
+        y escribe `backtest_trades`, `backtest_skipped_entries`, `backtest_runs` y
+        `backtest_verdicts`. Configura el logging (archivo en `LOG_DIR`) e imprime el resumen
+        por estrategia.
+    """
     setup_logging()
     t0 = time.time()
     db = Database(settings.database_path)

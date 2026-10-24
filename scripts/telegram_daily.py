@@ -83,6 +83,16 @@ FAILED_CAUSES = ("TIMEOUT", "ERROR_HTTP", "INVALID")
 
 @dataclass(frozen=True)
 class DbSnapshot:
+    """Lo que el resumen diario saca de la base: el avance de la medicion y las ultimas 24 h.
+
+    Attributes:
+        status: el avance de la medicion (`compute_status`).
+        approved_24h: decisiones APROBAR validas de las ultimas 24 h.
+        rejected_24h: decisiones RECHAZAR validas de las ultimas 24 h.
+        failed_by_cause_24h: filas fallidas (`TIMEOUT`, `ERROR_HTTP`, `INVALID`) por causa.
+        budget_exceeded_24h: filas `BUDGET_EXCEEDED` de las ultimas 24 h.
+        cost_24h_usd: coste del LLM de las ultimas 24 h (todas las filas de `llm_logs`), en USD.
+    """
     status: MeasurementStatus
     approved_24h: int
     rejected_24h: int
@@ -93,7 +103,22 @@ class DbSnapshot:
 
 def snapshot_database(source: str, dest_dir: Path) -> Path:
     """Copia consistente de `source` en `dest_dir` con la API de backup de sqlite.
-    La fuente se abre en solo lectura; el destino NUNCA puede estar dentro de `data/`."""
+
+    La fuente se abre en solo lectura; el destino nunca puede estar dentro de `data/`.
+
+    Args:
+        source: ruta de la base viva.
+        dest_dir: directorio donde dejar la copia (`daily_summary_copy.db`).
+
+    Returns:
+        La ruta de la copia.
+
+    Raises:
+        AssertionError: si el destino coincide con la fuente o cae dentro de `data/`.
+
+    Efectos:
+        Lee la base fuente (`mode=ro`) y escribe la copia en disco.
+    """
     source_path = Path(source).resolve()
     dest = (dest_dir / "daily_summary_copy.db").resolve()
     assert dest != source_path, "la copia no puede ser la base de origen"
@@ -113,7 +138,19 @@ def snapshot_database(source: str, dest_dir: Path) -> Path:
 def read_snapshot(
     conn: sqlite3.Connection, now: datetime, frozen_hash: str = FROZEN_PROMPT_SHA256,
 ) -> DbSnapshot:
-    """Solo `llm_logs` y `compute_status` (sin PnL): nunca resultados de sombras."""
+    """Lee de la copia lo que necesita el resumen, sin PnL ni resultados de sombras.
+
+    Args:
+        conn: conexion de solo lectura con `row_factory = sqlite3.Row`.
+        now: instante de referencia de la ventana de 24 h.
+        frozen_hash: hash del prompt de la medicion; por defecto, el congelado.
+
+    Returns:
+        El `DbSnapshot`.
+
+    Efectos:
+        Lee `llm_logs` y, por `compute_status`, las marcas de `shadow_trades` (sin PnL).
+    """
     since = (now.astimezone(UTC) - timedelta(hours=SUMMARY_WINDOW_HOURS)).isoformat()
     approved = rejected = budget_exceeded = 0
     failed: dict[str, int] = {}
@@ -146,7 +183,20 @@ def read_snapshot(
 def collect_snapshot(
     source: str, now: datetime, frozen_hash: str = FROZEN_PROMPT_SHA256,
 ) -> DbSnapshot:
-    """Copia a un directorio temporal del sistema, lee y borra la copia."""
+    """Copia la base a un directorio temporal del sistema, la lee y borra la copia.
+
+    Args:
+        source: ruta de la base viva.
+        now: instante de referencia de la ventana de 24 h.
+        frozen_hash: hash del prompt de la medicion; por defecto, el congelado.
+
+    Returns:
+        El `DbSnapshot`.
+
+    Efectos:
+        Lee `source` (`mode=ro`); escribe y borra una copia en el directorio temporal del
+        sistema.
+    """
     with tempfile.TemporaryDirectory(prefix="minerva_daily_", ignore_cleanup_errors=True) as tmp:
         copy_path = snapshot_database(source, Path(tmp))
         conn = sqlite3.connect(f"file:{copy_path.as_posix()}?mode=ro", uri=True)
@@ -160,9 +210,23 @@ def collect_snapshot(
 def collect_snapshot_from_docker(
     source: str, now: datetime, frozen_hash: str = FROZEN_PROMPT_SHA256,
 ) -> DbSnapshot:
-    """La base viva esta en el volumen de Docker (`source` es la copia vieja y se ignora): saca una
-    copia consistente del contenedor a un directorio temporal del sistema, la lee y la borra. Si
-    Docker falla, la excepcion llega a `run()`, que la informa DENTRO del mensaje."""
+    """Como `collect_snapshot`, pero la copia sale del contenedor de Docker.
+
+    La base viva esta en el volumen de Docker y `source` es la copia vieja, que se ignora.
+    Si Docker falla, la excepcion llega a `run`, que la informa dentro del mensaje.
+
+    Args:
+        source: se ignora (queda por compatibilidad con `collect_snapshot`).
+        now: instante de referencia de la ventana de 24 h.
+        frozen_hash: hash del prompt de la medicion; por defecto, el congelado.
+
+    Returns:
+        El `DbSnapshot`.
+
+    Efectos:
+        Ejecuta `docker compose` por `export_db_copy` (backup dentro del contenedor y copia al
+        anfitrion); escribe y borra una copia en el directorio temporal del sistema.
+    """
     with tempfile.TemporaryDirectory(
         prefix="minerva_daily_docker_", ignore_cleanup_errors=True,
     ) as tmp:
@@ -258,6 +322,22 @@ def build_message(
     db_error: str | None, now: datetime, port: int = 8000,
     tz_name: str = "America/Santiago",
 ) -> str:
+    """El texto del resumen diario: estado del bot, ultimas 24 h y avance de la medicion.
+
+    Pura: no toca la red ni la base. Nunca incluye PnL ni resultados de sombras.
+
+    Args:
+        health: respuesta de `/health`, o `None` si el bot no contesto.
+        health_error: motivo por el que no contesto.
+        snapshot: lo leido de la base, o `None` si no se pudo leer.
+        db_error: motivo por el que no se pudo leer la base.
+        now: instante actual.
+        port: puerto del bot (solo para el texto).
+        tz_name: zona horaria del encabezado.
+
+    Returns:
+        El mensaje.
+    """
     tz = ZoneInfo(tz_name)
     lines = [
         f"Minerva - resumen diario {now.astimezone(tz).strftime('%Y-%m-%d %H:%M')} ({tz_name})",
@@ -287,10 +367,33 @@ def run(
     snapshot_fn: Callable[..., DbSnapshot] = collect_snapshot,
     send_fn: Callable[..., bool] = send_telegram_message,
 ) -> bool:
-    """Devuelve si el resumen se entrego (o se imprimio en `dry_run`). Un bot caido
-    o una base ilegible NO son un fallo del resumen: se informan dentro del mensaje.
-    Solo un envio fallido a Telegram es `False`, para que el Programador de tareas
-    marque la corrida como fallida."""
+    """Arma el resumen diario y lo envia por Telegram (o solo lo imprime con `dry_run`).
+
+    Un bot caido o una base ilegible NO son un fallo del resumen: se informan dentro del
+    mensaje. Solo un envio fallido a Telegram devuelve `False`, para que el Programador de
+    tareas marque la corrida como fallida.
+
+    Args:
+        host: host del bot.
+        port: puerto del bot.
+        timeout: segundos de espera del sondeo y del envio.
+        db_path: base viva de la que sacar la copia de solo lectura.
+        token: token del bot de Telegram.
+        chat_id: chat de destino.
+        dry_run: solo imprimir el resumen, sin enviarlo.
+        now: instante actual (inyectable en pruebas); por defecto, ahora (UTC).
+        frozen_hash: hash del prompt de la medicion; por defecto, el congelado.
+        fetch_health_fn: consulta de `/health` (por defecto, `scripts.check_health.fetch_health`).
+        snapshot_fn: lectura de la base (por defecto, `collect_snapshot`).
+        send_fn: envio a Telegram (por defecto, `send_telegram_message`).
+
+    Returns:
+        True si el resumen se entrego (o se imprimio en `dry_run`); False si fallo el envio.
+
+    Efectos:
+        Red: `GET /health` y, sin `dry_run`, `POST sendMessage` a Telegram. Lee la base por
+        `snapshot_fn` (copia temporal). Imprime el mensaje.
+    """
     now = now or datetime.now(UTC)
     health, health_error = fetch_health_fn(host, port, timeout)
     try:

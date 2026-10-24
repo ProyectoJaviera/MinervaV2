@@ -30,7 +30,17 @@ def build_push_notifier(
     settings: Settings, db: Database, *, transport: httpx.AsyncBaseTransport | None = None,
     base_url: str = DEFAULT_BASE_URL,
 ) -> PushNotifier | None:
-    """El notificador listo para correr, o `None` (desactivado) sin lanzar nunca."""
+    """El notificador listo para correr, o `None` (desactivado), sin lanzar nunca.
+
+    Args:
+        settings: configuracion (`TELEGRAM_PUSH_ENABLED`, token y chat).
+        db: conexion a la base.
+        transport: transporte HTTP de prueba (sin red), o `None`.
+        base_url: URL base de la Bot API.
+
+    Returns:
+        El `PushNotifier`, o `None`.
+    """
     try:
         if not settings.telegram_push_enabled:
             logger.info("Notificaciones push de Telegram desactivadas (TELEGRAM_PUSH_ENABLED no "
@@ -70,8 +80,21 @@ async def run_isolated(notifier: PushNotifier) -> None:
 def maybe_start_push_notifier(
     settings: Settings, db: Database, tasks: list[asyncio.Task],
 ) -> PushNotifier | None:
-    """Si corresponde, crea la tarea del notificador y la agrega a `tasks` (para que el cierre
-    ordenado del `lifespan` la cancele igual que a las demas)."""
+    """Si corresponde, crea la tarea del notificador y la agrega a `tasks`.
+
+    Asi el cierre ordenado del `lifespan` la cancela igual que a las demas. Nunca lanza.
+
+    Args:
+        settings: configuracion.
+        db: conexion a la base.
+        tasks: lista de tareas del `lifespan`.
+
+    Returns:
+        El notificador, o `None` si esta desactivado.
+
+    Efectos:
+        Crea una tarea asyncio y agrega una entrada al log.
+    """
     notifier = build_push_notifier(settings, db)
     if notifier is None:
         return None

@@ -34,6 +34,25 @@ from app.persistence.repositories import ohlcv_repo  # noqa: E402
 async def repair_one(
     client: BitunixRestClient, db: Database, symbol: str, interval: str, price_type: str,
 ) -> tuple[int, int]:
+    """Busca y repara los huecos de una serie cacheada (simbolo, intervalo y tipo de precio).
+
+    Detecta los huecos entre la vela mas antigua y la mas reciente ya cacheadas y los repara
+    con pedidos estrechos (`fill_gaps`). Se omite una serie sin grilla conocida o sin datos.
+
+    Args:
+        client: cliente REST de Bitunix.
+        db: conexion a la base (una copia).
+        symbol: simbolo, p. ej. `BTCUSDT`.
+        interval: intervalo de vela, p. ej. `1m`.
+        price_type: `LAST_PRICE` o `MARK_PRICE`.
+
+    Returns:
+        La tupla `(huecos encontrados, huecos reparados)`.
+
+    Efectos:
+        Lee `ohlcv_cache`. Red: GET `kline` a Bitunix (datos publicos). Escribe `ohlcv_cache`
+        (UPSERT de las velas recuperadas). Imprime una linea por serie.
+    """
     step_ms = interval_to_ms(interval)
     if step_ms is None:
         print(f"{symbol} {interval} {price_type}: intervalo sin grilla conocida, se omite")
@@ -59,6 +78,19 @@ async def repair_one(
 
 
 async def main(db_path: str, symbols: list[str], interval: str, price_types: list[str]) -> None:
+    """Repara los huecos de las series pedidas (cada simbolo por cada tipo de precio).
+
+    Args:
+        db_path: copia de la base (nunca la de trabajo).
+        symbols: simbolos a revisar.
+        interval: intervalo de vela.
+        price_types: tipos de precio, p. ej. `LAST_PRICE` y `MARK_PRICE`.
+
+    Efectos:
+        Abre la copia con `Database.connect()` (que puede aplicar migraciones) y crea un
+        cliente REST de Bitunix; las tablas y la red son las de `repair_one`. Imprime el total
+        de huecos encontrados, reparados y sin reparar.
+    """
     db = Database(db_path)
     await db.connect()
     client = BitunixRestClient(

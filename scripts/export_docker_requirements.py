@@ -60,11 +60,26 @@ HEADER = """\
 
 
 def normalize(name: str) -> str:
+    """El nombre de un paquete normalizado (minusculas y guiones), como lo compara pip.
+
+    Args:
+        name: nombre del paquete.
+
+    Returns:
+        El nombre normalizado.
+    """
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
 @dataclass
 class Closure:
+    """La clausura transitiva de dependencias de ejecucion.
+
+    Attributes:
+        versions: `nombre normalizado -> version instalada`.
+        display: `nombre normalizado -> nombre con su capitalizacion original`.
+        missing: paquetes exigidos para Linux pero no instalados en este entorno.
+    """
     versions: dict[str, str] = field(default_factory=dict)  # nombre normalizado -> version
     display: dict[str, str] = field(default_factory=dict)  # nombre normalizado -> nombre bonito
     missing: set[str] = field(default_factory=set)  # exigidos para Linux pero no instalados aqui
@@ -75,8 +90,17 @@ def collect_closure(
     distribution: Callable[[str], Any] = metadata.distribution,
     environment: dict[str, str] | None = None,
 ) -> Closure:
-    """Clausura transitiva de `roots` para el entorno de la imagen. `distribution(nombre)` debe
-    devolver algo con `.version`, `.requires` y `.metadata["Name"]` (como `importlib.metadata`)."""
+    """Clausura transitiva de `roots` evaluada para el entorno de la imagen (Linux, Python 3.11).
+
+    Args:
+        roots: dependencias directas (como en `pyproject.toml`).
+        distribution: funcion que devuelve la distribucion instalada de un nombre; por
+            defecto `importlib.metadata.distribution`.
+        environment: valores de los marcadores de entorno; por defecto, el de la imagen.
+
+    Returns:
+        La `Closure`.
+    """
     environment = environment or LINUX_ENVIRONMENT
     closure = Closure()
     queue: deque[tuple[str, frozenset[str]]] = deque()
@@ -121,11 +145,32 @@ EXTRA_RUNTIME_ROOTS = ["tzdata"]
 
 
 def runtime_roots(pyproject: Path = PYPROJECT) -> list[str]:
+    """Las dependencias de ejecucion de `pyproject.toml` mas las extra que se exigen.
+
+    Las extra son las que se instalan aunque ninguna dependencia las pida (`tzdata`).
+
+    Args:
+        pyproject: archivo `pyproject.toml`.
+
+    Returns:
+        Lista de requisitos.
+
+    Efectos:
+        Lee `pyproject.toml`.
+    """
     data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     return [*data["project"]["dependencies"], *EXTRA_RUNTIME_ROOTS]
 
 
 def render_lock(closure: Closure) -> str:
+    """El texto de `docker/requirements.lock`: cabecera y una linea `Nombre==version` por paquete.
+
+    Args:
+        closure: la clausura calculada.
+
+    Returns:
+        El texto del archivo.
+    """
     lines = [
         f"{closure.display[name]}=={closure.versions[name]}" for name in sorted(closure.versions)
     ]
@@ -133,6 +178,18 @@ def render_lock(closure: Closure) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Regenera `docker/requirements.lock` (versiones exactas de la imagen) o lo verifica.
+
+    Args:
+        argv: argumentos (por defecto, los de la linea de comandos); `--check` solo compara.
+
+    Returns:
+        0 si escribio o esta al dia; 1 con `--check` si el archivo esta desactualizado.
+
+    Efectos:
+        Lee `pyproject.toml` y los paquetes instalados; escribe `docker/requirements.lock`
+        (salvo con `--check`).
+    """
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument(
         "--check", action="store_true", help="falla si docker/requirements.lock no coincide",

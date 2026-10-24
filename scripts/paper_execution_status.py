@@ -44,6 +44,24 @@ def _pct(values: list[float], p: float) -> float:
 
 
 def format_report(conn, *, last: int = 20) -> str:
+    """El texto del estado del brazo ejecutado de la cuenta paper, sin PnL ni resultados.
+
+    Muestra desde cuando esta armado (`real_arm_started_at`) y la linea base del contador de
+    drawdown, cuantas decisiones APROBADA se abrieron, se omitieron (por motivo) o siguen
+    pendientes, la calidad de la entrada (retraso y diferencia de precio frente a la sombra),
+    los simbolos que no llegan al tamano minimo y las ultimas `last` decisiones. Una copia
+    anterior a la subfase 3.9 (sin `paper_execution_log`) se informa y termina.
+
+    Args:
+        conn: conexion de solo lectura con `row_factory = sqlite3.Row`.
+        last: cuantas decisiones recientes listar.
+
+    Returns:
+        El informe en texto, terminado en salto de linea.
+
+    Efectos:
+        Lee `system_state` y `paper_execution_log`.
+    """
     state = dict(conn.execute("SELECT key, value FROM system_state"))
     lines = ["=== Brazo ejecutado de la cuenta paper (subfase 3.9) ==="]
     started = state.get(KEY_STARTED)
@@ -116,6 +134,18 @@ def format_report(conn, *, last: int = 20) -> str:
 
 
 def main(db_path: str, *, last: int = 20) -> None:
+    """Imprime el estado del brazo ejecutado de una copia, abierta en solo lectura.
+
+    Args:
+        db_path: copia de la base (nunca la de trabajo).
+        last: cuantas decisiones recientes listar.
+
+    Raises:
+        SystemExit: si la base no existe (la lanza `_connect_ro`).
+
+    Efectos:
+        Abre la copia con `mode=ro` y lee lo que indica `format_report`. Imprime el informe.
+    """
     conn = _connect_ro(db_path)
     try:
         print(format_report(conn, last=last))

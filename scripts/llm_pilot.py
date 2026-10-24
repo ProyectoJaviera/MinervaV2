@@ -99,6 +99,25 @@ def _percentile(values: list[float], p: float) -> float:
 
 
 async def main(args: argparse.Namespace) -> None:
+    """Corre el piloto por repeticion sobre una copia de la base e imprime sus metricas.
+
+    Elige hasta `--max-calls` grupos de senal sin fila en `llm_logs`, arma el mensaje con las
+    features de cada uno y pide la decision a `LlmDecisionService` con `fase='PILOTO'`. En seco
+    (por defecto) el cliente es falso: sin red ni coste. Imprime la validez del JSON, tokens y
+    latencia (media y p95), la tasa de APROBAR frente a la banda 15 %-85 %, el coste y los
+    campos en null.
+
+    Args:
+        args: opciones ya validadas: `db` (copia), `real` (llamar a la API) y `max_calls`.
+
+    Efectos:
+        Lee de la copia `shadow_trades`, `llm_logs` y lo que lee
+        `build_features_from_shadow_trade` (`signals`, `ohlcv_cache`, `funding_cache`,
+        `contract_specs_cache` y `trades`). ESCRIBE en la copia una fila de `llm_logs` por
+        grupo y, si la decision es valida, `shadow_trades.llm_decision`. Con `--real` llama a
+        la API de Anthropic (gasto real, sujeto al presupuesto diario); sin ella no usa la
+        red. Imprime el informe por consola.
+    """
     dry_run = not args.real
     db = Database(args.db)
     await db.connect()

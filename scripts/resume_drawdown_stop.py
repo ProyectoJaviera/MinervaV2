@@ -54,8 +54,22 @@ STOP_KEY = "drawdown_stop_active"
 
 
 def read_stop_state(db_path: Path) -> tuple[bool, str | None]:
-    """(stop activo, cuando se levanto por ultima vez) leidos en SOLO LECTURA: el modo sin
-    `--confirm` no escribe nada, ni siquiera las migraciones de `Database.connect()`."""
+    """Lee el estado del stop por drawdown en SOLO LECTURA.
+
+    El modo sin `--confirm` no escribe nada, ni siquiera las migraciones de
+    `Database.connect()`.
+
+    Args:
+        db_path: base del bot.
+
+    Returns:
+        La tupla `(stop activo, cuando se levanto por ultima vez)`; la fecha es `None` si
+        nunca se levanto.
+
+    Efectos:
+        Lee `system_state` (`drawdown_stop_active` y `drawdown_stop_last_resumed_at`) con
+        `mode=ro`.
+    """
     conn = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
     try:
         rows = dict(conn.execute(
@@ -68,6 +82,20 @@ def read_stop_state(db_path: Path) -> tuple[bool, str | None]:
 
 
 async def realized_equity(db: Database, initial_capital: float) -> float:
+    """El equity realizado: capital inicial mas el PnL neto de las operaciones cerradas.
+
+    Las posiciones abiertas no cuentan porque el script no tiene precios de mercado.
+
+    Args:
+        db: conexion a la base.
+        initial_capital: capital inicial, en USDT.
+
+    Returns:
+        El equity, en USDT.
+
+    Efectos:
+        Lee `trades` (las cerradas).
+    """
     row = await db.fetch_one(
         "SELECT COALESCE(SUM(pnl_net_usdt), 0) AS pnl FROM trades WHERE status = 'CLOSED'"
     )
@@ -78,6 +106,28 @@ async def run(
     db_path: str, confirm: bool, equity: float | None = None,
     initial_capital: float | None = None,
 ) -> tuple[int, str]:
+    """Muestra el estado del stop por drawdown y, con `confirm`, lo levanta.
+
+    Sin `confirm` no escribe nada. Con `confirm` solo actua si el stop esta activo: reinicia
+    el pico de equity al equity usado, pero no el contador del criterio de dinero real.
+    Mientras los resultados estan ocultos no imprime el equity.
+
+    Args:
+        db_path: base del bot.
+        confirm: levantar el stop (si no, solo informa).
+        equity: equity a usar como nuevo pico; por defecto, capital inicial mas PnL realizado.
+        initial_capital: capital inicial; por defecto `settings.initial_capital_usdt`.
+
+    Returns:
+        La tupla `(codigo de salida, mensaje)`: 0 ok; 3 el stop no esta activo (nada que
+        levantar); 4 la base no existe.
+
+    Efectos:
+        Lee `system_state` en solo lectura. Con `confirm` y el stop activo abre la base con
+        `Database.connect()`, lee `trades` y la puerta de resultados, y escribe `system_state`
+        (`risk_engine.resume_drawdown_stop`: `drawdown_stop_active`,
+        `drawdown_breach_in_progress`, `equity_peak_usdt` y `drawdown_stop_last_resumed_at`).
+    """
     path = Path(db_path)
     if not path.is_file():
         return EXIT_NO_DB, f"No existe la base: {path}"
@@ -120,6 +170,21 @@ async def run(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Punto de entrada: valida las opciones, ejecuta `run` e imprime el mensaje.
+
+    Sin `--db` y con el bot en Docker se niega (codigo 2): la base por defecto es una copia
+    vieja y levantar el stop ahi no cambiaria nada en el bot.
+
+    Args:
+        argv: argumentos (por defecto, los de la linea de comandos).
+
+    Returns:
+        El codigo de salida: 0 ok; 2 error de uso; 3 el stop no esta activo; 4 la base no
+        existe.
+
+    Efectos:
+        Los de `run`. El mensaje va a stdout (a stderr con los codigos 2 y 4).
+    """
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--db", default=None, help=f"base del bot (def.: {DEFAULT_DB})")
     parser.add_argument("--confirm", action="store_true", help="levantar el stop (si no, mira)")

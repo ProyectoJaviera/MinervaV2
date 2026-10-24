@@ -60,6 +60,29 @@ def main(
     frozen_hash: str = FROZEN_PROMPT_SHA256, docs_dir: Path | None = None,
     log_file: Path | None = None, out_path: str | None = None,
 ) -> int:
+    """Arma y muestra el reporte de paso a dinero real de una copia; solo recomienda.
+
+    Nunca importa un backend de ejecucion ni usa la red. Mientras `is_outcome_reveal_allowed`
+    sea falso solo imprime que falta, junto con los contadores de la medicion (sin PnL).
+
+    Args:
+        db_path: copia de la base (nunca la de trabajo).
+        allow_synthetic_for_tests: acepta una base sintetica (solo pruebas).
+        frozen_hash: hash del prompt de la medicion; por defecto, el congelado.
+        docs_dir: carpeta del registro oficial del veredicto (solo pruebas), o `None`.
+        log_file: log del bot, para contar los CRITICAL de reconciliacion, o `None`.
+        out_path: archivo donde guardar el informe con conclusion, o `None`; nunca se
+            sobrescribe.
+
+    Returns:
+        0 informe impreso; 3 rechazado por resultados ocultos; 4 bandera de pruebas
+        rechazada; 5 `out_path` ya existe.
+
+    Efectos:
+        Lee la copia con `mode=ro`, `log_file` y el registro oficial en `docs/`. Escribe
+        `out_path` (modo exclusivo `x`) solo si el informe tiene conclusion. Imprime el
+        informe.
+    """
     if out_path is not None and Path(out_path).exists():
         print(f"RECHAZADO: {out_path} ya existe; este script no sobrescribe un informe.")
         return EXIT_OUT_EXISTS

@@ -71,6 +71,26 @@ def _backup_database(source_path: Path, dest_path: Path) -> None:
 
 
 def main(source_db: str, port: int) -> None:
+    """Arranca el servidor de desarrollo sobre una copia temporal de `source_db`.
+
+    Hace la copia consistente (`_backup_database`), fija el entorno ANTES de importar nada de
+    `app.*` y lanza uvicorn. Los candados estan en el codigo y no dependen del `.env`: el
+    etiquetado en vivo del LLM, los comandos y el push de Telegram, el brazo ejecutado, las
+    noticias y la memoria de lecciones quedan apagados.
+
+    Args:
+        source_db: base real a copiar (solo se lee, para copiarla).
+        port: puerto del servidor (8001 por defecto desde la linea de comandos).
+
+    Raises:
+        SystemExit: si `source_db` no existe.
+        AssertionError: si la base temporal resultara ser la fuente.
+
+    Efectos:
+        Crea un directorio temporal con la copia de la base y su carpeta de logs, fija
+        `DATABASE_PATH`, `LOG_DIR` y las variables de apagado en `os.environ` y arranca uvicorn
+        (bloquea hasta Ctrl+C). El bot real del puerto 8000 y su base no se tocan.
+    """
     source_path = Path(source_db).resolve()
     if not source_path.exists():
         raise SystemExit(f"No existe: {source_path}")

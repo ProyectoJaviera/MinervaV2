@@ -123,6 +123,19 @@ def _strategy_section(strategy: str, trades: list) -> str:
 
 
 async def main() -> None:
+    """Corre el analisis de riesgo de ruina (bootstrap) sobre las operaciones OOS del backtest.
+
+    Genera una tabla por estrategia, el pool combinado y los escenarios de sensibilidad, y
+    escribe el informe de la Fase 2. Necesita haber corrido antes la descarga y el backtest.
+    OJO: `REPORT_PATH` es `docs/FASE2_RIESGO.md`; el documento historico ya vive en
+    `docs/historial/`, asi que volver a correrlo crea otro archivo en `docs/`.
+
+    Raises:
+        RuntimeError: si `backtest_trades` no tiene operaciones OOS.
+
+    Efectos:
+        Lee `backtest_trades` de la base configurada y escribe `docs/FASE2_RIESGO.md`.
+    """
     setup_logging()
     t0 = time.time()
     db = Database(settings.database_path)

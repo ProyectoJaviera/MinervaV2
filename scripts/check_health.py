@@ -18,7 +18,19 @@ SIN_RESPUESTA = 2
 
 
 def fetch_health(host: str, port: int, timeout: float) -> tuple[dict | None, str | None]:
-    """(JSON de /health, None) o (None, "<url>: <error>") si no hubo respuesta."""
+    """Consulta `GET /health` con un timeout corto.
+
+    Args:
+        host: direccion del servidor.
+        port: puerto.
+        timeout: segundos maximos.
+
+    Returns:
+        La tupla `(JSON de /health, None)` o `(None, "<url>: <error>")` si no hubo respuesta.
+
+    Efectos:
+        Red: GET a `http://<host>:<port>/health`.
+    """
     url = f"http://{host}:{port}/health"
     try:
         response = httpx.get(url, timeout=timeout)
@@ -29,6 +41,19 @@ def fetch_health(host: str, port: int, timeout: float) -> tuple[dict | None, str
 
 
 def main(host: str, port: int, timeout: float) -> int:
+    """Reporta OK, STALE o SIN_RESPUESTA segun `/health`.
+
+    Args:
+        host: direccion del servidor.
+        port: puerto.
+        timeout: segundos maximos.
+
+    Returns:
+        0 si `status` es `ok`; 1 si es `stale`; 2 si no hubo respuesta.
+
+    Efectos:
+        Red: GET a `/health`. Escribe el resultado en la consola.
+    """
     data, error = fetch_health(host, port, timeout)
     if data is None:
         print(f"SIN_RESPUESTA: {error}")

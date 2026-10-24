@@ -68,10 +68,19 @@ def jwt_secret_is_safe(secret: str) -> bool:
 
 
 def warn_if_jwt_secret_is_unsafe(logger: logging.Logger, settings: Settings) -> None:
-    """Llamado una vez al arrancar el proceso (`app/main.py`). No impide
-    arrancar (`/health`/`/positions`/`/trades` no necesitan auth) -- solo
-    deja constancia de que las rutas protegidas bajo `/api/` van a rechazar
-    todo (`login` con 503, `require_auth` con 401) hasta que se corrija."""
+    """Avisa en el log si `JWT_SECRET` es inseguro, una vez al arrancar (`app/main.py`).
+
+    No impide arrancar (`/health`, `/positions` y `/trades` no necesitan auth): solo deja
+    constancia de que las rutas protegidas bajo `/api/` van a rechazar todo (`login` con
+    503, `require_auth` con 401) hasta que se corrija.
+
+    Args:
+        logger: el logger donde avisar.
+        settings: configuracion.
+
+    Efectos:
+        Escribe una linea WARNING en el log.
+    """
     if not jwt_secret_is_safe(settings.jwt_secret):
         logger.warning(
             "JWT_SECRET no esta configurado o es muy corto (se exigen al menos 32 "
@@ -93,11 +102,20 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    """`False` si `password_hash` esta vacio (usuario nunca configurado) --
-    nunca se intenta `bcrypt.checkpw` contra un hash vacio -- o si `password`
-    supera los 72 bytes que bcrypt acepta (`ValueError` en vez de una
-    comparacion): una contrasena invalida por tamano no es una contrasena
-    correcta, nunca deberia tumbar el endpoint con un 500."""
+    """Comprueba una contrasena contra su hash bcrypt, sin lanzar nunca.
+
+    Devuelve `False` si el hash esta vacio (usuario nunca configurado: no se intenta
+    `bcrypt.checkpw` contra un hash vacio) o si la contrasena supera los 72 bytes que bcrypt
+    acepta: una contrasena invalida por tamano no es una correcta y jamas debe tumbar el
+    endpoint con un 500.
+
+    Args:
+        password: la contrasena en claro.
+        password_hash: el hash de `AUTH_PASSWORD_HASH`.
+
+    Returns:
+        True si coincide.
+    """
     if not password_hash:
         return False
     try:
@@ -107,10 +125,19 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def verify_username(username: str, expected_username: str) -> bool:
-    """Compara BYTES (UTF-8), no `str`: `hmac.compare_digest` exige que un
-    `str` sea puro ASCII y lanza `TypeError` ante cualquier caracter que no
-    lo sea -- un usuario con tilde o similar rompia esto con un 500 antes de
-    esta correccion. Comparar bytes no tiene esa restriccion."""
+    """Compara el usuario en tiempo constante y sobre BYTES (UTF-8), no sobre `str`.
+
+    `hmac.compare_digest` exige que un `str` sea puro ASCII y lanza `TypeError` ante
+    cualquier otro caracter: un usuario con tilde rompia el login con un 500 antes de esta
+    correccion.
+
+    Args:
+        username: el usuario recibido.
+        expected_username: `AUTH_USERNAME`.
+
+    Returns:
+        True si coincide; False tambien si no hay usuario configurado.
+    """
     if not expected_username:
         return False
     return hmac.compare_digest(username.encode("utf-8"), expected_username.encode("utf-8"))
@@ -136,24 +163,41 @@ def create_session_token(username: str, *, secret: str, now: datetime | None = N
 
 
 def decode_session_token(token: str, *, secret: str) -> str:
-    """Devuelve el `sub` (username) o lanza `jwt.PyJWTError` -- la clase BASE
-    de PyJWT, no `InvalidTokenError`: `InvalidKeyError` (clave HMAC
-    malformada) es subclase directa de `PyJWTError`, NO de
-    `InvalidTokenError`, y antes de esta correccion escapaba sin atrapar."""
+    """Valida el JWT de sesion y devuelve su usuario (`sub`).
+
+    Lanza la clase BASE de PyJWT (`jwt.PyJWTError`), no `InvalidTokenError`:
+    `InvalidKeyError` (clave HMAC malformada) es subclase directa de `PyJWTError` y antes de
+    esta correccion escapaba sin atrapar.
+
+    Args:
+        token: el JWT de la cookie.
+        secret: `JWT_SECRET`.
+
+    Returns:
+        El usuario del token.
+    """
     payload = jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
     return payload["sub"]
 
 
 async def require_auth(request: Request, settings: Settings = Depends(get_settings)) -> str:
-    """Dependencia para proteger un router ENTERO
-    (`APIRouter(dependencies=[Depends(require_auth)])`), no endpoint por
-    endpoint -- asi una ruta nueva que alguien agregue despues a ese router
-    queda protegida por construccion.
+    """Dependencia que exige sesion valida; se declara en el router ENTERO.
 
-    Si `JWT_SECRET` es inseguro (vacio o corto), SIEMPRE devuelve 401 sin
-    intentar decodificar nada -- nunca se confia en un token firmado (o
-    forjable) con una clave que no cumple el minimo, y nunca se deja escapar
-    una excepcion de PyJWT como un 500."""
+    Asi una ruta nueva que se agregue despues a ese router queda protegida por
+    construccion. Con `JWT_SECRET` inseguro (vacio o corto) responde SIEMPRE 401 sin
+    intentar decodificar nada, y nunca deja escapar una excepcion de PyJWT como un 500.
+
+    Args:
+        request: la peticion (de ella se lee la cookie).
+        settings: configuracion (inyectada).
+
+    Returns:
+        El usuario autenticado.
+
+    Raises:
+        HTTPException: 401 sin cookie, con token invalido o expirado, o con `JWT_SECRET`
+            inseguro.
+    """
     if not jwt_secret_is_safe(settings.jwt_secret):
         raise HTTPException(status_code=401, detail="No autenticado")
     token = request.cookies.get(COOKIE_NAME)

@@ -199,9 +199,17 @@ class SensitivityScenario:
 
 
 def pct_returns_from_trades(trades: list[TradeLike]) -> list[float]:
-    """PnL neto de cada operacion como fraccion de SU margen original.
-    Preserva el orden de `trades` (importante para el bootstrap por
-    bloques, que asume orden cronologico)."""
+    """El PnL neto de cada operacion como fraccion de SU margen original.
+
+    Conserva el orden de `trades`, importante para el bootstrap por bloques, que asume orden
+    cronologico.
+
+    Args:
+        trades: operaciones del pool.
+
+    Returns:
+        Lista de retornos (se omiten las operaciones sin margen).
+    """
     return [t.pnl_net_usdt / t.margin_usdt for t in trades if t.margin_usdt]
 
 

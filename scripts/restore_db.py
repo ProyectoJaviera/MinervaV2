@@ -48,15 +48,22 @@ READ_ONLY_MEDIUM_ERRORS = ("readonly", "unable to open")
 
 
 def connect_readonly(path: Path) -> sqlite3.Connection:
-    """Abre `path` en solo lectura, tambien desde un medio de solo lectura (p. ej. un montaje
-    `:ro` de Docker).
+    """Abre una base en solo lectura, tambien desde un medio de solo lectura (montaje `:ro`).
 
-    Un respaldo anterior a la Fase 7 trae el modo WAL en su cabecera y, desde un medio de solo
-    lectura, `mode=ro` falla ("attempt to write a readonly database"): SQLite necesita crear el
-    `-shm`. Un respaldo es un archivo suelto sin escritor, asi que en ese caso se abre
-    `immutable=1`, SALVO que tenga al lado un `-wal` con contenido (entonces ese contenido importa y
-    ignorarlo daria datos viejos: se deja fallar). Cualquier otro error (p. ej. `database is
-    locked`) tampoco se esquiva: con un escritor presente `immutable` podria leer datos a medias."""
+    Un respaldo anterior a la Fase 7 trae el modo WAL y, desde un medio de solo lectura,
+    `mode=ro` falla. Un respaldo es un archivo suelto sin escritor, asi que en ese caso se
+    abre `immutable=1`, SALVO que tenga al lado un `-wal` con contenido. Cualquier otro
+    error (p. ej. `database is locked`) no se esquiva.
+
+    Args:
+        path: archivo SQLite.
+
+    Returns:
+        La conexion de solo lectura.
+
+    Efectos:
+        Lee el archivo.
+    """
     uri = f"file:{path.as_posix()}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
     try:
@@ -76,7 +83,18 @@ def connect_readonly(path: Path) -> sqlite3.Connection:
 
 
 def validate_backup(path: Path) -> str | None:
-    """`None` si `path` es una base de Minerva integra; si no, el motivo del rechazo."""
+    """Dice si un archivo es una base de Minerva integra.
+
+    Args:
+        path: archivo a validar.
+
+    Returns:
+        `None` si es valida; si no, el motivo del rechazo (no abre, integridad, tablas
+        requeridas ausentes).
+
+    Efectos:
+        Lee el archivo en solo lectura.
+    """
     try:
         conn = connect_readonly(path)
     except sqlite3.OperationalError as exc:
@@ -101,8 +119,18 @@ def validate_backup(path: Path) -> str | None:
 
 
 def move_aside(destination: Path, stamp: str) -> list[tuple[Path, Path]]:
-    """Mueve la base existente y sus -wal/-shm a `<nombre>.previo_<sello>`. Devuelve los pares
-    (original, nuevo) para poder deshacerlo."""
+    """Mueve la base existente y sus `-wal` y `-shm` a `<nombre>.previo_<sello>`.
+
+    Args:
+        destination: la base actual.
+        stamp: sello de tiempo para el nombre.
+
+    Returns:
+        Los pares `(original, nuevo)` para poder deshacerlo.
+
+    Efectos:
+        Renombra archivos en la carpeta de la base.
+    """
     moved: list[tuple[Path, Path]] = []
     for suffix in ("", "-wal", "-shm"):
         current = destination.with_name(destination.name + suffix)
@@ -114,6 +142,14 @@ def move_aside(destination: Path, stamp: str) -> list[tuple[Path, Path]]:
 
 
 def undo_move_aside(moved: list[tuple[Path, Path]]) -> None:
+    """Deshace `move_aside`: devuelve cada archivo a su nombre original.
+
+    Args:
+        moved: los pares `(original, nuevo)` que devolvio `move_aside`.
+
+    Efectos:
+        Renombra archivos.
+    """
     for original, target in moved:
         if target.exists():
             os.replace(target, original)
@@ -122,6 +158,26 @@ def undo_move_aside(moved: list[tuple[Path, Path]]) -> None:
 def run(
     backup: str, db: str, force: bool = False, now: datetime | None = None,
 ) -> tuple[int, str]:
+    """Restaura un respaldo en la ruta de destino, con el bot DETENIDO.
+
+    Verifica el respaldo, se niega a tocar un destino existente salvo `force` (y entonces lo
+    mueve a `.previo_*`, no lo borra), copia a un temporal junto al destino, lo verifica y
+    lo pone en su sitio con un reemplazo atomico. Si algo falla, la base anterior queda como
+    estaba.
+
+    Args:
+        backup: respaldo a restaurar.
+        db: ruta de destino.
+        force: si el destino existe, moverlo y reemplazarlo.
+        now: instante para el sello de `.previo_*`; por defecto, ahora (UTC).
+
+    Returns:
+        La tupla `(codigo de salida, mensaje)`: 0 ok, 2 uso, 3 respaldo inexistente, 4
+        respaldo invalido, 5 destino existente, 6 no se pudo escribir.
+
+    Efectos:
+        Lee el respaldo; escribe (y mueve) archivos de base en la carpeta de destino.
+    """
     source, destination = Path(backup), Path(db)
     if not source.is_file():
         return EXIT_NO_BACKUP, f"No existe el respaldo: {source}"
@@ -184,8 +240,14 @@ def run(
 
 
 def docker_mode_refusal(db: str) -> str | None:
-    """Tras la mudanza a Docker, restaurar sobre `data/minerva_estabilidad.db` no cambia la base
-    que usa el bot (scripts/docker_support.py)."""
+    """Rechazo si restaurar sobre la base por defecto no cambiaria la base del bot (ya en Docker).
+
+    Args:
+        db: ruta de la base por defecto.
+
+    Returns:
+        El mensaje de rechazo, o `None`.
+    """
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from scripts.docker_support import docker_mode_refusal as refusal
 
@@ -196,6 +258,17 @@ def docker_mode_refusal(db: str) -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Linea de comandos de la restauracion.
+
+    Args:
+        argv: argumentos (por defecto, los de la linea de comandos).
+
+    Returns:
+        El codigo de salida (ver `run`).
+
+    Efectos:
+        Ver `run`. Escribe el resultado en la consola.
+    """
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("backup", help="respaldo a restaurar (hecho con scripts/backup_db.py)")
     parser.add_argument("--db", default=None, help=f"destino (def.: {DEFAULT_DB})")

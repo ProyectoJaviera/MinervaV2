@@ -48,6 +48,17 @@ def _connect_ro(path: str) -> sqlite3.Connection:
 
 
 def format_report(status: MeasurementStatus) -> str:
+    """El texto del avance de la medicion: conteos por lado, tasa, causas no OK, coste y ritmo.
+
+    No incluye PnL ni retornos: solo conteos y fechas. Sin filas `MEDICION` bajo el hash
+    congelado devuelve la cabecera y un aviso.
+
+    Args:
+        status: el avance calculado por `compute_status`.
+
+    Returns:
+        El informe en texto, terminado en salto de linea.
+    """
     lines = [
         "=== Avance de la medicion en vivo (hash congelado) ===",
         f"PROMPT_SHA256 congelado: {status.frozen_hash}",
@@ -128,6 +139,18 @@ def format_report(status: MeasurementStatus) -> str:
 
 
 def main(db_path: str) -> None:
+    """Imprime el avance de la medicion de una copia, abierta en solo lectura.
+
+    Args:
+        db_path: copia de la base (nunca la de trabajo; `__main__` lo verifica con un assert).
+
+    Raises:
+        SystemExit: si la base no existe (la lanza `_connect_ro`).
+
+    Efectos:
+        Lee `llm_logs` y las marcas de `shadow_trades` (sin PnL) de la copia con `mode=ro`.
+        Imprime el informe.
+    """
     conn = _connect_ro(db_path)
     try:
         status = compute_status(conn)

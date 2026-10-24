@@ -121,6 +121,21 @@ def _verdict_table(v1: dict, v2: dict, label: str) -> list[str]:
 
 
 def build_report(v1_path: str, v2_path: str) -> str:
+    """Tablas de comparacion de dos corridas del backtest de la Fase 2.
+
+    La v1 es la corrida con el error y la v2, la corregida.
+
+    Args:
+        v1_path: base con la corrida v1.
+        v2_path: base con la corrida v2.
+
+    Returns:
+        El informe en Markdown.
+
+    Efectos:
+        Lee `backtest_verdicts`, `backtest_skipped_entries` y `backtest_trades` de ambas
+        bases en solo lectura.
+    """
     c1, c2 = _connect_ro(v1_path), _connect_ro(v2_path)
     try:
         v1, v2 = _verdicts(c1), _verdicts(c2)
@@ -162,6 +177,11 @@ def build_report(v1_path: str, v2_path: str) -> str:
 
 
 def main() -> None:
+    """Linea de comandos: imprime el informe de comparacion o lo guarda con `--out`.
+
+    Efectos:
+        Lee las dos bases; con `--out`, escribe el archivo Markdown.
+    """
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--v1", required=True, help="base con la corrida v1 (con el error)")
     parser.add_argument("--v2", required=True, help="base con la corrida v2 (corregida)")

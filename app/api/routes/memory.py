@@ -32,7 +32,21 @@ DISCLAIMER = (
 async def status(
     request: Request, db: Database = Depends(get_db), settings: Settings = Depends(get_settings),
 ) -> dict:
-    """Interruptor y CONTEOS (nunca tasas ni retornos)."""
+    """`GET /api/memory/status`: interruptor y CONTEOS (nunca tasas ni retornos).
+
+    Args:
+        request: la peticion (para saber si el ejecutor quedo armado).
+        db: base (inyectada).
+        settings: configuracion (inyectada).
+
+    Returns:
+        Interruptor, si esta activa, muestra minima, conteos, ultima reconstruccion y si los
+        resultados son visibles.
+
+    Efectos:
+        Lee `shadow_trades`, `memory_entries`, `lesson_applications` y `lessons`, ademas de
+        la puerta de resultados.
+    """
     visible = await results_visible(db)
     return {
         "enabled": settings.lessons_memory_enabled,

@@ -37,7 +37,19 @@ EXIT_OK, EXIT_BAD_INTEGRITY, EXIT_USAGE, EXIT_NO_DB = 0, 1, 2, 3
 
 
 def fingerprint(path: Path) -> dict:
-    """Integridad, modo del diario, hash del esquema y conteo de filas de cada tabla."""
+    """Integridad, modo del diario, hash del esquema y conteo de filas de cada tabla.
+
+    Solo cuenta filas y resume el esquema: nunca lee resultados de operaciones.
+
+    Args:
+        path: base a resumir (se abre en solo lectura).
+
+    Returns:
+        Diccionario con `integrity`, `journal_mode`, `schema_sha256` y `tables`.
+
+    Efectos:
+        Lee la base (conteos, no datos).
+    """
     conn = connect_readonly(path)
     try:
         integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
@@ -62,8 +74,18 @@ def fingerprint(path: Path) -> dict:
 
 
 def differences(left: dict, right: dict) -> list[str]:
-    """Que cambia entre dos huellas (vacio si son equivalentes). El modo del diario NO cuenta: un
-    respaldo se guarda en modo clasico y el bot lo pasa a WAL al conectarse."""
+    """Que cambia entre dos huellas (vacio si son equivalentes).
+
+    El modo del diario NO cuenta: un respaldo se guarda en modo clasico y el bot lo pasa a
+    WAL al conectarse.
+
+    Args:
+        left: huella del origen.
+        right: huella del destino.
+
+    Returns:
+        Lista de diferencias en texto.
+    """
     found = []
     for label, fp in (("origen", left), ("destino", right)):
         if fp.get("integrity") != "ok":
@@ -78,6 +100,17 @@ def differences(left: dict, right: dict) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Imprime UNA linea JSON con la huella de una base.
+
+    Args:
+        argv: argumentos (por defecto, los de la linea de comandos).
+
+    Returns:
+        0 con integridad ok; 1 si la integridad falla; 3 si la base no existe.
+
+    Efectos:
+        Lee la base en solo lectura y escribe el JSON en stdout.
+    """
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--db", required=True, help="base a resumir (se abre en solo lectura)")
     args = parser.parse_args(argv)
