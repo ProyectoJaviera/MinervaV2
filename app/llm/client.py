@@ -17,6 +17,7 @@ from typing import Protocol
 
 @dataclass(frozen=True)
 class LlmRawResponse:
+    """Respuesta cruda de una llamada al LLM: texto, tokens de entrada y salida y latencia."""
     text: str
     input_tokens: int
     output_tokens: int
@@ -32,6 +33,13 @@ class LlmHttpError(Exception):
 
 
 class LlmClient(Protocol):
+    """Interfaz del cliente del LLM: el unico punto de contacto con la red.
+
+    Las implementaciones son `AnthropicLlmClient` (real) y `FakeLlmClient` (pruebas). Su
+    unico metodo, `complete(*, system, user, model, max_tokens)`, hace UNA llamada al
+    modelo y devuelve una `LlmRawResponse`; lanza `LlmTimeoutError` si no responde a
+    tiempo y `LlmHttpError` ante un error de red o de estado HTTP.
+    """
     async def complete(
         self, *, system: str, user: str, model: str, max_tokens: int
     ) -> LlmRawResponse: ...
@@ -50,6 +58,21 @@ class FakeLlmClient:
     async def complete(
         self, *, system: str, user: str, model: str, max_tokens: int
     ) -> LlmRawResponse:
+        """Devuelve la siguiente respuesta programada, o relanza la excepcion programada.
+
+        Args:
+            system: texto del sistema (se registra en `calls`).
+            user: mensaje de usuario (se registra en `calls`).
+            model: id del modelo (se registra en `calls`).
+            max_tokens: tope de tokens (se registra en `calls`).
+
+        Returns:
+            La `LlmRawResponse` programada.
+
+        Raises:
+            AssertionError: si no quedan respuestas programadas.
+            Exception: la excepcion programada, si la siguiente entrada es una.
+        """
         self.calls.append(
             {"system": system, "user": user, "model": model, "max_tokens": max_tokens}
         )
@@ -62,10 +85,18 @@ class FakeLlmClient:
 
 
 def build_anthropic_client(settings) -> LlmClient:
-    """Fabrica del cliente real. Import diferido a proposito (ver docstring del
-    modulo): construye `AnthropicLlmClient`, que a su vez crea el
-    `anthropic.AsyncAnthropic` con la clave de `settings.anthropic_api_key`
-    (leida solo de `.env` por pydantic-settings; el asistente nunca la lee)."""
+    """Fabrica del cliente real, con import diferido a proposito.
+
+    Asi ninguna prueba que no la llame necesita el SDK ni toca la red. Construye
+    `AnthropicLlmClient`, que crea el cliente asincrono de Anthropic con la clave de
+    `settings.anthropic_api_key` (leida solo de `.env` por pydantic-settings).
+
+    Args:
+        settings: configuracion (clave de Anthropic y timeout).
+
+    Returns:
+        Un `LlmClient` real.
+    """
     from app.llm._anthropic_client import AnthropicLlmClient  # diferido a proposito
 
     return AnthropicLlmClient(settings)

@@ -78,8 +78,17 @@ EXTERNAL_KEYS = ("news_context", "news_status", "lessons_context")
 
 
 def build_user_message_v5(features: dict) -> str:
-    """Igual que v4: JSON con claves ordenadas y nulos explicitos. Los titulares viajan como valores
-    de cadena (la serializacion escapa comillas y saltos de linea): no pueden abrir claves."""
+    """Igual que v4: JSON con claves ordenadas y nulos explicitos.
+
+    Los titulares viajan como valores de cadena (la serializacion escapa comillas y saltos
+    de linea): no pueden abrir claves.
+
+    Args:
+        features: las features v3.
+
+    Returns:
+        El JSON de una sola linea.
+    """
     return json.dumps(features, sort_keys=True, ensure_ascii=False)
 
 
@@ -87,7 +96,20 @@ def add_external_context(
     features_v2: dict, *, news_context: dict | None, news_status: str,
     lessons_context: dict | None,
 ) -> dict:
-    """features_v3 = features_v2 sin cambios + las tres claves externas (null si no hay dato)."""
+    """features_v3 = features_v2 sin cambios mas las tres claves externas (null si no hay dato).
+
+    Args:
+        features_v2: las features v2.
+        news_context: contexto de noticias, o `None`.
+        news_status: motivo del estado del contexto de noticias.
+        lessons_context: contexto de lecciones, o `None`.
+
+    Returns:
+        Un diccionario nuevo (no muta la entrada).
+
+    Raises:
+        ValueError: si las features v2 ya traen alguna de las claves externas.
+    """
     clash = set(features_v2) & set(EXTERNAL_KEYS)
     if clash:
         raise ValueError(f"las features v2 ya traen claves externas: {sorted(clash)}")
@@ -100,9 +122,19 @@ def add_external_context(
 def query_from_features(
     trade: ShadowTrade, features_v2: dict, news_context: dict | None,
 ) -> QueryFeatures:
-    """Lo que se sabe de la operacion nueva, con los MISMOS cortes con que se arman las entradas de
-    la memoria (`app/memory/entries.py`): la estrategia ordenada que da el timeframe, la hora del
-    cierre de la vela y el ATR del mensaje."""
+    """Lo que se sabe de la operacion nueva, con los MISMOS cortes de las entradas de memoria.
+
+    Usa la estrategia ordenada que da el timeframe, la hora del cierre de la vela y el ATR
+    del mensaje (`app/memory/entries.py`).
+
+    Args:
+        trade: la sombra a decidir.
+        features_v2: las features v2 ya calculadas.
+        news_context: contexto de noticias, o `None`.
+
+    Returns:
+        Los `QueryFeatures` para buscar lecciones.
+    """
     strategies = sorted(trade.contributing_strategies) or [trade.strategy or "n/d"]
     timeframes = features_v2.get("timeframe_by_strategy") or {}
     fear_greed = (news_context or {}).get("fear_greed")
@@ -119,9 +151,24 @@ def query_from_features(
 
 
 async def build_features_v3(db: Database, trade: ShadowTrade, settings: Settings) -> dict:
-    """Features v2 (sin cambios) + contexto de noticias + contexto de lecciones, todo con el
-    limite de instante `trade.candle_close_time`. Un contexto que no se puede dar queda en null
-    con su motivo (`news_status`); el de lecciones solo existe si los resultados ya son visibles."""
+    """Features v2 (sin cambios) mas contexto de noticias y de lecciones, con el limite de instante.
+
+    Un contexto que no se puede dar queda en null con su motivo (`news_status`); el de
+    lecciones solo existe si los resultados ya son visibles.
+
+    Args:
+        db: conexion a la base.
+        trade: la sombra a decidir.
+        settings: configuracion.
+
+    Returns:
+        El diccionario de features v3.
+
+    Efectos:
+        Lee `signals`, `ohlcv_cache`, `funding_cache`, `trades`, `news_items`,
+        `fear_greed`, `memory_entries` y `lessons`; con lecciones, escribe
+        `lesson_applications`. No se usa en la medicion en curso.
+    """
     features_v2 = await v4.build_features_from_shadow_trade(db, trade, settings)
     as_of = trade.candle_close_time
     news = await build_news_context(db, trade.symbol, as_of)

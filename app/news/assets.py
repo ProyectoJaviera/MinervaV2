@@ -13,6 +13,14 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class AssetAlias:
+    """Los nombres y el ticker con los que se reconoce un activo en un titular.
+
+    Attributes:
+        ticker: ticker base (`BTC`).
+        names: nombres en ingles que lo identifican (`bitcoin`).
+        ticker_matches: si False, el ticker no cuenta (es una palabra comun, como `LINK`).
+        ambiguous: si True, el nombre exige ademas contexto cripto en el titular.
+    """
     ticker: str
     names: tuple[str, ...]
     # Tickers que tambien son palabras comunes ("LINK", "NEAR"): solo cuentan en mayusculas exactas.
@@ -72,12 +80,32 @@ _CRYPTO_CONTEXT = re.compile(
 
 
 def base_ticker(symbol: str) -> str:
-    """`BTCUSDT` -> `BTC`."""
+    """El ticker base de un simbolo de futuros: `BTCUSDT` -> `BTC`.
+
+    Args:
+        symbol: simbolo.
+
+    Returns:
+        El simbolo sin el sufijo `USDT` (igual si no lo tiene).
+    """
     return symbol[:-4] if symbol.endswith("USDT") else symbol
 
 
 def extract_assets(title: str) -> list[str]:
-    """Tickers base mencionados en el titular, ordenados y sin repetir."""
+    """Tickers base mencionados en un titular, de forma determinista (sin LLM, sin costo).
+
+    Reconoce por nombre (palabra completa, sin distinguir mayusculas) y, si el ticker no es
+    una palabra comun, por el ticker en MAYUSCULAS exactas. Los nombres compuestos van
+    primero para que "Bitcoin Cash" no cuente como BTC; un nombre ambiguo solo cuenta si el
+    titular habla de cripto. Es una heuristica para titulares en ingles: puede no etiquetar
+    un titular, pero nunca inventa un activo.
+
+    Args:
+        title: titular.
+
+    Returns:
+        Tickers ordenados y sin repetir.
+    """
     remaining = title
     found: set[str] = set()
     has_crypto_context = bool(_CRYPTO_CONTEXT.search(title))
@@ -91,10 +119,17 @@ def extract_assets(title: str) -> list[str]:
 
 
 def query_for(symbol: str) -> str | None:
-    """Consulta de GDELT para un simbolo del universo (`BTCUSDT`) o `None` si no hay alias.
+    """La consulta de GDELT para un simbolo del universo, o `None` si no hay alias.
 
-    Nombres con comillas unidos por OR; si el nombre es ambiguo en lenguaje comun, se exige tambien
-    contexto cripto. Siempre solo noticias en ingles."""
+    Une los nombres entre comillas con OR; si el nombre es ambiguo en lenguaje comun exige
+    tambien contexto cripto. Siempre solo noticias en ingles.
+
+    Args:
+        symbol: simbolo del universo, p. ej. `BTCUSDT`.
+
+    Returns:
+        El texto de la consulta, o `None`.
+    """
     alias = _BY_TICKER.get(base_ticker(symbol))
     if alias is None:
         return None

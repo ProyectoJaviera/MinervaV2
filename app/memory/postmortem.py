@@ -25,8 +25,21 @@ def _common(counter: Counter, total: int) -> str | None:
 
 
 async def build_postmortem(db: Database, *, n_losses: int) -> dict | None:
-    """Analiza la racha actual de perdidas consecutivas de la cuenta paper; `None` si es mas corta
-    que `n_losses`."""
+    """Analiza la racha actual de perdidas consecutivas de la cuenta paper. Determinista, sin LLM.
+
+    Describe que tienen en comun esas operaciones (lado, estrategia, simbolo, motivo de
+    cierre, franja horaria) cuando una caracteristica supera el 75 %.
+
+    Args:
+        db: conexion a la base.
+        n_losses: largo minimo de la racha para producir un informe.
+
+    Returns:
+        El informe (con `dedupe_key`), o `None` si la racha es mas corta.
+
+    Efectos:
+        Lee `trades` (incluido PnL).
+    """
     rows = await db.fetch_all(
         "SELECT * FROM trades WHERE status = 'CLOSED' AND pnl_net_usdt IS NOT NULL "
         "AND COALESCE(close_reason, '') != 'RECONCILE_FAILED' "
@@ -75,7 +88,19 @@ async def build_postmortem(db: Database, *, n_losses: int) -> dict | None:
 
 
 async def maybe_postmortem(db: Database, *, n_losses: int, now: datetime | None = None) -> bool:
-    """Guarda UN post-mortem por racha (clave: su primera perdida). Devuelve si es nuevo."""
+    """Guarda UN post-mortem por racha, con clave su primera perdida.
+
+    Args:
+        db: conexion a la base.
+        n_losses: largo minimo de la racha.
+        now: hora del informe; por defecto, ahora (UTC).
+
+    Returns:
+        True si el informe es nuevo.
+
+    Efectos:
+        Lee `trades`; escribe `lessons_reports`.
+    """
     body = await build_postmortem(db, n_losses=n_losses)
     if body is None:
         return False

@@ -17,6 +17,14 @@ DIMENSIONS = (
 
 
 def hour_bin(hour_utc: int | None) -> str:
+    """La franja de 4 horas UTC de una hora (`04-07`), o `UNK` si no se conoce.
+
+    Args:
+        hour_utc: hora UTC (0-23), o `None`.
+
+    Returns:
+        La etiqueta de la franja.
+    """
     if hour_utc is None:
         return UNKNOWN
     start = (hour_utc // 4) * 4
@@ -24,6 +32,14 @@ def hour_bin(hour_utc: int | None) -> str:
 
 
 def atr_bucket(atr_pct: float | None) -> str:
+    """El tramo de volatilidad: `ATR<0.8`, `ATR0.8-1.6` o `ATR>=1.6` (`UNK` si no se conoce).
+
+    Args:
+        atr_pct: ATR como porcentaje del precio, o `None`.
+
+    Returns:
+        La etiqueta del tramo.
+    """
     if atr_pct is None:
         return UNKNOWN
     if atr_pct < 0.8:
@@ -34,6 +50,14 @@ def atr_bucket(atr_pct: float | None) -> str:
 
 
 def rr_bucket(risk_reward: float | None) -> str:
+    """El tramo de razon beneficio/riesgo: `RR<1`, `RR1-2` o `RR>=2` (`UNK` si no se conoce).
+
+    Args:
+        risk_reward: razon beneficio/riesgo, o `None`.
+
+    Returns:
+        La etiqueta del tramo.
+    """
     if risk_reward is None:
         return UNKNOWN
     if risk_reward < 1.0:
@@ -44,6 +68,14 @@ def rr_bucket(risk_reward: float | None) -> str:
 
 
 def risk_bucket(sl_margin_loss_pct: float | None) -> str:
+    """El tramo de riesgo sobre el margen: `SL<20`, `SL20-35` o `SL>=35` (`UNK` si no se conoce).
+
+    Args:
+        sl_margin_loss_pct: riesgo planeado como porcentaje del margen, o `None`.
+
+    Returns:
+        La etiqueta del tramo.
+    """
     if sl_margin_loss_pct is None:
         return UNKNOWN
     if sl_margin_loss_pct < 20.0:
@@ -54,6 +86,14 @@ def risk_bucket(sl_margin_loss_pct: float | None) -> str:
 
 
 def sentiment_bucket(sentiment: float | None) -> str:
+    """El tramo de sentimiento de noticias: `NEG`, `NEU` o `POS` (banda de +-0.15; `UNK` si falta).
+
+    Args:
+        sentiment: sentimiento medio, o `None`.
+
+    Returns:
+        La etiqueta del tramo.
+    """
     if sentiment is None:
         return UNKNOWN
     if sentiment <= -0.15:
@@ -64,6 +104,14 @@ def sentiment_bucket(sentiment: float | None) -> str:
 
 
 def fear_greed_bucket(value: int | None) -> str:
+    """El tramo del Fear & Greed Index: `FEAR` (<= 40), `NEUTRAL` o `GREED` (>= 60).
+
+    Args:
+        value: valor del indice, o `None`.
+
+    Returns:
+        La etiqueta del tramo (`UNK` si no se conoce).
+    """
     if value is None:
         return UNKNOWN
     if value <= 40:
@@ -74,7 +122,16 @@ def fear_greed_bucket(value: int | None) -> str:
 
 
 def risk_reward(entry: float, sl: float | None, tp: float | None) -> float | None:
-    """Razon beneficio/riesgo planeada (distancias al TP y al SL sobre el precio de entrada)."""
+    """Razon beneficio/riesgo planeada: distancia al TP sobre distancia al SL.
+
+    Args:
+        entry: precio de entrada.
+        sl: precio del SL, o `None`.
+        tp: precio del TP, o `None`.
+
+    Returns:
+        La razon, o `None` si falta algun dato o el riesgo es cero.
+    """
     if not entry or sl is None or tp is None:
         return None
     risk = abs(entry - sl) / entry
@@ -83,8 +140,10 @@ def risk_reward(entry: float, sl: float | None, tp: float | None) -> float | Non
 
 @dataclass(frozen=True)
 class QueryFeatures:
-    """Lo que se sabe de una operacion NUEVA al decidir (el equivalente de una `MemoryEntry` sin
-    resultado ni etiqueta)."""
+    """Lo que se sabe de una operacion NUEVA al decidir.
+
+    Es una `MemoryEntry` sin resultado ni etiqueta del LLM.
+    """
 
     symbol: str
     side: str
@@ -99,7 +158,14 @@ class QueryFeatures:
 
 
 def patterns_of(entry: MemoryEntry) -> dict[str, str]:
-    """Patron de una entrada en cada dimension (`UNK` si falta el dato)."""
+    """El patron de una entrada de memoria en cada dimension (`UNK` si falta el dato).
+
+    Args:
+        entry: la entrada.
+
+    Returns:
+        Diccionario `dimension -> patron`.
+    """
     return {
         "strategy_set": entry.strategy_set,
         "side": entry.side,
@@ -117,8 +183,16 @@ def patterns_of(entry: MemoryEntry) -> dict[str, str]:
 
 
 def patterns_of_query(q: QueryFeatures) -> dict[str, str]:
-    """Patron de una operacion NUEVA en las dimensiones que se conocen antes de decidir (sin
-    `llm_label`: es justo lo que se esta por decidir)."""
+    """El patron de una operacion NUEVA en las dimensiones que se conocen antes de decidir.
+
+    No incluye `llm_label`: es justo lo que se esta por decidir.
+
+    Args:
+        q: las caracteristicas de la operacion nueva.
+
+    Returns:
+        Diccionario `dimension -> patron`.
+    """
     strategy_set = "+".join(sorted(q.strategies))
     return {
         "strategy_set": strategy_set,

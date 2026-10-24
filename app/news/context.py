@@ -37,6 +37,13 @@ LIVE_TOLERANCE = timedelta(minutes=5)
 
 @dataclass(frozen=True)
 class NewsContext:
+    """El contexto de noticias para una decision, o el motivo por el que no existe.
+
+    Attributes:
+        status: `OK`, `NO_DATA` o `STALE`.
+        context: el diccionario del contexto (marcado `untrusted_text`), o `None`.
+        reason: explicacion si no hay contexto.
+    """
     status: str
     context: dict | None
     reason: str | None = None
@@ -78,7 +85,31 @@ async def build_news_context(
     db: Database, symbol: str, as_of: datetime, *, window_hours: float = 24.0, max_items: int = 5,
     stale_after_hours: float = 6.0, check_live_health: bool | None = None,
 ) -> NewsContext:
-    """Titulares del activo, del mercado y de la Fed disponibles en `as_of`."""
+    """Titulares del activo, del mercado y de la Fed disponibles en `as_of`, con Fear & Greed.
+
+    Sin mirar al futuro: solo noticias publicadas Y vistas por el bot en o antes de `as_of`.
+    Cada titular se vuelve a sanear y se acota; el bloque va marcado `untrusted_text: true`
+    (el prompt debe tratarlo como dato, jamas como instruccion). Sin titulares recientes el
+    estado es `NO_DATA`; en una llamada "en vivo", con todas las fuentes caidas, `STALE`.
+    Incluye los textos de atribucion de las fuentes de las que salio algo. Hoy solo lo usa
+    el prompt v5 (sin usar).
+
+    Args:
+        db: conexion a la base.
+        symbol: simbolo, p. ej. `BTCUSDT`.
+        as_of: instante de la decision.
+        window_hours: antiguedad maxima de los titulares del activo y del mercado.
+        max_items: titulares por bloque.
+        stale_after_hours: sin exito en este tiempo una fuente cuenta como caida.
+        check_live_health: fuerza o apaga la comprobacion de salud; por defecto solo si
+            `as_of` es "ahora".
+
+    Returns:
+        El `NewsContext`.
+
+    Efectos:
+        Lee `news_items`, `fear_greed` y `data_source_health`.
+    """
     as_of = as_of.replace(tzinfo=UTC) if as_of.tzinfo is None else as_of.astimezone(UTC)
     window = timedelta(hours=window_hours)
     base = base_ticker(symbol)

@@ -43,6 +43,13 @@ def build_news_collector(
 
 
 async def run_isolated(collector: NewsCollector) -> None:
+    """Corre el colector capturando cualquier `Exception` que escape.
+
+    Un bug del colector no se propaga al scheduler, al etiquetado, al brazo ni al monitor.
+
+    Args:
+        collector: el colector.
+    """
     try:
         await collector.run_forever()
     except asyncio.CancelledError:

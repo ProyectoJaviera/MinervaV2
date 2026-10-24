@@ -62,6 +62,10 @@ RAZONAMIENTO_MAX_LENGTH = 300
 
 
 class LlmDecisionOut(BaseModel):
+    """Esquema de la decision del LLM: `decision`, `confianza` (0-1) y `razonamiento` (<= 300).
+
+    `extra="forbid"`: cualquier campo extra es una respuesta invalida.
+    """
     model_config = ConfigDict(extra="forbid")
 
     decision: Literal["APROBAR", "RECHAZAR"]
@@ -71,6 +75,7 @@ class LlmDecisionOut(BaseModel):
 
 @dataclass(frozen=True)
 class ParsedDecision:
+    """Una decision ya validada, y si hubo que repararla (JSON con la comilla final omitida)."""
     decision: LlmDecisionOut
     repaired: bool
 
@@ -104,16 +109,25 @@ def _try_repair_unterminated_razonamiento(raw_text: str) -> LlmDecisionOut | Non
 
 
 def parse_decision(raw_text: str) -> ParsedDecision:
-    """Valida `raw_text` contra `LlmDecisionOut`, truncando `razonamiento` a
-    `RAZONAMIENTO_MAX_LENGTH` ANTES de validar en vez de invalidar toda la
-    decision por un limite de longitud (revision del piloto v1). Si el JSON
-    esta roto, intenta el reparo MUY acotado de la revision del piloto v2
-    (`_try_repair_unterminated_razonamiento`) antes de rendirse. Sigue
-    lanzando (`json.JSONDecodeError` o `pydantic.ValidationError`, ambas
-    capturadas en `decision_service.py` como INVALID) si el JSON esta roto de
-    cualquier otra forma, si no es un objeto, o si `decision`/`confianza`/un
-    campo extra no cumplen el esquema -- la verdadera "respuesta invalida"
-    sigue siendolo."""
+    """Valida la respuesta del modelo contra `LlmDecisionOut`.
+
+    TRUNCA `razonamiento` a 300 caracteres ANTES de validar, en vez de invalidar toda la
+    decision por un limite de longitud (revision del piloto v1). Si el JSON esta roto,
+    intenta el reparo MUY acotado de la revision del piloto v2 (solo la comilla de cierre
+    de `razonamiento` omitida) antes de rendirse; cualquier otro JSON roto sigue siendo
+    invalido.
+
+    Args:
+        raw_text: el texto que devolvio el modelo.
+
+    Returns:
+        La `ParsedDecision`; `repaired` es True si se uso el reparo.
+
+    Raises:
+        json.JSONDecodeError: si el JSON esta roto de forma no reparable.
+        pydantic.ValidationError: si no es un objeto o `decision`, `confianza` o un campo
+            extra no cumplen el esquema.
+    """
     try:
         data = json.loads(raw_text)
     except json.JSONDecodeError:

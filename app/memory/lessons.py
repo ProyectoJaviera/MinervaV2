@@ -34,7 +34,16 @@ NOT_SIGNIFICANT = "NOT_SIGNIFICANT"
 
 
 def wilson_interval(wins: int, n: int, z: float = Z_99) -> tuple[float, float]:
-    """Intervalo de Wilson de una proporcion. (0, 1) si `n` es 0."""
+    """Intervalo de Wilson de una proporcion (por defecto al 99 %, z = 2.576).
+
+    Args:
+        wins: aciertos.
+        n: total.
+        z: cuantil normal.
+
+    Returns:
+        La tupla `(limite inferior, limite superior)`; `(0, 1)` si `n` es 0.
+    """
     if n <= 0:
         return 0.0, 1.0
     p = wins / n
@@ -57,7 +66,20 @@ def _delta(group: list[MemoryEntry], half: list[MemoryEntry]) -> float | None:
 
 
 def build_lessons(entries: list[MemoryEntry], *, min_sample: int) -> list[LessonRow]:
-    """Todas las lecciones (cualquier estado) de una lista de entradas. Puro y determinista."""
+    """Todas las lecciones (cualquier estado) de una lista de entradas. Puro y determinista.
+
+    Una leccion es `ACTIVE` solo con TRES condiciones: muestra minima (si no,
+    `INSUFFICIENT`), un intervalo de Wilson al 99 % que EXCLUYE la tasa base (si no,
+    `NOT_SIGNIFICANT`) y el mismo signo respecto de la tasa base en las dos mitades del
+    tiempo (si no, `UNSTABLE`). Es un filtro contra patrones que son ruido, no una garantia.
+
+    Args:
+        entries: entradas de memoria.
+        min_sample: muestra minima por patron.
+
+    Returns:
+        Las `LessonRow`, por dimension.
+    """
     if not entries:
         return []
     ordered = sorted(entries, key=lambda e: (e.closed_at, e.signal_group_key))
@@ -101,7 +123,19 @@ def build_lessons(entries: list[MemoryEntry], *, min_sample: int) -> list[Lesson
 async def rebuild_lessons(
     db: Database, *, min_sample: int, now: datetime | None = None,
 ) -> tuple[str, list[LessonRow]]:
-    """Reconstruye las lecciones de TODA la memoria y las guarda bajo un `build_id` nuevo."""
+    """Reconstruye las lecciones de TODA la memoria y las guarda bajo un `build_id` nuevo.
+
+    Args:
+        db: conexion a la base.
+        min_sample: muestra minima por patron.
+        now: hora de construccion; por defecto, ahora (UTC).
+
+    Returns:
+        La tupla `(build_id, lecciones)`; no guarda nada si no hay lecciones.
+
+    Efectos:
+        Lee `memory_entries`; escribe `lessons`.
+    """
     now = now or datetime.now(UTC)
     entries = await memory_repo.get_entries_closed_before(db)
     lessons = build_lessons(entries, min_sample=min_sample)

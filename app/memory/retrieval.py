@@ -46,13 +46,24 @@ _WEIGHTS = {
 
 @dataclass(frozen=True)
 class SimilarCase:
+    """Una operacion pasada parecida a la nueva, con su puntaje de parecido."""
     score: float
     entry: MemoryEntry
 
 
 def similarity(query: QueryFeatures, entry: MemoryEntry) -> float | None:
-    """Parecido en [0, 1] entre la operacion nueva y una pasada. `None` si el lado es distinto (un
-    LONG no se compara con un SHORT)."""
+    """Parecido en [0, 1] entre la operacion nueva y una pasada.
+
+    Un dato desconocido en la consulta no puntua; uno desconocido en la entrada cuenta como
+    no coincidencia. Las estrategias pesan mas (Jaccard).
+
+    Args:
+        query: la operacion nueva.
+        entry: la operacion pasada.
+
+    Returns:
+        El parecido, o `None` si el lado es distinto (un LONG no se compara con un SHORT).
+    """
     if query.side != entry.side:
         return None
     total = earned = 0.0
@@ -89,6 +100,7 @@ def similarity(query: QueryFeatures, entry: MemoryEntry) -> float | None:
 
 @dataclass(frozen=True)
 class SimilarResult:
+    """La cohorte de operaciones parecidas, y sus ejemplos ganadores y perdedores."""
     cohort: list[SimilarCase]  # todos los que superan el puntaje minimo
     winners: list[SimilarCase]
     losers: list[SimilarCase]
@@ -102,7 +114,20 @@ def find_similar(
     query: QueryFeatures, entries: list[MemoryEntry], *, as_of: datetime, k: int,
     min_score: float = DEFAULT_MIN_SCORE,
 ) -> SimilarResult:
-    """Entradas parecidas a la consulta, cerradas ESTRICTAMENTE antes de `as_of`."""
+    """Las entradas parecidas a la consulta, cerradas ESTRICTAMENTE antes de `as_of`.
+
+    Lo que aun no habia cerrado no existia para esa decision (sin fuga temporal).
+
+    Args:
+        query: la operacion nueva.
+        entries: entradas de memoria.
+        as_of: instante de la decision.
+        k: ejemplos ganadores y perdedores a devolver.
+        min_score: parecido minimo para entrar en la cohorte.
+
+    Returns:
+        El `SimilarResult`.
+    """
     as_of = _utc(as_of)
     cohort: list[SimilarCase] = []
     for entry in entries:
@@ -132,8 +157,27 @@ async def build_lessons_context(
     db: Database, settings: Settings, *, signal_group_key: str, query: QueryFeatures,
     as_of: datetime, reveal_allowed: bool, record: bool = True,
 ) -> dict | None:
-    """Contexto de lecciones para UNA decision, o `None` si los resultados aun estan ocultos o la
-    memoria esta vacia. Es contexto estadistico PASADO: no garantiza nada."""
+    """Contexto de lecciones para UNA decision, o `None` si los resultados aun estan ocultos.
+
+    Es contexto estadistico PASADO: no garantiza nada. Las estadisticas de la cohorte se
+    entregan solo con `n >= LESSONS_MIN_SAMPLE`; con menos, evidencia `BAJA` y solo el
+    conteo. Los ejemplos van marcados como anecdoticos. Registra que lecciones se aplicaron.
+
+    Args:
+        db: conexion a la base.
+        settings: configuracion.
+        signal_group_key: clave de la decision.
+        query: la operacion nueva.
+        as_of: instante de la decision.
+        reveal_allowed: si los resultados son visibles; si no, devuelve `None`.
+        record: si es True, registra la aplicacion en `lesson_applications`.
+
+    Returns:
+        El diccionario de contexto, o `None` (resultados ocultos o memoria vacia).
+
+    Efectos:
+        Lee `memory_entries` y `lessons`; con `record`, escribe `lesson_applications`.
+    """
     if not reveal_allowed:
         return None
     as_of = _utc(as_of)

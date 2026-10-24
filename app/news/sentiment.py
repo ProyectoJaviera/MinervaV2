@@ -52,7 +52,18 @@ _WORDS: dict[str, float] = {
 
 
 def score_headline(title: str) -> float:
-    """Puntaje en [-1, 1] del titular (0.0 si no hay ninguna palabra del lexico)."""
+    """Puntaje de sentimiento de un titular, en [-1, 1], con el lexico `LEXICON_V1`.
+
+    Determinista y sin costo: suma los pesos de frases y palabras, invierte el signo si hay
+    una negacion en las tres palabras previas y satura suavemente. No entiende contexto ni
+    ironia.
+
+    Args:
+        title: titular.
+
+    Returns:
+        El puntaje (0.0 si no hay ninguna palabra del lexico).
+    """
     text = title.lower()
     total = 0.0
     for phrase, weight in _PHRASES.items():
@@ -73,7 +84,14 @@ def score_headline(title: str) -> float:
 
 
 def label(score: float | None) -> str | None:
-    """`POSITIVE` / `NEGATIVE` / `NEUTRAL` (None si no hay puntaje)."""
+    """Etiqueta de un puntaje: `POSITIVE`, `NEGATIVE` o `NEUTRAL` (banda de +-0.15).
+
+    Args:
+        score: puntaje, o `None`.
+
+    Returns:
+        La etiqueta, o `None` si no hay puntaje.
+    """
     if score is None:
         return None
     if score >= NEUTRAL_BAND:

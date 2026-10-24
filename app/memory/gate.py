@@ -14,7 +14,20 @@ HIDDEN_RESULTS = "ocultos hasta el registro oficial del veredicto (regla del 202
 
 
 async def results_visible(db: Database) -> bool:
-    """Falla CERRADO: ante cualquier error al evaluar la puerta, los resultados siguen ocultos."""
+    """Dice si se pueden mostrar resultados de la memoria. FALLA CERRADO.
+
+    Es `is_outcome_reveal_allowed`: gate de la medicion abierto Y registro oficial del
+    veredicto. Ante cualquier error al evaluarla, los resultados siguen ocultos.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        True solo si se pueden mostrar.
+
+    Efectos:
+        Lee `llm_logs`, `shadow_trades`, `signals` y `docs/` (no PnL).
+    """
     try:
         return is_outcome_reveal_allowed(await compute_status_async(db))
     except Exception as exc:  # noqa: BLE001 - ante la duda, no se muestra nada

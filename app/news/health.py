@@ -13,6 +13,22 @@ from app.persistence.repositories import health_repo, news_repo
 
 
 async def news_health_block(db: Database, settings: Settings, *, active: bool) -> dict:
+    """El bloque `news` de `GET /health`: interruptor, salud por fuente y titulares de 24 h.
+
+    Solo lectura; nunca resultados de operaciones. Las noticias NO son un dato critico: una
+    fuente caida no bloquea nada.
+
+    Args:
+        db: conexion a la base.
+        settings: configuracion.
+        active: si el colector quedo armado en este proceso.
+
+    Returns:
+        Diccionario con `enabled`, `active`, `sources`, `items_24h` y `attribution`.
+
+    Efectos:
+        Lee `data_source_health` y `news_items`.
+    """
     enabled = settings.news_collection_enabled
     block: dict = {
         "enabled": enabled, "active": active, "sources": {}, "items_24h": 0,

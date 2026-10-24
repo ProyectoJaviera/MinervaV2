@@ -34,6 +34,7 @@ class RateLimitedError(RuntimeError):
 
 @dataclass(frozen=True)
 class ParsedItem:
+    """Un titular ya extraido de una fuente, antes de limpiarlo y guardarlo."""
     title: str
     url: str
     published_at: datetime | None = None
@@ -44,6 +45,7 @@ class ParsedItem:
 
 @dataclass(frozen=True)
 class FearGreedPoint:
+    """Un valor diario del Fear & Greed Index: instante, valor 0-100 y clasificacion."""
     ts: datetime
     value: int
     classification: str | None
@@ -53,7 +55,14 @@ _RATE_LIMIT_RE = re.compile(r"limit requests|rate limit|too many requests", re.I
 
 
 def parse_gdelt_datetime(value: object) -> datetime | None:
-    """`seendate` de GDELT: `20261017T130000Z` (UTC). Tambien acepta ISO 8601."""
+    """`seendate` de GDELT (`20261017T130000Z`, UTC); tambien acepta ISO 8601.
+
+    Args:
+        value: el valor crudo.
+
+    Returns:
+        El instante UTC, o `None` si no es un texto con fecha valida.
+    """
     if not isinstance(value, str) or not value:
         return None
     for fmt in ("%Y%m%dT%H%M%SZ", "%Y%m%d%H%M%S"):
@@ -69,9 +78,22 @@ def parse_gdelt_datetime(value: object) -> datetime | None:
 
 
 def parse_gdelt(text: str) -> list[ParsedItem]:
-    """Articulos de una respuesta `artlist`. `{}` o vacio = sin resultados (lista vacia). Texto
-    de limite de peticiones -> `RateLimitedError`. Cualquier otra cosa que no sea JSON ->
-    `ValueError`."""
+    """Articulos de una respuesta `artlist` de GDELT.
+
+    Defensivo: un campo ausente o de otro tipo se omite y un elemento malo no tumba al
+    resto. El formato real de los articulos NO se pudo verificar desde este equipo (la
+    API respondio 429): se sigue la documentacion.
+
+    Args:
+        text: cuerpo de la respuesta.
+
+    Returns:
+        Los `ParsedItem` (lista vacia si la respuesta es `{}` o esta vacia).
+
+    Raises:
+        RateLimitedError: si el texto es el aviso de limite de peticiones.
+        ValueError: si el cuerpo no es JSON.
+    """
     body = (text or "").strip().lstrip(BOM)
     if not body:
         return []
@@ -130,7 +152,21 @@ def _parse_rss_date(value: str | None) -> datetime | None:
 
 
 def parse_rss(data: bytes | str) -> list[ParsedItem]:
-    """Items de un RSS 2.0 (`channel/item`) o Atom (`entry`). Sin DTD ni entidades; tolera BOM."""
+    """Items de un RSS 2.0 (`channel/item`) o Atom (`entry`).
+
+    Rechaza cualquier DTD o entidad (ataques de expansion de entidades) antes de parsear y
+    tolera el BOM que antepone la Fed.
+
+    Args:
+        data: el XML, como bytes o texto.
+
+    Returns:
+        Los `ParsedItem` con titulo y enlace.
+
+    Raises:
+        UnsafeXmlError: si el XML trae una DTD o entidades.
+        ValueError: si el XML esta mal formado.
+    """
     raw = data.encode("utf-8") if isinstance(data, str) else data
     text = raw.decode("utf-8-sig", errors="replace")
     upper = text.upper()
@@ -165,7 +201,17 @@ def parse_rss(data: bytes | str) -> list[ParsedItem]:
 
 
 def parse_fear_greed(text: str) -> list[FearGreedPoint]:
-    """Puntos del Fear & Greed Index (el mas reciente primero). Fuera de 0-100 se descartan."""
+    """Puntos del Fear & Greed Index, el mas reciente primero.
+
+    Args:
+        text: cuerpo JSON de alternative.me.
+
+    Returns:
+        Los `FearGreedPoint`; los valores fuera de 0-100 se descartan.
+
+    Raises:
+        ValueError: si el cuerpo no es JSON.
+    """
     try:
         payload = json.loads((text or "").strip().lstrip(BOM))
     except json.JSONDecodeError as exc:

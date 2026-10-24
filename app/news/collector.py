@@ -52,19 +52,43 @@ GDELT_TIMESPAN = "3h"
 
 
 class SourceRateLimited(RuntimeError):
+    """La fuente respondio 429 (demasiadas peticiones).
+
+    Attributes:
+        retry_after_s: espera pedida por la fuente (`Retry-After`), si la indico.
+    """
     def __init__(self, message: str, retry_after_s: float | None = None) -> None:
         super().__init__(message)
         self.retry_after_s = retry_after_s
 
 
 def backoff_seconds(consecutive_failures: int, retry_after_s: float | None = None) -> float:
-    """5 min x 2^(k-1) hasta 6 h; si la fuente pide esperar mas (`Retry-After`), eso."""
+    """Espera tras un fallo: 5 minutos por 2^(k-1), con tope de 6 horas.
+
+    Si la fuente pide esperar mas (`Retry-After`), esa espera (tambien con tope de 6 h).
+
+    Args:
+        consecutive_failures: fallos seguidos de la fuente (minimo 1).
+        retry_after_s: espera pedida por la fuente, o `None`.
+
+    Returns:
+        Los segundos a esperar.
+    """
     k = max(1, consecutive_failures)
     seconds = min(BACKOFF_BASE_S * 2 ** (k - 1), BACKOFF_CAP_S)
     return max(seconds, min(retry_after_s or 0.0, BACKOFF_CAP_S))
 
 
 class NewsCollector:
+    """El colector de noticias: una tarea propia, fuente por fuente, aislada y sin costo.
+
+    Para cada fuente habilitada respeta su intervalo minimo, pide con GET condicional donde
+    se puede, guarda titulares limpios, deduplicados y etiquetados (activo y sentimiento
+    deterministas) y registra su salud. Cada fuente corre en su propio `try/except` y con
+    un timeout duro de 600 s: una fuente caida no afecta a las demas ni al bot. Tras un
+    fallo la fuente espera un backoff exponencial; mientras tanto el contexto de noticias
+    simplemente envejece. No importa nada del nucleo de la medicion ni la API de Anthropic.
+    """
     def __init__(
         self, db: Database, settings: Settings, fetcher: HttpFetcher,
         *, clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -83,15 +107,32 @@ class NewsCollector:
         self._recent: list[tuple[int, frozenset[str], datetime]] = []
 
     def stop(self) -> None:
+        """Pide que `run_forever` termine despues de su espera actual."""
         self._stop.set()
 
     async def aclose(self) -> None:
+        """Cierra el cliente HTTP del colector.
+
+        Efectos:
+            Cierra las conexiones de red.
+        """
         await self.fetcher.aclose()
 
     # --- ciclo ------------------------------------------------
 
     async def run_once(self) -> dict[str, str]:
-        """Un ciclo sobre las fuentes habilitadas. Nunca lanza (salvo cancelacion)."""
+        """Un ciclo sobre las fuentes habilitadas. Nunca lanza (salvo cancelacion).
+
+        Las fuentes con `next_allowed_at` en el futuro se aplazan. Al final poda los titulares
+        mas viejos que `NEWS_RETENTION_DAYS` (como mucho una vez al dia).
+
+        Returns:
+            El resultado por fuente: un resumen, `aplazada` o `error: ...`.
+
+        Efectos:
+            Lee y escribe `news_fetch_state`, `data_source_health`, `news_items` (y `fear_greed`);
+            lee `asset_universe`. Red: GDELT, Federal Reserve y alternative.me.
+        """
         now = self._clock()
         results: dict[str, str] = {}
         await self._load_recent(now)
@@ -112,8 +153,18 @@ class NewsCollector:
         return results
 
     async def run_forever(self, tick_seconds: float = 60.0, startup_delay_s: float = 60.0) -> None:
-        """Espera `startup_delay_s` (no compite con el arranque del bot) y revisa cada
-        `tick_seconds` que fuentes estan vencidas."""
+        """Espera `startup_delay_s` y despues revisa cada `tick_seconds` que fuentes estan vencidas.
+
+        La espera inicial evita competir con el arranque del bot. Un error inesperado se
+        registra y el bucle sigue.
+
+        Args:
+            tick_seconds: segundos entre revisiones.
+            startup_delay_s: espera antes del primer ciclo.
+
+        Efectos:
+            Ver `run_once`.
+        """
         try:
             await asyncio.wait_for(self._stop.wait(), timeout=startup_delay_s)
             return

@@ -24,6 +24,16 @@ logger = get_logger(__name__)
 
 
 class LessonsRunner:
+    """Tarea aislada que mantiene la memoria de lecciones, cada `LESSONS_REBUILD_HOURS`.
+
+    Agrega las operaciones cerradas nuevas, reconstruye las lecciones, guarda un post-mortem
+    si hay una racha perdedora y la tabla de calibracion. LEE resultados para aprender, pero
+    solo ESCRIBE en las tablas de memoria. Apagada por defecto y NO se activa en ningun
+    puerto durante la medicion.
+
+    Attributes:
+        last_run_at: hora de la ultima pasada completa, o `None`.
+    """
     def __init__(self, db: Database, settings: Settings) -> None:
         self.db = db
         self.settings = settings
@@ -31,9 +41,22 @@ class LessonsRunner:
         self.last_run_at: datetime | None = None
 
     def stop(self) -> None:
+        """Pide que `run_forever` termine despues de su espera actual."""
         self._stop.set()
 
     async def run_once(self, now: datetime | None = None) -> dict:
+        """Una pasada completa: entradas, lecciones, post-mortem y calibracion.
+
+        Args:
+            now: hora de la pasada; por defecto, ahora (UTC).
+
+        Returns:
+            Resumen con las entradas agregadas, el `build_id`, las lecciones y las activas.
+
+        Efectos:
+            Lee `shadow_trades`, `trades`, `llm_logs`, `news_items`; escribe `memory_entries`,
+            `lessons` y `lessons_reports`.
+        """
         now = now or datetime.now(UTC)
         added = await refresh_entries(self.db, now=now)
         build_id, lessons = await rebuild_lessons(
@@ -51,6 +74,14 @@ class LessonsRunner:
         }
 
     async def run_forever(self, startup_delay_s: float = 300.0) -> None:
+        """Espera el arranque y repite `run_once` cada `LESSONS_REBUILD_HOURS` hasta `stop()`.
+
+        Args:
+            startup_delay_s: espera inicial, para no competir con el arranque del bot.
+
+        Efectos:
+            Ver `run_once`. Un error inesperado se registra y el bucle sigue.
+        """
         try:
             await asyncio.wait_for(self._stop.wait(), timeout=startup_delay_s)
             return
@@ -86,6 +117,11 @@ def build_lessons_runner(settings: Settings, db: Database) -> LessonsRunner | No
 
 
 async def run_isolated(runner: LessonsRunner) -> None:
+    """Corre la memoria capturando cualquier `Exception` que escape.
+
+    Args:
+        runner: el ejecutor.
+    """
     try:
         await runner.run_forever()
     except asyncio.CancelledError:
@@ -98,6 +134,21 @@ async def run_isolated(runner: LessonsRunner) -> None:
 def maybe_start_lessons_runner(
     settings: Settings, db: Database, tasks: list[asyncio.Task],
 ) -> LessonsRunner | None:
+    """Si corresponde, crea la tarea de la memoria y la agrega a `tasks`.
+
+    Asi el cierre ordenado del `lifespan` la cancela igual que a las demas. Nunca lanza.
+
+    Args:
+        settings: configuracion (`LESSONS_MEMORY_ENABLED`).
+        db: conexion a la base.
+        tasks: lista de tareas del `lifespan`.
+
+    Returns:
+        El ejecutor, o `None` si esta desactivada.
+
+    Efectos:
+        Crea una tarea asyncio y agrega una entrada al log.
+    """
     runner = build_lessons_runner(settings, db)
     if runner is None:
         return None

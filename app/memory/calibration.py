@@ -23,7 +23,14 @@ BUCKETS = (
 
 
 def confidence_of(response_raw: str | None) -> float | None:
-    """`confianza` del JSON de la respuesta, o `None` si no se puede leer (nunca lanza)."""
+    """La `confianza` del JSON de la respuesta del LLM. Nunca lanza.
+
+    Args:
+        response_raw: el texto crudo guardado en `llm_logs.response_raw`.
+
+    Returns:
+        La confianza entre 0 y 1, o `None` si no se puede leer.
+    """
     if not response_raw:
         return None
     try:
@@ -36,6 +43,21 @@ def confidence_of(response_raw: str | None) -> float | None:
 
 
 async def calibration_table(db: Database) -> dict:
+    """Calibracion de la confianza del LLM: cuantas decisiones de cada tramo terminaron ganando.
+
+    Une `llm_logs` con `memory_entries` y reparte por tramos de confianza, por separado para
+    APROBAR y RECHAZAR, con el intervalo de Wilson al 99 %. Es INFORMATIVA: no recalibra
+    ningun umbral. Lleva tasas de acierto, asi que se muestra solo con el registro oficial.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        Diccionario con `rows`, `unreadable_confidence`, `table` y una nota.
+
+    Efectos:
+        Lee `llm_logs` y `memory_entries` (incluidos resultados).
+    """
     rows = await db.fetch_all(
         """
         SELECT l.decision AS decision, l.response_raw AS raw, m.outcome AS outcome,
@@ -71,6 +93,18 @@ async def calibration_table(db: Database) -> dict:
 
 
 async def save_calibration(db: Database, *, now: datetime | None = None) -> bool:
+    """Guarda la tabla de calibracion como informe, una vez por cantidad de entradas.
+
+    Args:
+        db: conexion a la base.
+        now: hora del informe; por defecto, ahora (UTC).
+
+    Returns:
+        True si se guardo; False si ya habia un informe con la misma clave (`entries:<n>`).
+
+    Efectos:
+        Lee `llm_logs`, `memory_entries`; escribe `lessons_reports`.
+    """
     body = await calibration_table(db)
     total = await memory_repo.count_entries(db)
     return await memory_repo.save_report(

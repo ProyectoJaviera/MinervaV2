@@ -18,6 +18,17 @@ FEAR_GREED = "fear_greed"
 
 @dataclass(frozen=True)
 class NewsSource:
+    """Una fuente de noticias integrada y verificada en su documentacion oficial.
+
+    Attributes:
+        id: identificador (`gdelt`, `fed_monetary`, `fear_greed`).
+        label: nombre legible.
+        kind: `headlines` o `market`.
+        url: direccion de consulta.
+        min_interval_s: intervalo MINIMO entre consultas completas.
+        attribution: texto de atribucion que debe verse junto a cualquier muestra de sus datos.
+        request_gap_s: espera entre dos peticiones de un mismo ciclo (GDELT: una cada 5 s).
+    """
     id: str
     label: str
     kind: str  # "headlines" | "market"
@@ -31,6 +42,7 @@ class NewsSource:
 
     @property
     def health_key(self) -> str:
+        """La clave de esta fuente en `data_source_health`: `news:<id>`."""
         return f"news:{self.id}"
 
 
@@ -69,5 +81,13 @@ def enabled_sources(ids: list[str]) -> list[NewsSource]:
 
 
 def attribution_lines(ids: list[str] | None = None) -> list[str]:
+    """Los textos de atribucion de las fuentes pedidas (o de todas).
+
+    Args:
+        ids: ids de fuente, o `None` para todas.
+
+    Returns:
+        Lista de textos de atribucion.
+    """
     sources = list(SOURCES.values()) if ids is None else enabled_sources(ids)
     return [s.attribution for s in sources]

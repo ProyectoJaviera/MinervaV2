@@ -34,6 +34,15 @@ class ResponseTooLargeError(FetchError):
 
 @dataclass(frozen=True)
 class FetchResult:
+    """Resultado de una peticion HTTP a una fuente de noticias.
+
+    Attributes:
+        status: codigo HTTP.
+        content: cuerpo (acotado a `max_bytes`; en errores, a 4096 bytes).
+        etag: cabecera `ETag`, si vino.
+        last_modified: cabecera `Last-Modified`, si vino.
+        retry_after_s: espera pedida por `Retry-After`, si vino.
+    """
     status: int
     content: bytes = b""
     etag: str | None = None
@@ -42,23 +51,35 @@ class FetchResult:
 
     @property
     def text(self) -> str:
+        """El cuerpo como texto UTF-8 (tolera BOM)."""
         return self.content.decode("utf-8-sig", errors="replace")
 
     @property
     def not_modified(self) -> bool:
+        """True si la fuente respondio 304 (sin cambios)."""
         return self.status == 304
 
     @property
     def rate_limited(self) -> bool:
+        """True si la fuente respondio 429."""
         return self.status == 429
 
     @property
     def ok(self) -> bool:
+        """True si la fuente respondio 200."""
         return self.status == 200
 
 
 def parse_retry_after(value: str | None, now: datetime | None = None) -> float | None:
-    """`Retry-After` en segundos o como fecha HTTP. `None` si falta o no se entiende."""
+    """Interpreta `Retry-After`, en segundos o como fecha HTTP.
+
+    Args:
+        value: valor de la cabecera, o `None`.
+        now: instante de referencia para una fecha; por defecto, ahora (UTC).
+
+    Returns:
+        Los segundos de espera, o `None` si falta o no se entiende.
+    """
     if not value:
         return None
     value = value.strip()
@@ -74,6 +95,14 @@ def parse_retry_after(value: str | None, now: datetime | None = None) -> float |
 
 
 class HttpFetcher:
+    """Cliente HTTP de las fuentes de noticias, cuidadoso y acotado.
+
+    GET condicional (ETag y Last-Modified), User-Agent propio, tope de tamano de respuesta,
+    timeout duro, reintentos con backoff exponencial y jitter para fallos de red y 5xx, y
+    respeto de `Retry-After` en un 429 (que NO se reintenta dentro de la llamada: lo
+    gestiona el colector con un enfriamiento). No sigue redirecciones. Se construye con
+    `app/core/http.py`.
+    """
     def __init__(
         self, *, user_agent: str, max_bytes: int = 2_000_000, timeout: float = 15.0,
         max_retries: int = 2, transport: httpx.AsyncBaseTransport | None = None,
@@ -95,6 +124,11 @@ class HttpFetcher:
         return build_async_http_client(timeout=self.timeout)
 
     async def aclose(self) -> None:
+        """Cierra el cliente HTTP, sin esperar mas de 5 segundos.
+
+        Efectos:
+            Cierra las conexiones de red.
+        """
         try:
             await asyncio.wait_for(self._client.aclose(), timeout=5.0)
         except Exception:  # noqa: BLE001, S110 - cierre best-effort
@@ -104,6 +138,24 @@ class HttpFetcher:
         self, url: str, *, params: dict | None = None, etag: str | None = None,
         last_modified: str | None = None,
     ) -> FetchResult:
+        """Hace un GET (condicional si se dan `etag` o `last_modified`).
+
+        Args:
+            url: direccion.
+            params: parametros de consulta.
+            etag: valor para `If-None-Match`.
+            last_modified: valor para `If-Modified-Since`.
+
+        Returns:
+            El `FetchResult`; un 429 o un 4xx se devuelven, no se lanzan.
+
+        Raises:
+            ResponseTooLargeError: si la respuesta supera `max_bytes`.
+            FetchError: tras agotar los reintentos por red, timeout o 5xx.
+
+        Efectos:
+            Red: GET a la fuente.
+        """
         headers = {"User-Agent": self.user_agent, "Accept": "*/*"}
         if etag:
             headers["If-None-Match"] = etag

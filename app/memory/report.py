@@ -22,6 +22,24 @@ def _pct(value: float | None) -> str:
 async def build_report_text(
     db: Database, settings: Settings, *, now: datetime | None = None,
 ) -> str:
+    """Informe de la memoria de lecciones en texto. Lleva tasas de acierto y retornos.
+
+    SOLO se llama con los resultados visibles (`results_visible`); `scripts/lessons_report.py`
+    comprueba la puerta antes de abrir la base para escribir. Antes actualiza entradas,
+    lecciones y post-mortem.
+
+    Args:
+        db: conexion a la base.
+        settings: configuracion.
+        now: hora del informe; por defecto, ahora (UTC).
+
+    Returns:
+        El texto del informe.
+
+    Efectos:
+        Lee `shadow_trades`, `trades`, `llm_logs`; escribe `memory_entries`, `lessons` y
+        `lessons_reports`.
+    """
     now = now or datetime.now(UTC)
     added = await refresh_entries(db, now=now)
     build_id, lessons = await rebuild_lessons(db, min_sample=settings.lessons_min_sample, now=now)

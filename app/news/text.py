@@ -29,9 +29,18 @@ _STOPWORDS = frozenset(
 
 
 def sanitize_headline(raw: str | None, max_chars: int = MAX_TITLE_CHARS) -> str:
-    """Titular limpio: entidades HTML resueltas, etiquetas fuera, sin caracteres de control ni de
-    formato (incluidos los de ancho cero y los controles bidireccionales), espacios colapsados y
-    longitud acotada. Devuelve "" si no queda nada."""
+    """Titular limpio: sin etiquetas HTML ni caracteres de control o de formato.
+
+    Resuelve entidades HTML, quita los caracteres de ancho cero y los controles
+    bidireccionales, colapsa espacios y acota la longitud. Limpiar NO lo vuelve confiable.
+
+    Args:
+        raw: titular crudo, o `None`.
+        max_chars: longitud maxima (se recorta con `...`).
+
+    Returns:
+        El titular limpio, o `""` si no queda nada.
+    """
     if not raw:
         return ""
     text = html.unescape(str(raw))
@@ -49,9 +58,18 @@ def sanitize_headline(raw: str | None, max_chars: int = MAX_TITLE_CHARS) -> str:
 
 
 def canonical_url(url: str | None) -> str | None:
-    """URL canonica para deduplicar: solo http/https, host en minusculas, sin fragmento, sin puerto
-    por defecto, sin parametros de seguimiento, parametros restantes ordenados y sin barra final.
-    `None` si no es una URL http(s) valida."""
+    """URL canonica para deduplicar.
+
+    Solo http o https, host en minusculas, sin fragmento, sin puerto por defecto, sin
+    parametros de seguimiento (`utm_*`, `fbclid`, ...), parametros restantes ordenados y
+    sin barra final.
+
+    Args:
+        url: URL cruda.
+
+    Returns:
+        La URL canonica, o `None` si no es una URL http(s) valida.
+    """
     if not url:
         return None
     try:
@@ -73,6 +91,14 @@ def canonical_url(url: str | None) -> str | None:
 
 
 def domain_of(url: str | None) -> str | None:
+    """El dominio de una URL, sin `www.`.
+
+    Args:
+        url: URL cruda.
+
+    Returns:
+        El dominio, o `None` si la URL no es valida.
+    """
     canonical = canonical_url(url)
     if canonical is None:
         return None
@@ -81,23 +107,54 @@ def domain_of(url: str | None) -> str | None:
 
 
 def url_hash(canonical: str) -> str:
+    """SHA-256 de una URL canonica (la clave unica de `news_items.url_hash`).
+
+    Args:
+        canonical: URL canonica.
+
+    Returns:
+        El hash en hexadecimal.
+    """
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def title_tokens(title: str) -> frozenset[str]:
-    """Tokens en minusculas (sin acentos ni palabras vacias) para comparar titulares."""
+    """Tokens en minusculas, sin acentos ni palabras vacias, para comparar titulares.
+
+    Args:
+        title: titular.
+
+    Returns:
+        Conjunto de tokens de mas de 2 caracteres.
+    """
     folded = unicodedata.normalize("NFKD", title.lower())
     folded = "".join(c for c in folded if not unicodedata.combining(c))
     return frozenset(t for t in _TOKEN_RE.findall(folded) if len(t) > 2 and t not in _STOPWORDS)
 
 
 def title_hash(title: str) -> str:
-    """Hash estable de un titular normalizado (mayusculas, signos y espacios no cuentan)."""
+    """Hash estable de un titular normalizado: mayusculas, signos y espacios no cuentan.
+
+    Args:
+        title: titular.
+
+    Returns:
+        El SHA-256 en hexadecimal.
+    """
     normalized = " ".join(sorted(title_tokens(title))) or title.lower().strip()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def jaccard(a: frozenset[str], b: frozenset[str]) -> float:
+    """Similitud de Jaccard entre dos conjuntos de tokens.
+
+    Args:
+        a: primer conjunto.
+        b: segundo conjunto.
+
+    Returns:
+        Un valor entre 0 y 1 (0 si alguno esta vacio).
+    """
     if not a or not b:
         return 0.0
     return len(a & b) / len(a | b)
@@ -106,8 +163,19 @@ def jaccard(a: frozenset[str], b: frozenset[str]) -> float:
 def find_near_duplicate(
     tokens: frozenset[str], candidates: list[tuple[int, frozenset[str]]], threshold: float = 0.8,
 ) -> int | None:
-    """Id del candidato mas parecido con Jaccard >= `threshold`, o `None`. Con menos de 4 tokens no
-    se declara casi duplicado (un titular de 2-3 palabras coincide por azar)."""
+    """Id del candidato mas parecido con Jaccard >= `threshold`.
+
+    Con menos de 4 tokens no se declara casi duplicado: un titular de 2 o 3 palabras
+    coincide por azar.
+
+    Args:
+        tokens: tokens del titular nuevo.
+        candidates: pares `(id, tokens)` de titulares recientes.
+        threshold: umbral de similitud.
+
+    Returns:
+        El id del original, o `None`.
+    """
     if len(tokens) < 4:
         return None
     best_id, best = None, threshold

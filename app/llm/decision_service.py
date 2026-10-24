@@ -41,7 +41,16 @@ MEDICION = "MEDICION"
 
 
 def estimate_cost_usd(input_tokens: int, output_tokens: int, settings: Settings) -> float:
-    """Coste en USD con los precios configurados (seccion e)."""
+    """Costo en USD de una llamada con los precios configurados.
+
+    Args:
+        input_tokens: tokens de entrada.
+        output_tokens: tokens de salida.
+        settings: configuracion (precios por millon de tokens).
+
+    Returns:
+        El costo en USD.
+    """
     return (
         input_tokens * settings.llm_price_input_per_mtok / 1_000_000
         + output_tokens * settings.llm_price_output_per_mtok / 1_000_000
@@ -49,15 +58,34 @@ def estimate_cost_usd(input_tokens: int, output_tokens: int, settings: Settings)
 
 
 def real_open_allowed(label: str, decision_delay_s: float, settings: Settings) -> bool:
-    """Regla de apertura de la cuenta real (seccion g): solo con APROBADA y si la
-    decision llego a tiempo. Desde la subfase 3.9 la aplica el brazo ejecutado de la
-    cuenta PAPER (`app.trading.paper_execution`), que se entera de cada decision despues
-    de que `decide_group` la persistio; este servicio sigue sin abrir nada."""
+    """Regla de apertura en la cuenta paper: solo con APROBADA y si la decision llego a tiempo.
+
+    La aplica el brazo ejecutado (`app.trading.paper_execution`) despues de que
+    `decide_group` ya persistio la etiqueta; este servicio no abre nada.
+
+    Args:
+        label: etiqueta de la sombra (`APROBADA`, `RECHAZADA` o `SIN_LLM`).
+        decision_delay_s: segundos entre el cierre de la vela y la decision.
+        settings: configuracion (`LLM_REAL_MAX_DELAY_SECONDS`, 60 s por defecto).
+
+    Returns:
+        True si la etiqueta es `APROBADA` y el retraso no supera el limite.
+    """
     return label == "APROBADA" and decision_delay_s <= settings.llm_real_max_delay_seconds
 
 
 @dataclass(frozen=True)
 class LlmDecisionResult:
+    """Resultado de una decision del LLM sobre un grupo.
+
+    Attributes:
+        status: `OK`, `TIMEOUT`, `ERROR_HTTP`, `INVALID` o `BUDGET_EXCEEDED`.
+        label: `APROBADA`, `RECHAZADA` o `SIN_LLM` (todo fallo deja `SIN_LLM`, jamas
+            `RECHAZADA`).
+        decision_delay_s: segundos entre el cierre de la vela y la decision.
+        log_id: id de la fila de `llm_logs`.
+        error: texto del fallo, si lo hubo.
+    """
     status: str
     label: str  # "APROBADA" | "RECHAZADA" | "SIN_LLM"
     decision_delay_s: float
@@ -66,6 +94,18 @@ class LlmDecisionResult:
 
 
 class LlmDecisionService:
+    """Servicio de decision: junta el cliente del LLM, `llm_logs`, el presupuesto y un semaforo.
+
+    Por cada grupo hace UNA llamada (sin reintentos), valida la respuesta con el esquema
+    pydantic, guarda SIEMPRE una fila en `llm_logs` y, si la decision es valida, escribe la
+    etiqueta en `shadow_trades` (una sola vez, inmutable). Reserva el costo maximo antes de
+    llamar (presupuesto diario global) y limita la concurrencia con
+    `LLM_MAX_CONCURRENCY`. Nunca abre ni cierra posiciones. El cliente real se construye
+    de forma diferida con `client_factory`.
+
+    Attributes:
+        fase: `MEDICION` o `PILOTO`; se guarda en cada fila de `llm_logs`.
+    """
     def __init__(
         self,
         db: Database,
@@ -101,6 +141,35 @@ class LlmDecisionService:
         atr_pct: float | None = None,
         now: datetime | None = None,
     ) -> LlmDecisionResult:
+        """Pide al LLM la decision de un grupo, la registra y etiqueta la sombra.
+
+        Un fallo de red, un timeout, un JSON invalido o el presupuesto agotado dejan la sombra
+        en `SIN_LLM` (con su fila de `llm_logs` y el estado correspondiente). El
+        `prompt_sha256` se recalcula aqui con la misma formula que
+        `app.llm.prompts.PROMPT_SHA256`, porque el llamador puede pasar otro texto (pruebas).
+        Una fila duplicada para el mismo grupo hace fallar el INSERT (`signal_group_key` es
+        UNICA).
+
+        Args:
+            signal_group_key: clave de la senal agrupada.
+            shadow_trade_id: sombra a etiquetar, o `None` (solo se registra la fila).
+            candle_close_time: cierre de la vela evaluada.
+            system_prompt: texto del sistema.
+            prompt_version: version legible del prompt.
+            user_message: mensaje de usuario (JSON de las features).
+            estimated_input_tokens: estimacion de tokens de entrada (para reservar presupuesto).
+            features_version: version del mensaje de features.
+            atr_pct: ATR en porcentaje, si el llamador lo tiene (el etiquetador en vivo no
+                lo pasa).
+            now: instante de referencia; por defecto, ahora (UTC).
+
+        Returns:
+            El `LlmDecisionResult`.
+
+        Efectos:
+            Lee `llm_logs` (gasto del dia). Red: API de Anthropic. Escribe `llm_logs` (siempre
+            una fila) y `shadow_trades.llm_decision` (solo con decision valida).
+        """
         now = now or datetime.now(UTC)
         decision_delay_s = (now - candle_close_time).total_seconds()
         hour_utc = candle_close_time.astimezone(UTC).hour

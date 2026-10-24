@@ -33,7 +33,17 @@ ORDER BY closed_at, id
 
 
 async def count_closed_reliable(db: Database) -> int:
-    """Cuantas operaciones cerradas y fiables hay en total (solo un conteo: no lee PnL)."""
+    """Cuantas sombras cerradas y fiables hay en total. Solo un conteo: no lee PnL.
+
+    Args:
+        db: conexion a la base.
+
+    Returns:
+        El numero de sombras cerradas con PnL, sin reconciliacion fallida.
+
+    Efectos:
+        Lee `shadow_trades`.
+    """
     row = await db.fetch_one(
         "SELECT COUNT(*) AS n FROM shadow_trades WHERE status = 'CLOSED' "
         "AND pnl_net_usdt IS NOT NULL AND reconciliation_failed = 0 "
@@ -43,10 +53,17 @@ async def count_closed_reliable(db: Database) -> int:
 
 
 def atr_from_log(row) -> float | None:
-    """ATR(14) % que vio el modelo al decidir: la columna `llm_logs.atr_pct` si esta y, si no, el
-    `volatility_atr14_pct` del mensaje guardado en `prompt` (el etiquetador en vivo no rellena la
-    columna; ver `app/persistence/llm_log_fields.py`, compartido con el informe del veredicto).
-    Sin fila de log, o con un prompt ilegible, es `None` (nunca se inventa)."""
+    """El ATR(14) % que vio el modelo al decidir.
+
+    Es la columna `llm_logs.atr_pct` si esta y, si no, el `volatility_atr14_pct` del mensaje
+    guardado en `prompt` (el etiquetador en vivo no rellena la columna). Nunca se inventa.
+
+    Args:
+        row: fila con `atr_pct` y `prompt`, o `None`.
+
+    Returns:
+        El ATR en porcentaje, o `None`.
+    """
     if row is None:
         return None
     return atr_value(row["atr_pct"], row["prompt"])
@@ -88,7 +105,23 @@ async def _entry_from_shadow(db: Database, shadow: ShadowTrade) -> MemoryEntry:
 
 
 async def refresh_entries(db: Database, *, now: datetime | None = None) -> int:
-    """Agrega a la memoria las operaciones cerradas que todavia no estan. Devuelve cuantas."""
+    """Agrega a la memoria las sombras cerradas y fiables que todavia no estan.
+
+    Cada entrada es INMUTABLE y guarda lo que se sabia al decidir (hora, ATR, riesgo y
+    beneficio, etiqueta del LLM, noticias y Fear & Greed con el limite de `decision_time`) y
+    el resultado. Se excluyen las de reconciliacion fallida. LEE resultados (PnL).
+
+    Args:
+        db: conexion a la base.
+        now: hora de construccion; por defecto, ahora (UTC).
+
+    Returns:
+        Cuantas entradas se agregaron.
+
+    Efectos:
+        Lee `shadow_trades`, `signals`, `llm_logs`, `news_items`, `fear_greed`; escribe
+        `memory_entries`.
+    """
     now = now or datetime.now(UTC)
     added = 0
     for row in await db.fetch_all(CLOSED_RELIABLE_SQL):

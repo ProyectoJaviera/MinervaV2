@@ -35,6 +35,12 @@ from app.llm.client import LlmHttpError, LlmRawResponse, LlmTimeoutError
 
 
 class AnthropicLlmClient:
+    """Cliente real del LLM con el SDK oficial de Anthropic, sin reintentos (`max_retries=0`).
+
+    Una sola llamada por grupo, tambien a nivel de transporte: un fallo deja SIN_LLM rapido,
+    dentro del timeout, en vez de reintentar en silencio. No envia `temperature` ni
+    parametros de muestreo (el modelo los rechaza con 400).
+    """
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._client = anthropic.AsyncAnthropic(
@@ -44,6 +50,24 @@ class AnthropicLlmClient:
     async def complete(
         self, *, system: str, user: str, model: str, max_tokens: int
     ) -> LlmRawResponse:
+        """Llama a la API de mensajes con `thinking = between_tools` y `effort = low`.
+
+        Args:
+            system: texto del sistema.
+            user: mensaje de usuario.
+            model: id del modelo.
+            max_tokens: tope de tokens de salida.
+
+        Returns:
+            La `LlmRawResponse` con el texto, los tokens facturados y la latencia.
+
+        Raises:
+            LlmTimeoutError: si la API no responde dentro de `LLM_TIMEOUT_SECONDS`.
+            LlmHttpError: ante cualquier otro error de la API o de conexion.
+
+        Efectos:
+            Red: llamada a la API de Anthropic (es lo unico del proyecto que cuesta dinero).
+        """
         start = time.monotonic()
         try:
             response = await self._client.with_options(
