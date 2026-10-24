@@ -65,8 +65,8 @@ Windows, `.venv/bin/python` en Linux y macOS).
 
 ## Correr las pruebas
 
-La suite completa tiene unas 2.300 pruebas y tarda unos 11 o 12 minutos; **mientras desarrollas corre
-solo lo que tocas.** Más sobre cómo está organizada y qué protege cada parte en
+La suite completa tiene unas 2.560 pruebas y tarda unos 12 minutos; **mientras desarrollas corre solo lo
+que tocas.** Más sobre cómo está organizada y qué protege cada parte en
 [`PRUEBAS.md`](PRUEBAS.md).
 
 ```bash
@@ -332,5 +332,5 @@ Qué es cada zona y qué hacer con un aviso: [`ZONAS_PROTEGIDAS.md`](ZONAS_PROTE
 
 - **El flujo de pruebas del compose con otro nombre de proyecto** (ver la sección de Docker) se describe a
   partir de `docker-compose.yml` y de lo que ya registra el proyecto; no se ejecutó al escribir esta guía.
-- **El número de pruebas y el tiempo de la suite** (unas 2.300 y unos 11 o 12 minutos) son de una máquina
-  concreta; varían con el equipo.
+- **El número de pruebas y el tiempo de la suite** (unas 2.560 y unos 12 minutos) son de una máquina
+  concreta (2026-10-24); varían con el equipo.

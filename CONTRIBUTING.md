@@ -56,7 +56,7 @@ correr las pruebas, igual que al ejecutar el bot.
 Todo esto debe estar en verde:
 
 ```bash
-pytest                              # unas 2.400 pruebas (unitarias, de integración y de punta a punta; unos 12 min)
+pytest                              # unas 2.560 pruebas (unitarias, de integración y de punta a punta; unos 12 min)
 ruff check .
 npm --prefix frontend run test      # Vitest
 npm --prefix frontend run build     # tsc + vite build

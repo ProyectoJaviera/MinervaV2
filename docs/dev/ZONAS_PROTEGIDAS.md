@@ -763,11 +763,20 @@ que no haya que reabrir la investigación cada vez que el script los vuelva a mo
 
 **Variables:** `LLM_LIVE_LABELING_ENABLED`, que `scripts/start_bot.ps1` y `docker-compose.yml`
 fijan para el bot real, aparece como "variable nueva en el archivo" porque esas líneas se
-introdujeron después (la mudanza a Docker). El código y el prompt de la medición no cambiaron.
+introdujeron después del congelamiento, para fijar por código lo que antes decía el `.env`. El valor
+que fijan es el mismo; el código y el prompt de la medición no cambiaron.
 
-Todo lo demás que el script muestra como protegido en esa comparación es `solo documentacion`
-(los docstrings completos de la tarea de documentación técnica). **No hay ningún cambio en el
-prompt, las features, las estrategias, los niveles, las sombras ni el hash congelado.**
+**Zonas "para revisar".** Los archivos que el script lista bajo "PARA REVISAR" (las rutas de la API,
+Telegram, el dashboard, los controles, el brazo ejecutado, `risk_engine.py`, `paper_backend.py`,
+`app/main.py`...) nacieron o cambiaron con las subfases 3.7 a 3.9 y las Fases 4 y 5, después del
+congelamiento y se aprobaron en su fase (no se reabrieron línea por línea al escribir este
+documento; las pruebas de invarianza y de fuga vigilan que no cambien lo que se mide). Lo que queda
+hasta llegar a los totales del script es `solo documentacion` (los docstrings completos de la
+tarea de documentación técnica). Lo que sí se comprobó aquí, función por función, es que los
+archivos de las zonas protegidas son los de la tabla de arriba y qué cambió en cada uno.
+
+**No hay ningún cambio en el prompt, las features, las estrategias, los niveles, las sombras ni el
+hash congelado.** (Las estrategias solo perdieron la función sin uso `get_strategy`.)
 
 ## Si de verdad hay que cambiar algo protegido
 

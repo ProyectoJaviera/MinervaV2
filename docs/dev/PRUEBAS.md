@@ -8,12 +8,12 @@ que entender qué promesa se rompió.
 
 ## Qué hay
 
-Al 2026-10-24, `python -m pytest --collect-only` reúne **unas 2.400 pruebas** en 129 archivos de
-`tests/`:
+Al 2026-10-24, `python -m pytest --collect-only` reúne **2.564 pruebas** en 130 archivos de
+`tests/` (la corrida completa de ese día: 2.560 pasan y 4 se omiten, las de red real):
 
 | Carpeta | Pruebas | Archivos | Qué es |
 |---|---:|---:|---|
-| `tests/unit/` | 2.326 | 119 | pruebas de una pieza o de pocas, con una base en memoria o temporal y el exterior simulado; incluye las guardianas y las de los scripts |
+| `tests/unit/` | 2.509 | 120 | pruebas de una pieza o de pocas, con una base en memoria o temporal y el exterior simulado; incluye las guardianas y las de los scripts |
 | `tests/e2e/` | 51 | 8 | **de punta a punta**: el sistema real (scheduler, generador con las estrategias reales, sombras, etiquetador, brazo, riesgo, monitor, Telegram, push y la aplicación FastAPI) con **solo el exterior simulado**: Anthropic, Bitunix REST y WebSocket, y Telegram |
 | `tests/integration/` | 4 | 2 | **manuales**, contra la red real de Bitunix; se omiten por defecto (ver abajo) |
 | `tests/support/` | — | — | ayudantes compartidos, no son pruebas |
