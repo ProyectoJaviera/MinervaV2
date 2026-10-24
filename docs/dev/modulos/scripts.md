@@ -47,7 +47,7 @@ no crear a mano el registro oficial del veredicto. Ver [Gate, placebo y veredict
 | LLM (gastan API con `--real --confirm-real`) | `llm_smoke.py`, `llm_pilot.py` |
 | Backtest de la Fase 2 | `download_history.py`, `run_backtest.py`, `analyze_risk.py`, `compare_fase2_runs.py`, `repair_ohlcv_gaps.py` |
 | Control | `resume_drawdown_stop.py`, `hash_password.py` |
-| Desarrollo | `run_dev_server.py`, `export_schema_doc.py`, `export_docker_requirements.py`, `build_dev_docs.py`, `dev_docs_facts.py` |
+| Desarrollo | `run_dev_server.py`, `export_schema_doc.py`, `export_docker_requirements.py`, `build_dev_docs.py`, `dev_docs_facts.py`, `check_measurement_safety.py` |
 
 ## Archivos de PowerShell (sin hechos derivados)
 
@@ -338,7 +338,7 @@ con `. (Join-Path $PSScriptRoot "docker_common.ps1")`.
 
 - **Referencia pdoc:** [`api/scripts/docker_support.html`](../api/scripts/docker_support.html)
 - **Importa (internos):** ninguno
-- **Lo importan:** `scripts.backup_db`, `scripts.build_dev_docs`, `scripts.docker_db`, `scripts.restore_db`, `scripts.resume_drawdown_stop`, `scripts.telegram_daily`
+- **Lo importan:** `scripts.backup_db`, `scripts.build_dev_docs`, `scripts.check_measurement_safety`, `scripts.docker_db`, `scripts.restore_db`, `scripts.resume_drawdown_stop`, `scripts.telegram_daily`
 - **Configuración que lee:** ninguno
 - **Tablas que lee:** ninguno
 - **Tablas que escribe:** ninguno
@@ -414,7 +414,7 @@ con `. (Join-Path $PSScriptRoot "docker_common.ps1")`.
 - **Configuración que lee:** ninguno
 - **Tablas que lee:** ninguno
 - **Tablas que escribe:** ninguno
-- **Tablas que crea o altera:** `if`
+- **Tablas que crea o altera:** ninguno
 - **Pruebas que lo importan o citan:** `tests/unit/test_schema_doc.py`
 <!-- /hechos:scripts/export_schema_doc.py -->
 
@@ -850,3 +850,31 @@ Solo imprime conteos y fechas. Códigos: 0 identidad única y congelada (o sin f
 - **Tablas que crea o altera:** ninguno
 - **Pruebas que lo importan o citan:** `tests/e2e/world.py`, `tests/unit/test_docker_mode_guards.py`, `tests/unit/test_docker_setup.py`, `tests/unit/test_measurement_uptime.py`, `tests/unit/test_telegram_daily_script.py`
 <!-- /hechos:scripts/telegram_daily.py -->
+
+### `scripts/check_measurement_safety.py`
+
+**Responsabilidad.** Compara el árbol de trabajo, el índice (`--staged`) o los commits desde una revisión (`--since`, `--since-measurement`) con la lista de **zonas protegidas** de la medición y avisa qué archivos, parámetros de configuración o tablas protegidos cambiaron y de qué manera. Es la lista de zonas, en código, de [ZONAS_PROTEGIDAS](../ZONAS_PROTEGIDAS.md).
+
+**Funciones y clases clave.**
+- `ZONES` (la lista, **fuente única**) y `Zone`; `zones_for()` dice a qué zonas pertenece un archivo.
+- `classify_change()` y `code_signature()`: un cambio es `solo documentacion` si el AST sin docstrings es el mismo; los archivos fijados por hash (`app/llm/prompts.py`, `app/llm/market_features.py`) cuentan ante cualquier byte.
+- `config_defaults()` / `config_changes()`: detectan el cambio del valor por defecto de una variable en `app/config.py`, que `.env.example` deje de coincidir con él, o que cambie una línea de `docker-compose.yml` o `scripts/start_bot.ps1`.
+- `protected_schema()` / `schema_changes()`: comparan el DDL de las tablas de la medición; una columna nueva es aditiva (REVISAR), cambiar o quitar lo existente es PROTEGIDO.
+- `gather_findings()`, `render()` y `main()` (códigos de salida: 0 sin cambios protegidos, 1 hay cambios protegidos, 2 error de uso o de git).
+
+**Invariantes — no romper.** **Solo lee**: ejecuta `git` y lee archivos del repositorio; no importa `app`, no lee `.env`, no abre la base y no escribe nada (una prueba lo comprueba con el AST). La salida es solo ASCII (la consola de Windows no es UTF-8). Cada patrón de `ZONES` debe coincidir con un archivo versionado y cada zona debe estar explicada en [ZONAS_PROTEGIDAS](../ZONAS_PROTEGIDAS.md#mapa-rápido): `tests/unit/test_check_measurement_safety.py` lo exige. El subproceso `git` lleva `creationflags=NO_WINDOW`.
+
+**Trampas conocidas.** `MEASUREMENT_START` (`c13f8ca`) es el commit que cierra el congelamiento; si se empieza una medición nueva hay que actualizarlo. No ve el `.env` real ni el contenedor que corre (para el modelo usa `scripts/measurement_identity.py`). El gancho `pre-commit` es opcional y no está instalado: ver [ENTORNO_DESARROLLO](../ENTORNO_DESARROLLO.md#gancho-pre-commit-opcional-no-instalado).
+
+<!-- hechos:scripts/check_measurement_safety.py -->
+**Hechos derivados del código** (los escribe `scripts/build_dev_docs.py`; no se editan):
+
+- **Referencia pdoc:** [`api/scripts/check_measurement_safety.html`](../api/scripts/check_measurement_safety.html)
+- **Importa (internos):** `scripts.docker_support`
+- **Lo importan:** ninguno
+- **Configuración que lee:** ninguno
+- **Tablas que lee:** ninguno
+- **Tablas que escribe:** ninguno
+- **Tablas que crea o altera:** ninguno
+- **Pruebas que lo importan o citan:** `tests/unit/test_check_measurement_safety.py`
+<!-- /hechos:scripts/check_measurement_safety.py -->

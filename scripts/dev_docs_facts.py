@@ -54,8 +54,10 @@ _DDL_SQL = re.compile(
     re.IGNORECASE,
 )
 _READ_SQL = re.compile(r"\b(?:FROM|JOIN)\s+([A-Za-z_]\w*|§)", re.IGNORECASE)
+# Un `CREATE TABLE` de verdad abre el parentesis de las columnas justo despues del nombre: eso
+# deja fuera la frase `CREATE TABLE IF NOT EXISTS` citada en un comentario o un docstring.
 _CREATE_TABLE = re.compile(
-    r"CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+([A-Za-z_]\w*)", re.IGNORECASE
+    r"CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+([A-Za-z_]\w*)\s*\(", re.IGNORECASE
 )
 
 

@@ -176,6 +176,18 @@ def test_table_catalog_reads_the_schema_without_importing_it(tmp_path):
     }
 
 
+def test_table_catalog_ignores_the_ddl_phrase_quoted_in_prose(tmp_path):
+    repo = make_repo(tmp_path)
+    write(repo, "app/persistence/database.py", SCHEMA + '''
+    def migrate():
+        """`CREATE TABLE IF NOT EXISTS` no agrega columnas; CREATE TABLE IF NOT EXISTS no aplica."""
+    ''')
+
+    tables = facts_module.table_catalog(facts_module.load_sources(repo))
+
+    assert tables == {"trades", "shadow_trades", "system_state", "signals"}
+
+
 def test_sql_reads_writes_and_ddl_are_told_apart(tmp_path):
     repo = make_repo(tmp_path)
     write(repo, "app/user.py", '''

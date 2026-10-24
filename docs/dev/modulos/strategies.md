@@ -148,7 +148,7 @@ backtest recalculaba cada indicador desde cero en cada vela.
 - **Tablas que lee:** ninguno
 - **Tablas que escribe:** ninguno
 - **Tablas que crea o altera:** ninguno
-- **Pruebas que lo importan o citan:** `tests/unit/test_backtest_engine.py`, `tests/unit/test_ema_cross_strategy.py`
+- **Pruebas que lo importan o citan:** `tests/unit/test_backtest_engine.py`, `tests/unit/test_check_measurement_safety.py`, `tests/unit/test_ema_cross_strategy.py`
 <!-- /hechos:app/strategies/ema_cross.py -->
 
 ### `app/strategies/funding_contrarian.py`

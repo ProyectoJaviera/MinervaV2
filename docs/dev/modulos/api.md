@@ -256,7 +256,7 @@ rastro en `control_audit`.
 - **Tablas que lee:** `control_audit`
 - **Tablas que escribe:** ninguno
 - **Tablas que crea o altera:** ninguno
-- **Pruebas que lo importan o citan:** `tests/unit/test_phase5_control_api.py`
+- **Pruebas que lo importan o citan:** `tests/unit/test_check_measurement_safety.py`, `tests/unit/test_phase5_control_api.py`
 <!-- /hechos:app/api/routes/control.py -->
 
 ### `app/api/routes/health.py`

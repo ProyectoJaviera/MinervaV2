@@ -733,7 +733,7 @@ y [Tope de SL](../ZONAS_PROTEGIDAS.md#tope-de-sl).
 - **Tablas que lee:** `asset_universe`, `contract_specs_cache`, `funding_cache`, `ohlcv_cache`, `system_state`
 - **Tablas que escribe:** `signals`, `signals_discarded_by_sl_cap`, `system_state`
 - **Tablas que crea o altera:** ninguno
-- **Pruebas que lo importan o citan:** `tests/e2e/series.py`, `tests/e2e/world.py`, `tests/unit/test_paper_execution.py`, `tests/unit/test_position_monitor.py`, `tests/unit/test_scheduler.py`, `tests/unit/test_shadow_book.py`, `tests/unit/test_signal_generator.py`, `tests/unit/test_universe_refresh.py`
+- **Pruebas que lo importan o citan:** `tests/e2e/series.py`, `tests/e2e/world.py`, `tests/unit/test_check_measurement_safety.py`, `tests/unit/test_paper_execution.py`, `tests/unit/test_position_monitor.py`, `tests/unit/test_scheduler.py`, `tests/unit/test_shadow_book.py`, `tests/unit/test_signal_generator.py`, `tests/unit/test_universe_refresh.py`
 <!-- /hechos:app/trading/signal_generator.py -->
 
 ### `app/trading/sl_calc.py`

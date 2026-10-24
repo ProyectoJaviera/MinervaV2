@@ -151,7 +151,7 @@ advertencia es parte del comando; (3) la lista de permitidos del chat. Ver
 - **Tablas que lee:** `llm_logs`, `trades`
 - **Tablas que escribe:** `system_state`
 - **Tablas que crea o altera:** ninguno
-- **Pruebas que lo importan o citan:** `tests/e2e/world.py`, `tests/unit/test_measurement_uptime.py`, `tests/unit/test_paper_execution_isolation.py`, `tests/unit/test_phase5_base.py`, `tests/unit/test_phase5_control_api.py`, `tests/unit/test_public_docs.py`, `tests/unit/test_telegram_commands.py`, `tests/unit/test_telegram_control.py`, `tests/unit/test_telegram_e2e.py`, `tests/unit/test_telegram_metrics.py`, `tests/unit/test_telegram_runtime.py`
+- **Pruebas que lo importan o citan:** `tests/e2e/world.py`, `tests/unit/test_check_measurement_safety.py`, `tests/unit/test_measurement_uptime.py`, `tests/unit/test_paper_execution_isolation.py`, `tests/unit/test_phase5_base.py`, `tests/unit/test_phase5_control_api.py`, `tests/unit/test_public_docs.py`, `tests/unit/test_telegram_commands.py`, `tests/unit/test_telegram_control.py`, `tests/unit/test_telegram_e2e.py`, `tests/unit/test_telegram_metrics.py`, `tests/unit/test_telegram_runtime.py`
 <!-- /hechos:app/telegram/commands.py -->
 
 ### `app/telegram/confirmation.py`

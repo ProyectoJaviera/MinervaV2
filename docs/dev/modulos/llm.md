@@ -225,7 +225,7 @@ texto **y** `features_version`: antes cubría solo el texto y dos mensajes disti
 - **Tablas que lee:** `contract_specs_cache`, `funding_cache`, `ohlcv_cache`, `trades`
 - **Tablas que escribe:** ninguno
 - **Tablas que crea o altera:** ninguno
-- **Pruebas que lo importan o citan:** `tests/unit/test_docstrings.py`, `tests/unit/test_llm_market_features.py`, `tests/unit/test_prompt_v5_prepared.py`
+- **Pruebas que lo importan o citan:** `tests/unit/test_check_measurement_safety.py`, `tests/unit/test_docstrings.py`, `tests/unit/test_llm_market_features.py`, `tests/unit/test_prompt_v5_prepared.py`
 <!-- /hechos:app/llm/market_features.py -->
 
 ### `app/llm/prompts.py`
@@ -264,7 +264,7 @@ texto del prompt tiene algún carácter acentuado; **no se normaliza ni se refor
 - **Tablas que lee:** `signals`
 - **Tablas que escribe:** ninguno
 - **Tablas que crea o altera:** ninguno
-- **Pruebas que lo importan o citan:** `tests/unit/test_atr_from_prompt.py`, `tests/unit/test_docstrings.py`, `tests/unit/test_llm_prompts.py`, `tests/unit/test_paper_execution_isolation.py`, `tests/unit/test_prompt_v5_prepared.py`, `tests/unit/test_public_docs.py`, `tests/unit/test_shadow_live_labeler.py`
+- **Pruebas que lo importan o citan:** `tests/unit/test_atr_from_prompt.py`, `tests/unit/test_check_measurement_safety.py`, `tests/unit/test_docstrings.py`, `tests/unit/test_llm_prompts.py`, `tests/unit/test_paper_execution_isolation.py`, `tests/unit/test_prompt_v5_prepared.py`, `tests/unit/test_public_docs.py`, `tests/unit/test_shadow_live_labeler.py`
 <!-- /hechos:app/llm/prompts.py -->
 
 ### `app/llm/prompts_v5.py`
