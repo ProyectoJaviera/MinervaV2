@@ -42,9 +42,15 @@ TOP_LEVEL_DOCS = sorted(p.name for p in DOCS.glob("*.md"))
 GITHUB_DOCS = sorted(
     p.relative_to(REPO_ROOT).as_posix() for p in (REPO_ROOT / ".github").rglob("*.md")
 )
+# La documentacion tecnica para quien modifica el codigo (docs/dev/ y sus guias por paquete) pasa
+# por TODAS las comprobaciones de abajo; su contenido propio lo vigila `test_dev_docs.py`.
+DEV_DOCS = sorted(
+    p.relative_to(REPO_ROOT).as_posix()
+    for pattern in ("dev/*.md", "dev/modulos/*.md") for p in DOCS.glob(pattern)
+)
 PUBLIC_DOCS = [
     *ROOT_DOCS, *(f"docs/{name}" for name in TOP_LEVEL_DOCS), "docs/historial/README.md",
-    *GITHUB_DOCS,
+    *GITHUB_DOCS, *DEV_DOCS,
 ]
 HISTORIAL_DOCS = sorted(
     p.relative_to(REPO_ROOT).as_posix() for p in HISTORIAL.glob("*.md") if p.name != "README.md"
