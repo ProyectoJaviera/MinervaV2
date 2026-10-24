@@ -333,8 +333,10 @@ liquidación de cada sombra, y es lo que determina cómo termina:
 **Trampas.**
 
 - **`BACKTEST_*` no significa "solo backtest".** Estos SL y TP de respaldo se usan en vivo.
-- **Todo esto es código compartido** entre el backtest, la cuenta paper y las sombras: cambiarlo
-  cambia también los números del backtest que fijan las pruebas de reproducibilidad.
+- **Es código compartido.** `sl_calc.py` (que se extrajo del backtest para que el generador en vivo use
+  la misma fórmula) y `liquidation.py` los usa también el motor del backtest, y `levels.py` lo usan las
+  sombras y la cuenta paper: cambiarlos cambia el resultado de las tres y, en el caso del backtest, los
+  números que fijan sus pruebas de reproducibilidad.
 - El riesgo planeado (`margin_loss_pct`) está en [Tope de SL](#tope-de-sl).
 
 ## Tope de SL
@@ -383,10 +385,14 @@ y `TP_GAP_TOLERANCE_PCT`.
 
 **Trampas.**
 
-- **`DEFAULT_MARGIN_USDT` parece inocuo y no lo es.** El veredicto mide el retorno sobre el margen,
-  y las comisiones, el slippage y el funding son proporcionales al nocional, así que el retorno
-  apenas cambia. Pero el nocional elige el tramo de margen de mantenimiento de la liquidación y,
-  en la cuenta paper, el tamaño mínimo de orden. "Apenas" no está medido: está protegido.
+- **`DEFAULT_MARGIN_USDT` y `LEVERAGE`.** El veredicto mide el retorno como fracción del margen
+  (`pnl_net_usdt / margin_usdt`), de modo que, por diseño, mezclar operaciones de antes y de después
+  de un cambio de margen no rompe la comparación (`app/trading/ai_value.py` lo dice así). Aun así
+  están protegidas: las comisiones, el slippage y el funding son proporcionales al nocional, que
+  además elige el tramo de margen de mantenimiento de la liquidación, y el apalancamiento fija la
+  distancia a la liquidación y el riesgo planeado del [tope de SL](#tope-de-sl). Cuánto cambiaría el
+  veredicto no está medido; la recomendación del proyecto es cambiarlos solo al empezar una medición
+  nueva ([`../CONFIGURACION.md`](../CONFIGURACION.md#qué-no-cambiar-durante-una-medición)).
 - Las sombras cuya reconciliación falló (`RECONCILE_FAILED`, sin PnL fiable) se **excluyen** del
   veredicto (`get_unreliable_signal_group_keys`). Cambiar cuándo se rinde la reconciliación cambia
   cuántas filas se excluyen.
@@ -623,8 +629,9 @@ mitad, los 30 días y las 100 operaciones mezclan dos conjuntos de reglas.
 No cambian el significado de lo medido, pero un valor malo degrada la medición:
 
 - Un `LLM_DAILY_BUDGET_USD` demasiado bajo agota el presupuesto y deja grupos `SIN_LLM`
-  (`BUDGET_EXCEEDED`); si superan `MAX_SIN_LLM_SHARE` el veredicto será `INCONCLUSO`. Subirlo es
-  seguro para la medición (el único dinero del proyecto es la API de Claude).
+  (`BUDGET_EXCEEDED`); si superan `MAX_SIN_LLM_SHARE` el veredicto será `INCONCLUSO`. Subirlo no
+  cambia lo medido, pero es gasto real de la API de Claude (lo único que cuesta dinero en el
+  proyecto): decídelo tú.
 - Los precios por millón de tokens solo afectan a la contabilidad del costo y a la reserva del
   presupuesto: un precio mal puesto corta el presupuesto antes o después de lo debido.
 - Los tiempos del monitor cambian cuánto tarda en reaccionar a un tick o a un feed obsoleto.
@@ -725,7 +732,7 @@ contenedor, el despliegue en la ventana segura** (ver [`RECETAS.md`](RECETAS.md)
 | **Colector de noticias** (`app/news/`) | está aislado y no alimenta el prompt congelado; `tests/unit/test_news_runtime_isolation.py` lo vigila |
 | **Memoria de lecciones** (`app/memory/`, salvo `gate.py`) | `LESSONS_MEMORY_ENABLED` es `false` en todo momento durante la medición |
 | **Registro de eventos, latido, cliente HTTP** (`app/core/logging.py`, `app/core/heartbeat.py`, `app/core/http.py`) | sin añadir resultados a los logs |
-| **Motor de backtest** (`app/backtesting/engine.py`, `metrics.py`, `report.py`) | no comparte nada con el camino vivo salvo `liquidation.py` y `funding.py` |
+| **Motor de backtest** (`app/backtesting/engine.py`, `report.py`, `risk_analysis.py`) | el camino vivo solo usa de `app/backtesting/` tres módulos: `liquidation.py` y `funding.py` (protegidos) y `metrics.py` (lo importa el reporte de paso a dinero real: cambiarlo cambia ese reporte) |
 | **Pruebas nuevas** | las guardianas no se debilitan |
 | **Una columna nueva** en una tabla medida | aditiva, nula o con valor por defecto, que el camino medido no escriba (ver [Esquema](#esquema-de-las-tablas-de-la-medición)) |
 
@@ -826,7 +833,7 @@ vuelva a escribir con un prompt modificado.
   [Cómo comprobarlo](#cómo-comprobarlo-scriptscheck_measurement_safetypy).
 - **La estimación de efectos** ("apenas cambia", "no altera") es razonamiento, no medición: donde
   no se probó con una prueba de invarianza, se tomó la opción conservadora y se protegió.
-- **Lo no verificado:** si cambiar `DEFAULT_MARGIN_USDT` a mitad de la medición cambiaría el
-  veredicto en la práctica (solo se razona que el efecto es pequeño); y el efecto de actualizar
-  dependencias sobre los indicadores (no hay una prueba que compare resultados numéricos entre
-  versiones).
+- **Lo no verificado:** cuánto cambiaría el veredicto si `DEFAULT_MARGIN_USDT` o `LEVERAGE` cambiaran
+  a mitad de la medición (el diseño dice que el retorno sobre el margen es comparable, pero no hay
+  una medición de ello); y el efecto de actualizar dependencias sobre los indicadores (no hay una
+  prueba que compare resultados numéricos entre versiones).

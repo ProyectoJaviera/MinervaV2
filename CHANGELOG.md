@@ -7,6 +7,20 @@ de su autor. El detalle commit por commit está en `git log`, y la bitácora com
 
 Las fechas son las de los commits (2026). **Nada de lo que hay aquí envía órdenes reales**: todo es paper trading.
 
+## Documentación técnica para desarrolladores — 2026-10-24
+
+- Nueva carpeta [`docs/dev/`](docs/dev/README.md) para quien modifica el código: las
+  [zonas protegidas de la medición](docs/dev/ZONAS_PROTEGIDAS.md) (qué no se puede cambiar y por qué), el flujo de
+  ejecución, el modelo de datos, el entorno de desarrollo, las pruebas y las recetas de los cambios comunes, y una
+  guía por paquete con cada archivo.
+- Referencia automática de `app/` y `scripts/` generada con pdoc (`docs/dev/api/`, regenerada con
+  `scripts/build_dev_docs.py`); docstrings completos en todo el código público (`Args`, `Returns`, `Raises` y
+  `Efectos:`), exigidos por una prueba.
+- `scripts/check_measurement_safety.py`: compara los cambios con la lista de zonas protegidas y avisa qué archivos,
+  parámetros o tablas protegidos se tocaron (solo lee; gancho pre-commit opcional, no instalado).
+- Pruebas que vigilan que esta documentación esté completa, al día y coincida con el código.
+- Sin cambios de comportamiento en `app/`, en el prompt congelado ni en la medición: solo docstrings y comentarios.
+
 ## Documentación pública — 2026-10-23
 
 - Nueva documentación para quien llega sin contexto: [`README.md`](README.md), [`docs/README.md`](docs/README.md)
