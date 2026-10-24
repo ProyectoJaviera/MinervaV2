@@ -101,21 +101,11 @@ protegidos (con `--strict`, también si hay algo para revisar); `2` error de uso
 
 ### Gancho pre-commit opcional (no instalado)
 
-Este repositorio **no instala ningún gancho** (en `.git/hooks/` solo hay los `.sample` de git). Si
-quieres uno, créalo tú: guarda esto como `.git/hooks/pre-commit` (git lo ejecuta desde la raíz del
-repositorio; en Windows lo ejecuta el `sh` de Git para Windows):
-
-```sh
-#!/bin/sh
-# Avisa y frena el commit si lo que vas a confirmar toca una zona protegida de la medición.
-exec .venv/Scripts/python.exe scripts/check_measurement_safety.py --staged
-```
-
-- El gancho frena el commit con código `1`. Si el cambio está revisado y es deliberado, confirma
-  con `git commit --no-verify`.
-- Añade `--strict` a la línea si quieres que también frene con las zonas a revisar.
-- En Linux o macOS la ruta del intérprete es `.venv/bin/python`.
-- Un gancho local no se versiona ni se comparte; cada clon lo crea por su cuenta.
+Este repositorio **no instala ningún gancho** de git (en `.git/hooks/` solo hay los `.sample`). Si
+quieres que git frene un commit que toca una zona protegida, créalo tú: el archivo
+`.git/hooks/pre-commit` de dos líneas que llama a este script con `--staged` está en
+[`ENTORNO_DESARROLLO.md`](ENTORNO_DESARROLLO.md#gancho-pre-commit-opcional-no-instalado), con la
+manera de saltarlo cuando el cambio está revisado (`git commit --no-verify`).
 
 ## Mapa rápido
 
