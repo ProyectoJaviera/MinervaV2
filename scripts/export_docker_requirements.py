@@ -13,10 +13,15 @@ que no entran `colorama` ni nada exclusivo de Windows, ni las herramientas de de
 de `uvicorn[standard]`) se omite y se informa: no esta en el conjunto probado, asi que no se
 agrega a ciegas.
 
+Tambien genera `docker/requirements.old-cpu.lock`, la variante para procesadores SIN SSE4 (p. ej.
+un Intel Atom N570): es el mismo conjunto de versiones con `numpy==2.3.5`, porque NumPy 2.4 exige
+x86-64-v2 y su `import` falla con "instruccion ilegal" en esos procesadores. No se calcula desde el
+entorno sino desde el lock principal, para que las dos listas solo difieran en esa linea.
+
 Uso (solo desarrollo; necesita `packaging`, que trae pytest):
 
-    python scripts/export_docker_requirements.py          # escribe docker/requirements.lock
-    python scripts/export_docker_requirements.py --check  # falla si el archivo esta desactualizado
+    python scripts/export_docker_requirements.py          # escribe los dos archivos de versiones
+    python scripts/export_docker_requirements.py --check  # falla si alguno esta desactualizado
 """
 
 from __future__ import annotations
@@ -37,6 +42,10 @@ from packaging.requirements import Requirement
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 LOCK_PATH = REPO_ROOT / "docker" / "requirements.lock"
+OLD_CPU_LOCK_PATH = REPO_ROOT / "docker" / "requirements.old-cpu.lock"
+# La ultima serie de NumPy cuyas ruedas de Linux x86_64 funcionan sin SSE4 (baseline x86-64
+# original). Verificada con una prueba de importacion bajo un procesador sin SSE4 emulado.
+OLD_CPU_NUMPY = "2.3.5"
 
 # Entorno de la imagen (python:3.11-slim, Linux x86_64): contra esto se evaluan los marcadores.
 LINUX_ENVIRONMENT = {
@@ -177,18 +186,53 @@ def render_lock(closure: Closure) -> str:
     return HEADER + "\n".join(lines) + "\n"
 
 
+OLD_CPU_HEADER = f"""\
+# VARIANTE PARA PROCESADORES SIN SSE4 (p. ej. Intel Atom N570): las mismas versiones exactas que
+# docker/requirements.lock, salvo numpy=={OLD_CPU_NUMPY} (NumPy 2.4 exige x86-64-v2 y su import
+# falla con "instruccion ilegal" sin SSE4). GENERADO por scripts/export_docker_requirements.py a
+# partir del lock principal; no se edita a mano. Se usa con
+# `docker build --build-arg REQUIREMENTS_FILE=docker/requirements.old-cpu.lock .`
+"""
+
+
+def render_old_cpu_lock(main_lock: str) -> str:
+    """El texto de `docker/requirements.old-cpu.lock`: el lock principal con NumPy anterior.
+
+    Args:
+        main_lock: el texto de `docker/requirements.lock`.
+
+    Returns:
+        La cabecera de la variante y las mismas lineas de versiones, con la de `numpy` cambiada
+        a `OLD_CPU_NUMPY`.
+
+    Raises:
+        ValueError: si el lock principal no fija `numpy`.
+    """
+    pins = [
+        line for line in main_lock.splitlines() if line.strip() and not line.startswith("#")
+    ]
+    if not any(normalize(line.split("==")[0]) == "numpy" for line in pins):
+        raise ValueError("el lock principal no fija numpy")
+    swapped = [
+        f"{line.split('==')[0]}=={OLD_CPU_NUMPY}"
+        if normalize(line.split("==")[0]) == "numpy" else line
+        for line in pins
+    ]
+    return OLD_CPU_HEADER + "\n".join(swapped) + "\n"
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Regenera `docker/requirements.lock` (versiones exactas de la imagen) o lo verifica.
+    """Regenera los archivos de versiones exactas de la imagen (principal y de CPU antigua).
 
     Args:
         argv: argumentos (por defecto, los de la linea de comandos); `--check` solo compara.
 
     Returns:
-        0 si escribio o esta al dia; 1 con `--check` si el archivo esta desactualizado.
+        0 si escribio o estan al dia; 1 con `--check` si alguno esta desactualizado.
 
     Efectos:
-        Lee `pyproject.toml` y los paquetes instalados; escribe `docker/requirements.lock`
-        (salvo con `--check`).
+        Lee `pyproject.toml` y los paquetes instalados; escribe `docker/requirements.lock` y
+        `docker/requirements.old-cpu.lock` (salvo con `--check`).
     """
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument(
@@ -202,18 +246,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"AVISO: {name} se exige para Linux pero no esta instalado aqui; no se fija.",
               file=sys.stderr)
 
+    old_cpu_text = render_old_cpu_lock(text)
+    targets = ((LOCK_PATH, text), (OLD_CPU_LOCK_PATH, old_cpu_text))
+
     if args.check:
-        current = LOCK_PATH.read_text(encoding="utf-8") if LOCK_PATH.exists() else ""
-        if current != text:
-            print("docker/requirements.lock esta desactualizado: corre este script sin --check.",
+        stale = [
+            path for path, expected in targets
+            if (path.read_text(encoding="utf-8") if path.exists() else "") != expected
+        ]
+        for path in stale:
+            print(f"docker/{path.name} esta desactualizado: corre este script sin --check.",
                   file=sys.stderr)
+        if stale:
             return 1
-        print("docker/requirements.lock esta al dia.")
+        print("docker/requirements.lock y docker/requirements.old-cpu.lock estan al dia.")
         return 0
 
     LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    LOCK_PATH.write_text(text, encoding="utf-8", newline="\n")
+    for path, expected in targets:
+        path.write_text(expected, encoding="utf-8", newline="\n")
     print(f"Escrito {LOCK_PATH} con {len(closure.versions)} paquetes.")
+    print(f"Escrito {OLD_CPU_LOCK_PATH} (igual, con numpy=={OLD_CPU_NUMPY}).")
     return 0
 
 

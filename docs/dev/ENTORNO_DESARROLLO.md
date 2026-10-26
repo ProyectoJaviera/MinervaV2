@@ -208,6 +208,9 @@ privilegios con el código de solo lectura y no lleva secretos: el `.env` se mon
   `python scripts/export_docker_requirements.py` (con `--check` verifica que estén al día).
 - **El contenedor sigue con el código viejo** hasta que se reconstruye la imagen y se recrea. Un
   `docker compose restart` no aplica un cambio de código.
+- **Qué archivo de versiones usa la imagen:** el argumento `REQUIREMENTS_FILE` del `Dockerfile` (por defecto
+  `docker/requirements.lock`, así que `docker compose build` no cambia). Para procesadores sin SSE4 existe la
+  variante descrita abajo.
 - **Las pruebas de Docker no usan el demonio:** verifican el healthcheck, la paridad de los interruptores del
   compose con `scripts/start_bot.ps1`, las propiedades de seguridad del `Dockerfile` y del compose, y usan un
   `docker` falso (`tests/support/fake_docker.py`) para los scripts de la mudanza. Si el CLI de Docker está
@@ -220,6 +223,38 @@ privilegios con el código de solo lectura y no lleva secretos: el `.env` se mon
   `MINERVA_RESTART=no`): así no comparte volúmenes ni nombre con el bot real. *No verificado en esta
   documentación: no se ejecutó ese flujo mientras se escribía; los nombres de las variables salen de
   `docker-compose.yml`.*
+
+### Variante para procesadores sin SSE4
+
+NumPy 2.4 subió el mínimo de la CPU a x86-64-v2 (SSE4.2; según sus notas de versión), y en un procesador que
+llega solo hasta SSSE3 (Intel Atom N570, por ejemplo) `import numpy` muere con `Instrucción ilegal`. La variante es
+`docker/requirements.old-cpu.lock`: las mismas 38 versiones que `docker/requirements.lock` salvo `numpy==2.3.5`.
+
+- **Se genera, no se edita:** `python scripts/export_docker_requirements.py` escribe los dos archivos y
+  `--check` falla si cualquiera está desactualizado. La versión de NumPy de la variante es la constante
+  `OLD_CPU_NUMPY` del exportador; las pruebas de `tests/unit/test_docker_setup.py` exigen que difiera de la
+  principal **solo** en NumPy y que `pandas` la admita.
+- **Cómo se construye:** `docker build -t <etiqueta> --build-arg REQUIREMENTS_FILE=docker/requirements.old-cpu.lock .`
+  (o `docker compose build --build-arg …`). La etiqueta de una prueba **no** puede ser `minerva:local`.
+- **Qué se verificó (2026-10-26):**
+  1. *Ruedas:* las 38 versiones tienen rueda binaria para Linux x86_64 (CPython 3.11) en PyPI, y `pip install
+     --only-binary=:all:` dentro de la imagen las instala todas.
+  2. *Medición:* sobre una **copia** de la base real se calcularon, con NumPy 2.4.6 y con 2.3.5 (mismo pandas
+     3.0.6 y mismas demás versiones), todas las columnas de `precompute` de cada estrategia y marco de tiempo (77
+     series, 1.023 columnas), las señales de las últimas 250 velas (19.250 evaluaciones), los niveles SL/TP y
+     distancia de trailing para LONG y SHORT (19.424), el SL de respaldo, la pérdida sobre margen, el precio de
+     liquidación y las características de mercado que van al prompt. Se comparó el SHA-256 de los bytes de
+     cada resultado: **1.207 huellas, todas idénticas.**
+  3. *CPU:* la imagen de la variante se ejecutó bajo `qemu-x86_64 -cpu Conroe` (SSSE3, sin SSE4.1; NumPy detecta
+     solo hasta SSSE3) importando y usando NumPy, pandas, pydantic-core, bcrypt, jiter, PyYAML, httptools,
+     watchfiles y websockets, sin instrucción ilegal. El control negativo, con la imagen normal (NumPy 2.4.6), muere
+     con `Illegal instruction` bajo la misma CPU emulada.
+- **Lo que no prueba:** la emulación de `qemu-user` no es un Atom real (no mide velocidad ni caminos de código que
+  dependan de otras características), y la comparación bit a bit cubre los datos y las ventanas indicadas, no
+  toda entrada posible. El arranque completo del bot en el equipo real queda sin verificar.
+- **Seguridad de la medición:** el archivo está en la zona *Entorno de ejecución* de
+  [`ZONAS_PROTEGIDAS.md`](ZONAS_PROTEGIDAS.md), así que `scripts/check_measurement_safety.py` lo marca como REVISAR
+  (aviso de archivo cambiado, no de código protegido).
 
 ## Documentación técnica
 

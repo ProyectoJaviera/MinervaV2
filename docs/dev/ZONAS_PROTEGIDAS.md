@@ -688,12 +688,20 @@ cualquier cambio aquí, comprueba `llm_labeling.enabled` y `llm_labeling.frozen_
 
 ### Entorno de ejecución
 
-**Qué cubre:** `pyproject.toml`, `docker/requirements.lock` y `Dockerfile`.
+**Qué cubre:** `pyproject.toml`, `docker/requirements.lock`, `docker/requirements.old-cpu.lock` y
+`Dockerfile`.
 
 Un cambio de versión de pandas, numpy o pydantic puede alterar indicadores o validaciones sin que
 ninguna prueba lo vea, y la imagen del bot real fija las versiones exactas. Cambiar una dependencia
 es REVISAR: corre toda la batería, compara los indicadores y despliega solo en la ventana segura
 (ver [`RECETAS.md`](RECETAS.md)).
+
+`docker/requirements.old-cpu.lock` es la variante para procesadores sin SSE4: idéntica a
+`docker/requirements.lock` salvo `numpy==2.3.5`, y la genera el mismo exportador. Su elección es
+**opcional y de quien construye la imagen** (`--build-arg REQUIREMENTS_FILE=...`). La comparación
+hecha sobre una copia de la base real (indicadores, señales y niveles SL/TP calculados con NumPy
+2.4.6 y con 2.3.5) dio resultados idénticos bit a bit; el procedimiento y su alcance están en
+[`ENTORNO_DESARROLLO.md`](ENTORNO_DESARROLLO.md).
 
 ### Prompt v5 preparado
 

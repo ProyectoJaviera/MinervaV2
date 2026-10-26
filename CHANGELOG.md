@@ -7,6 +7,18 @@ de su autor. El detalle commit por commit está en `git log`, y la bitácora com
 
 Las fechas son las de los commits (2026). **Nada de lo que hay aquí envía órdenes reales**: todo es paper trading.
 
+## Variante de la imagen para procesadores sin SSE4 — 2026-10-26
+
+- Nuevo `docker/requirements.old-cpu.lock`: las mismas versiones exactas que `docker/requirements.lock` salvo
+  `numpy==2.3.5`, para equipos como un Intel Atom N570 (solo hasta SSSE3), donde NumPy 2.4 muere con «Instrucción
+  ilegal». Lo genera `scripts/export_docker_requirements.py` (con `--check` para ambos archivos).
+- El `Dockerfile` acepta `ARG REQUIREMENTS_FILE` (por defecto `docker/requirements.lock`): la construcción normal no
+  cambia. Para la variante: `--build-arg REQUIREMENTS_FILE=docker/requirements.old-cpu.lock`. Ver
+  [`docs/GUIA_INSTALACION.md`](docs/GUIA_INSTALACION.md#procesador-antiguo-sin-sse4).
+- Comprobado: indicadores, señales y niveles SL/TP calculados sobre una copia de la base real con NumPy 2.4.6 y con
+  2.3.5 son idénticos bit a bit; la imagen de la variante corre sobre una CPU emulada sin SSE4 y la normal no.
+- Sin cambios en `app/`, en el prompt congelado ni en la medición.
+
 ## Documentación técnica para desarrolladores — 2026-10-24
 
 - Nueva carpeta [`docs/dev/`](docs/dev/README.md) para quien modifica el código: las

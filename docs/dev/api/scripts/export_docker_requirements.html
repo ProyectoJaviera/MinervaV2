@@ -38,6 +38,12 @@
                     <a class="variable" href="#LOCK_PATH">LOCK_PATH</a>
             </li>
             <li>
+                    <a class="variable" href="#OLD_CPU_LOCK_PATH">OLD_CPU_LOCK_PATH</a>
+            </li>
+            <li>
+                    <a class="variable" href="#OLD_CPU_NUMPY">OLD_CPU_NUMPY</a>
+            </li>
+            <li>
                     <a class="variable" href="#LINUX_ENVIRONMENT">LINUX_ENVIRONMENT</a>
             </li>
             <li>
@@ -77,6 +83,12 @@
                     <a class="function" href="#render_lock">render_lock</a>
             </li>
             <li>
+                    <a class="variable" href="#OLD_CPU_HEADER">OLD_CPU_HEADER</a>
+            </li>
+            <li>
+                    <a class="function" href="#render_old_cpu_lock">render_old_cpu_lock</a>
+            </li>
+            <li>
                     <a class="function" href="#main">main</a>
             </li>
     </ul>
@@ -111,10 +123,15 @@ que no entran <code>colorama</code> ni nada exclusivo de Windows, ni las herrami
 de <code>uvicorn[standard]</code>) se omite y se informa: no esta en el conjunto probado, asi que no se
 agrega a ciegas.</p>
 
+<p>Tambien genera <code>docker/requirements.old-cpu.lock</code>, la variante para procesadores SIN SSE4 (p. ej.
+un Intel Atom N570): es el mismo conjunto de versiones con <code>numpy==2.3.5</code>, porque NumPy 2.4 exige
+x86-64-v2 y su <code>import</code> falla con "instruccion ilegal" en esos procesadores. No se calcula desde el
+entorno sino desde el lock principal, para que las dos listas solo difieran en esa linea.</p>
+
 <p>Uso (solo desarrollo; necesita <code>packaging</code>, que trae pytest):</p>
 
-<pre><code>python scripts/export_docker_requirements.py          # escribe docker/requirements.lock
-python scripts/export_docker_requirements.py --check  # falla si el archivo esta desactualizado
+<pre><code>python scripts/export_docker_requirements.py          # escribe los dos archivos de versiones
+python scripts/export_docker_requirements.py --check  # falla si alguno esta desactualizado
 </code></pre>
 </div>
 
@@ -154,6 +171,30 @@ python scripts/export_docker_requirements.py --check  # falla si el archivo esta
         
     </div>
     <a class="headerlink" href="#LOCK_PATH"></a>
+    
+    
+
+                </section>
+                <section id="OLD_CPU_LOCK_PATH">
+                    <div class="attr variable">
+            <span class="name">OLD_CPU_LOCK_PATH</span>        =
+<span class="default_value">Path(&#39;&lt;repo&gt;/docker/requirements.old-cpu.lock&#39;)</span>
+
+        
+    </div>
+    <a class="headerlink" href="#OLD_CPU_LOCK_PATH"></a>
+    
+    
+
+                </section>
+                <section id="OLD_CPU_NUMPY">
+                    <div class="attr variable">
+            <span class="name">OLD_CPU_NUMPY</span>        =
+<span class="default_value">&#39;2.3.5&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#OLD_CPU_NUMPY"></a>
     
     
 
@@ -384,6 +425,53 @@ defecto <code>importlib.metadata.distribution</code>.</li>
 
 
                 </section>
+                <section id="OLD_CPU_HEADER">
+                    <div class="attr variable">
+            <span class="name">OLD_CPU_HEADER</span>        =
+<input id="OLD_CPU_HEADER-view-value" class="view-value-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
+            <label class="view-value-button pdoc-button" for="OLD_CPU_HEADER-view-value"></label><span class="default_value">&#39;# VARIANTE PARA PROCESADORES SIN SSE4 (p. ej. Intel Atom N570): las mismas versiones exactas que\n# docker/requirements.lock, salvo numpy==2.3.5 (NumPy 2.4 exige x86-64-v2 y su import\n# falla con &#34;instruccion ilegal&#34; sin SSE4). GENERADO por scripts/export_docker_requirements.py a\n# partir del lock principal; no se edita a mano. Se usa con\n# `docker build --build-arg REQUIREMENTS_FILE=docker/requirements.old-cpu.lock .`\n&#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#OLD_CPU_HEADER"></a>
+    
+    
+
+                </section>
+                <section id="render_old_cpu_lock">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">render_old_cpu_lock</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">main_lock</span><span class="p">:</span> <span class="nb">str</span></span><span class="return-annotation">) -> <span class="nb">str</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#render_old_cpu_lock"></a>
+    
+            <div class="docstring"><p>El texto de <code>docker/requirements.old-cpu.lock</code>: el lock principal con NumPy anterior.</p>
+
+<h6 id="arguments">Arguments:</h6>
+
+<ul>
+<li><strong>main_lock:</strong>  el texto de <code>docker/requirements.lock</code>.</li>
+</ul>
+
+<h6 id="returns">Returns:</h6>
+
+<blockquote>
+  <p>La cabecera de la variante y las mismas lineas de versiones, con la de <code>numpy</code> cambiada
+  a <code><a href="#OLD_CPU_NUMPY">OLD_CPU_NUMPY</a></code>.</p>
+</blockquote>
+
+<h6 id="raises">Raises:</h6>
+
+<ul>
+<li><strong>ValueError:</strong>  si el lock principal no fija <code>numpy</code>.</li>
+</ul>
+</div>
+
+
+                </section>
                 <section id="main">
                     <div class="attr function">
             
@@ -394,7 +482,7 @@ defecto <code>importlib.metadata.distribution</code>.</li>
     </div>
     <a class="headerlink" href="#main"></a>
     
-            <div class="docstring"><p>Regenera <code>docker/requirements.lock</code> (versiones exactas de la imagen) o lo verifica.</p>
+            <div class="docstring"><p>Regenera los archivos de versiones exactas de la imagen (principal y de CPU antigua).</p>
 
 <h6 id="arguments">Arguments:</h6>
 
@@ -405,14 +493,14 @@ defecto <code>importlib.metadata.distribution</code>.</li>
 <h6 id="returns">Returns:</h6>
 
 <blockquote>
-  <p>0 si escribio o esta al dia; 1 con <code>--check</code> si el archivo esta desactualizado.</p>
+  <p>0 si escribio o estan al dia; 1 con <code>--check</code> si alguno esta desactualizado.</p>
 </blockquote>
 
 <h6 id="efectos">Efectos:</h6>
 
 <blockquote>
-  <p>Lee <code>pyproject.toml</code> y los paquetes instalados; escribe <code>docker/requirements.lock</code>
-  (salvo con <code>--check</code>).</p>
+  <p>Lee <code>pyproject.toml</code> y los paquetes instalados; escribe <code>docker/requirements.lock</code> y
+  <code>docker/requirements.old-cpu.lock</code> (salvo con <code>--check</code>).</p>
 </blockquote>
 </div>
 

@@ -270,7 +270,10 @@ ZONES: tuple[Zone, ...] = (
         id="entorno", title="Entorno de ejecución", level=LEVEL_REVIEW,
         summary="Las dependencias exactas y la imagen donde corre el bot: un cambio en pandas o "
                 "pydantic puede alterar indicadores o validaciones sin que nada lo avise.",
-        files=("pyproject.toml", "docker/requirements.lock", "Dockerfile"),
+        files=(
+            "pyproject.toml", "docker/requirements.lock", "docker/requirements.old-cpu.lock",
+            "Dockerfile",
+        ),
     ),
     Zone(
         id="prompt-v5", title="Prompt v5 preparado", level=LEVEL_REVIEW,

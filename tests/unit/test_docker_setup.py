@@ -414,7 +414,9 @@ def test_the_dependencies_come_from_the_pinned_lock_with_binary_wheels_only():
     assert install and all(
         "--only-binary=:all:" in line and "-r /tmp/requirements.lock" in line for line in install
     )
-    assert "COPY docker/requirements.lock /tmp/requirements.lock" in _dockerfile_lines()
+    # El archivo es un argumento de build; SIN el argumento sigue siendo el lock principal.
+    assert "ARG REQUIREMENTS_FILE=docker/requirements.lock" in _dockerfile_lines()
+    assert "COPY ${REQUIREMENTS_FILE} /tmp/requirements.lock" in _dockerfile_lines()
     # El proyecto NO se instala (editable ni no): sus rutas (frontend/dist, docs/) son relativas
     # al paquete.
     installs = [line for line in _dockerfile_lines() if "pip install" in line]
@@ -550,9 +552,9 @@ def test_the_build_context_excludes_secrets_data_and_what_is_not_needed(path):
     # las herramientas que se corren DENTRO del contenedor (docker compose exec/run)
     "scripts/backup_db.py", "scripts/restore_db.py", "scripts/db_fingerprint.py",
     "scripts/docker_support.py", "scripts/resume_drawdown_stop.py",
-    "docker/requirements.lock", "docker/certs/README.md", "frontend/package.json",
-    "frontend/package-lock.json", "frontend/index.html", "frontend/src/main.tsx",
-    "frontend/vite.config.ts", "frontend/tsconfig.json",
+    "docker/requirements.lock", "docker/requirements.old-cpu.lock", "docker/certs/README.md",
+    "frontend/package.json", "frontend/package-lock.json", "frontend/index.html",
+    "frontend/src/main.tsx", "frontend/vite.config.ts", "frontend/tsconfig.json",
 ])
 def test_the_build_context_keeps_everything_a_stage_copies(path):
     assert not _ignored(path), path
@@ -564,6 +566,7 @@ def test_every_copy_source_exists_and_survives_the_dockerignore():
             continue
         args = [a for a in line.split()[1:] if not a.startswith("--")]
         for source in args[:-1]:
+            source = source.replace("${REQUIREMENTS_FILE}", "docker/requirements.lock")
             path = REPO_ROOT / source
             assert path.exists(), f"COPY de algo que no existe: {source}"
             assert _kept_files(path), f"el .dockerignore deja vacio el origen {source}"
@@ -623,6 +626,64 @@ def test_the_lock_header_says_it_is_generated_and_how_to_regenerate_it():
 
     assert any("GENERADO" in line for line in head)
     assert any("scripts/export_docker_requirements.py" in line for line in head)
+
+
+# --- variante para procesadores sin SSE4 ------------------------------------------------------
+
+OLD_CPU_LOCK = REPO_ROOT / "docker" / "requirements.old-cpu.lock"
+
+
+def _pins_of(path: Path) -> dict[str, str]:
+    pins = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#"):
+            name, version = line.split("==")
+            pins[export_lock.normalize(name)] = version
+    return pins
+
+
+def test_the_old_cpu_lock_is_the_main_lock_with_only_numpy_changed():
+    main, old = _pins_of(LOCK), _pins_of(OLD_CPU_LOCK)
+
+    assert old["numpy"] == export_lock.OLD_CPU_NUMPY == "2.3.5"
+    assert {k: v for k, v in old.items() if k != "numpy"} == {
+        k: v for k, v in main.items() if k != "numpy"
+    }
+    assert old.keys() == main.keys()
+
+
+def test_the_old_cpu_numpy_satisfies_what_pandas_requires():
+    from importlib import metadata
+
+    requirements = [Requirement(line) for line in metadata.requires("pandas") or []]
+    numpy_requirements = [
+        r for r in requirements
+        if export_lock.normalize(r.name) == "numpy"
+        and (r.marker is None or r.marker.evaluate(export_lock.LINUX_ENVIRONMENT))
+    ]
+
+    assert numpy_requirements, "pandas ya no declara numpy"
+    for requirement in numpy_requirements:
+        assert requirement.specifier.contains(export_lock.OLD_CPU_NUMPY), requirement
+
+
+def test_the_old_cpu_lock_header_says_what_it_is_and_how_to_use_it():
+    head = "\n".join(OLD_CPU_LOCK.read_text(encoding="utf-8").splitlines()[:6])
+
+    assert "SSE4" in head and "GENERADO" in head
+    assert "scripts/export_docker_requirements.py" in head
+    assert "--build-arg REQUIREMENTS_FILE=docker/requirements.old-cpu.lock" in head
+
+
+def test_render_old_cpu_lock_swaps_only_the_numpy_line_and_refuses_a_lock_without_it():
+    main = "# cabecera\nalpha==1.0\nnumpy==9.9.9\nzeta==2.0\n"
+
+    rendered = export_lock.render_old_cpu_lock(main)
+
+    assert rendered.endswith("alpha==1.0\nnumpy==2.3.5\nzeta==2.0\n")
+    assert "numpy==9.9.9" not in rendered
+    with pytest.raises(ValueError):
+        export_lock.render_old_cpu_lock("alpha==1.0\n")
 
 
 class _FakeDist:

@@ -11,6 +11,10 @@
 
 ARG NODE_VERSION=24
 ARG PYTHON_VERSION=3.11
+# Archivo de versiones exactas de Python. Por defecto el principal; para un procesador SIN SSE4
+# (p. ej. Intel Atom N570), donde NumPy 2.4 falla con "instruccion ilegal":
+#   docker build --build-arg REQUIREMENTS_FILE=docker/requirements.old-cpu.lock .
+ARG REQUIREMENTS_FILE=docker/requirements.lock
 
 # ---------------------------------------------------------------------------------------------------
 # Etapa 1: build del frontend (React + Vite). `npm run build` = tsc --noEmit && vite build.
@@ -30,7 +34,8 @@ FROM python:${PYTHON_VERSION}-slim AS python-deps
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
 RUN python -m venv /opt/venv
-COPY docker/requirements.lock /tmp/requirements.lock
+ARG REQUIREMENTS_FILE
+COPY ${REQUIREMENTS_FILE} /tmp/requirements.lock
 RUN /opt/venv/bin/pip install --only-binary=:all: -r /tmp/requirements.lock
 
 # ---------------------------------------------------------------------------------------------------

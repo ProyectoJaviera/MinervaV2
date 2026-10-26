@@ -250,6 +250,31 @@ y arranca con `docker compose up -d`. El bot sigue generando señales y operacio
 API de pago. Cuando quieras la medición real, quita la línea (o ponla en `true`) y recrea el contenedor:
 `docker compose up -d --force-recreate`.
 
+### Procesador antiguo (sin SSE4)
+
+Si el equipo tiene un procesador anterior a ≈ 2008-2010 (por ejemplo un Intel Atom N570 de netbook, que llega solo
+hasta SSSE3), la imagen normal arranca y se cae al instante con **`Instrucción ilegal`** (`Illegal instruction`) al
+importar NumPy: la versión 2.4 de NumPy, la que fija `docker/requirements.lock`, exige un procesador x86-64-v2
+(SSE4.2). Para esos equipos hay una variante, `docker/requirements.old-cpu.lock`, **idéntica a la principal salvo
+`numpy==2.3.5`** (pandas 3.0.6 es compatible con esa versión). Construye la imagen indicándola:
+
+```bash
+docker compose build --build-arg REQUIREMENTS_FILE=docker/requirements.old-cpu.lock
+docker compose up -d --no-build
+```
+
+- `--no-build` importa: un `docker compose up -d --build` posterior reconstruiría la imagen con el archivo por
+  defecto (`docker/requirements.lock`) y el síntoma volvería. En cada actualización de versión repite el
+  `docker compose build --build-arg …` y luego `docker compose up -d --no-build`.
+- Comprobación rápida con el bot ya arrancado: `docker compose exec minerva python -c "import numpy; print(numpy.__version__)"`
+  debe imprimir `2.3.5` (con la imagen normal imprime `2.4.6`).
+- Sin el argumento la construcción no cambia: sigue usando `docker/requirements.lock` (NumPy 2.4.6).
+- Qué se comprobó y qué no, en [Entorno de desarrollo](dev/ENTORNO_DESARROLLO.md#variante-para-procesadores-sin-sse4).
+  **No verificado:** el arranque completo del bot en un Atom N570 real; lo comprobado fue la importación y el uso de
+  las librerías de código nativo bajo una CPU emulada sin SSE4, y el resultado idéntico de los cálculos de la medición.
+- Un solo bot por clave: si migras de otro equipo, **no dejes los dos encendidos** (el mismo token de Telegram, la
+  misma clave de Anthropic y dos bases que se desincronizan).
+
 ## 5. Comprobar que funciona
 
 1. **Estado del contenedor:** `docker compose ps` debe decir `healthy`.

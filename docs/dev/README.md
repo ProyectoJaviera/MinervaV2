@@ -142,7 +142,7 @@ El diagrama muestra solo las flechas con 3 o más imports; no dibuja las que lle
 | `memory` | 10 | 1252 | persistence 20, config 3, core 2, news 1, trading 1 | api, llm, main, scripts |
 | `news` | 11 | 1703 | persistence 11, core 4, config 3 | api, llm, main, memory, scripts |
 | `persistence` | 22 | 5016 | ninguno | api, backtesting, core, execution, llm, main, market, memory, news, scripts, telegram, trading |
-| `scripts` | 32 | 8700 | trading 26, config 19, persistence 19, market 9, llm 6, backtesting 3, core 3, strategies 3, memory 2, news 2, api 1 | ninguno |
+| `scripts` | 32 | 8756 | trading 26, config 19, persistence 19, market 9, llm 6, backtesting 3, core 3, strategies 3, memory 2, news 2, api 1 | ninguno |
 | `strategies` | 9 | 807 | indicators 4 | backtesting, scripts, trading |
 | `telegram` | 8 | 1903 | persistence 12, trading 7, core 5, config 4, market 2, api 1, llm 1 | api, main |
 | `trading` | 23 | 7441 | persistence 57, config 9, market 8, core 6, execution 5, llm 5, backtesting 4, strategies 4 | api, backtesting, core, execution, main, memory, scripts, telegram |
